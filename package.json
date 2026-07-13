@@ -1,8 +1,8 @@
 {
-  "name": "wacrm",
-  "version": "0.8.0",
+  "name": "growth-saints-crm",
+  "version": "0.9.0",
   "private": true,
-  "description": "Self-hostable CRM template for WhatsApp built on Next.js and Supabase — shared inbox, contacts, sales pipelines, broadcasts, and no-code automations.",
+  "description": "Growth Saints CRM — a multi-tenant customer engagement platform built on Next.js and Supabase: shared inbox, contacts, sales pipelines, campaigns, and no-code automations.",
   "license": "MIT",
   "author": "Arnas Donauskas",
   "homepage": "https://github.com/ArnasDon/wacrm",
@@ -21,8 +21,9 @@
     "supabase",
     "automation",
     "broadcast",
-    "self-hosted",
-    "template"
+    "saas",
+    "multi-tenant",
+    "customer-engagement"
   ],
   "engines": {
     "node": ">=20.0.0"

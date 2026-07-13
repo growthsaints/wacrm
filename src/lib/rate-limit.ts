@@ -167,6 +167,13 @@ export const RATE_LIMITS = {
    *  capping a stampede; excess inbounds simply don't get an auto-reply
    *  (they still land in the inbox for a human). */
   aiAutoReplyAccount: { limit: 30, windowMs: 60_000 },
+  /** Super Admin (platform-admin) actions: suspend/reinstate a tenant,
+   *  start/exit impersonation, add/remove a platform admin. 30/min per
+   *  admin — a clicks-only console, so this only bounds a runaway
+   *  script or a compromised platform-admin session, same rationale
+   *  as `adminAction` above but for the platform layer instead of a
+   *  single tenant. */
+  platformAdminAction: { limit: 30, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

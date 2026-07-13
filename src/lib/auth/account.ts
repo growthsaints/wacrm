@@ -149,7 +149,7 @@ export async function getCurrentAccount(): Promise<AccountContext> {
   // RLS, so it stays robust against cache staleness and older schemas.
   const { data: account, error: accountErr } = await supabase
     .from("accounts")
-    .select("id, name")
+    .select("id, name, status")
     .eq("id", data.account_id)
     .maybeSingle();
 
@@ -161,6 +161,13 @@ export async function getCurrentAccount(): Promise<AccountContext> {
     // account_id points at no readable account row — orphaned profile
     // or an RLS gap. Same "can't scope this user" outcome as above.
     throw new ForbiddenError("Profile is not linked to an account");
+  }
+  if (account.status === "suspended") {
+    // Set by a platform admin from the Super Admin dashboard (Client
+    // management → Suspend). Blocks every API route that resolves
+    // account context — the tenant's data stays intact, but nobody on
+    // it can read or write until a platform admin reinstates it.
+    throw new ForbiddenError("This account has been suspended");
   }
 
   return {
