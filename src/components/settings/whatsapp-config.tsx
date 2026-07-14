@@ -30,6 +30,8 @@ import {
   AccordionContent,
 } from '@/components/ui/accordion';
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
+import { WhatsAppManagement } from '@/components/whatsapp/whatsapp-management';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 
 const MASKED_TOKEN = '••••••••••••••••';
 
@@ -38,6 +40,8 @@ type ResetReason = 'token_corrupted' | 'meta_api_error' | null;
 
 export function WhatsAppConfig() {
   const t = useTranslations('Settings.whatsapp');
+  const tm = useTranslations('Settings.whatsappManagement');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const supabase = createClient();
   // After multi-user, whatsapp_config is one-row-per-account, not
   // one-row-per-user. We pull `accountId` straight off the auth
@@ -393,7 +397,26 @@ export function WhatsAppConfig() {
         title={t("title")}
         description={t("description")}
       />
-      <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+
+      <WhatsAppManagement
+        config={config}
+        onChanged={() => accountId && fetchConfig(accountId)}
+      />
+
+      <div className="mt-6 border-t border-border pt-4">
+        <button
+          type="button"
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+        >
+          {showAdvanced ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          {tm('advancedSetup')}
+        </button>
+        <p className="mt-1 text-xs text-muted-foreground">{tm('advancedSetupDesc')}</p>
+      </div>
+
+      {showAdvanced && (
+      <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_380px]">
       {/* Main config form */}
       <div className="space-y-6">
         {/* Corrupted-token reset banner */}
@@ -835,6 +858,7 @@ export function WhatsAppConfig() {
         </Card>
       </div>
     </div>
+      )}
     </section>
   );
 }

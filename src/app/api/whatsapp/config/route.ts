@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createClient as createAdminClient } from '@supabase/supabase-js'
 import {
   registerPhoneNumber,
   subscribeWabaToApp,
   verifyPhoneNumber,
 } from '@/lib/whatsapp/meta-api'
 import { encrypt, decrypt } from '@/lib/whatsapp/encryption'
+import { checkPhoneNumberClaim } from '@/lib/whatsapp/claim-check'
+import { whatsappAdminClient } from '@/lib/whatsapp/admin-client'
 
 /**
  * Resolve the caller's account_id from their profile. Inlined here
@@ -31,21 +32,6 @@ async function resolveAccountId(
   return data.account_id as string
 }
 
-// Lazy-initialised service-role client. We need it to detect a
-// phone_number_id already claimed by a *different* user — under RLS,
-// the user's own session can't see other users' rows, so the conflict
-// would be invisible without the service role.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _adminClient: any = null
-function supabaseAdmin() {
-  if (!_adminClient) {
-    _adminClient = createAdminClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    )
-  }
-  return _adminClient
-}
 
 /**
  * GET /api/whatsapp/config
@@ -209,27 +195,24 @@ export async function POST(request: Request) {
     // throw PGRST116 ("multiple rows"), silently dropping every
     // inbound message. See issue #136. Post-multi-user we key on
     // account_id (not user_id) since teammates inside the same account
-    // all share one config; the conflict is between accounts.
-    const { data: claimed, error: claimedError } = await supabaseAdmin()
-      .from('whatsapp_config')
-      .select('account_id')
-      .eq('phone_number_id', phone_number_id)
-      .neq('account_id', accountId)
-      .maybeSingle()
-
-    if (claimedError) {
-      console.error('Error checking phone_number_id ownership:', claimedError)
+    // all share one config; the conflict is between accounts. Shared
+    // with the Embedded Signup completion route — see claim-check.ts.
+    let claim
+    try {
+      claim = await checkPhoneNumberClaim(whatsappAdminClient(), phone_number_id, accountId)
+    } catch (err) {
+      console.error('Error checking phone_number_id ownership:', err)
       return NextResponse.json(
         { error: 'Failed to validate configuration' },
         { status: 500 }
       )
     }
 
-    if (claimed) {
+    if (claim.claimedByAnotherAccount) {
       return NextResponse.json(
         {
           error:
-            'This WhatsApp phone number is already linked to another account on this instance. Each phone number can only be connected to one wacrm user.',
+            'This WhatsApp phone number is already linked to another account on this instance. Each phone number can only be connected to one Growth Saints organization.',
         },
         { status: 409 }
       )

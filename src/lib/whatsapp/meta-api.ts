@@ -21,6 +21,10 @@ export interface MetaPhoneInfo {
   display_phone_number: string
   verified_name?: string
   quality_rating?: string
+  /** Meta's phone-verification state — VERIFIED / NOT_VERIFIED / EXPIRED etc. */
+  code_verification_status?: string
+  /** WhatsApp Business Platform per-24h messaging tier, e.g. TIER_1K. */
+  messaging_limit_tier?: string
 }
 
 interface MetaErrorResponse {
@@ -55,7 +59,135 @@ export async function verifyPhoneNumber(
   args: VerifyPhoneNumberArgs
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
-  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating`
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,code_verification_status,messaging_limit_tier`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+// ============================================================
+// Embedded Signup (official Meta onboarding)
+// ============================================================
+//
+// The full flow (client-side FB.login() + postMessage handling lives
+// in src/components/whatsapp/connect-whatsapp-button.tsx) hands the
+// server a short-lived `code`. Two calls turn that into a fully
+// configured, live number:
+//
+//   1. exchangeEmbeddedSignupCode — code → long-lived access token
+//   2. getWabaDetails             — resolve a human-readable business
+//                                    name to show in WhatsApp Management
+//
+// registerPhoneNumber / subscribeWabaToApp above are reused as-is —
+// Embedded Signup calls the exact same Cloud API endpoints the manual
+// flow already does, just with a token we minted instead of one the
+// user pasted in.
+
+export interface ExchangeEmbeddedSignupCodeArgs {
+  appId: string
+  appSecret: string
+  code: string
+}
+
+export interface ExchangeEmbeddedSignupCodeResult {
+  accessToken: string
+  tokenType: string
+  /** Seconds until expiry, when Meta returns one (long-lived tokens
+   *  from this exchange are typically ~60 days; absent means it
+   *  didn't specify one). */
+  expiresIn?: number
+}
+
+/**
+ * Exchange the short-lived authorization `code` from the Embedded
+ * Signup popup for a long-lived access token.
+ *
+ * Errors surfaced verbatim so the completion route can distinguish
+ * "code expired/already used" from other failures — the code is
+ * single-use and only valid for a few minutes.
+ */
+export async function exchangeEmbeddedSignupCode(
+  args: ExchangeEmbeddedSignupCodeArgs,
+): Promise<ExchangeEmbeddedSignupCodeResult> {
+  const { appId, appSecret, code } = args
+  const params = new URLSearchParams({
+    client_id: appId,
+    client_secret: appSecret,
+    code,
+  })
+  const response = await fetch(`${META_API_BASE}/oauth/access_token?${params.toString()}`)
+  if (!response.ok) {
+    await throwMetaError(response, `Meta token exchange failed: ${response.status}`)
+  }
+  const data = (await response.json()) as {
+    access_token?: string
+    token_type?: string
+    expires_in?: number
+  }
+  if (!data.access_token) {
+    throw new Error('Meta token exchange did not return an access token.')
+  }
+  return {
+    accessToken: data.access_token,
+    tokenType: data.token_type ?? 'bearer',
+    expiresIn: data.expires_in,
+  }
+}
+
+export interface GetWabaDetailsArgs {
+  wabaId: string
+  accessToken: string
+}
+
+export interface MetaWabaDetails {
+  id: string
+  name?: string
+  message_template_namespace?: string
+}
+
+/**
+ * Fetch the WhatsApp Business Account's own metadata — used as a
+ * fallback "business name" when the Embedded Signup callback didn't
+ * hand us a separate Business Manager id (see getBusinessDetails).
+ */
+export async function getWabaDetails(args: GetWabaDetailsArgs): Promise<MetaWabaDetails> {
+  const { wabaId, accessToken } = args
+  const url = `${META_API_BASE}/${wabaId}?fields=id,name,message_template_namespace`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+export interface GetBusinessDetailsArgs {
+  businessId: string
+  accessToken: string
+}
+
+export interface MetaBusinessDetails {
+  id: string
+  name?: string
+}
+
+/**
+ * Fetch the Meta Business Manager entity's display name — the
+ * friendliest "Business Name" for WhatsApp Management when the
+ * Embedded Signup callback included a `business_id`. Falls back to
+ * the WABA's own name (getWabaDetails) when this isn't available or
+ * the token lacks `business_management` on this specific business.
+ */
+export async function getBusinessDetails(
+  args: GetBusinessDetailsArgs,
+): Promise<MetaBusinessDetails> {
+  const { businessId, accessToken } = args
+  const url = `${META_API_BASE}/${businessId}?fields=id,name`
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })

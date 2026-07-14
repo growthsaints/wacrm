@@ -101,6 +101,25 @@ export async function GET(request: Request) {
       )
     }
 
+    // Fast path for the central Meta App used by Embedded Signup.
+    // Every Embedded-Signup-connected tenant shares ONE app-level
+    // webhook subscription (configured once by the platform operator
+    // in Meta's dashboard, never per-tenant), so there's exactly one
+    // verify token to check here — no DB round trip needed. Rows
+    // created via Embedded Signup never set their own `verify_token`
+    // (see embedded-signup/complete/route.ts), so this is the only
+    // path that verifies them.
+    const sharedVerifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN
+    if (sharedVerifyToken && verifyToken === sharedVerifyToken) {
+      return new Response(challenge, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      })
+    }
+
+    // Fall back to the legacy per-account check — self-hosters running
+    // their own Meta App pick their own verify_token per the manual
+    // "Advanced setup" flow, so we still need to scan for a match.
     // Fetch all whatsapp configs to check verify tokens
     const { data: configs, error: configError } = await supabaseAdmin()
       .from('whatsapp_config')

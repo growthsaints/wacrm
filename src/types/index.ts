@@ -285,6 +285,30 @@ export interface WhatsAppConfig {
   subscribed_apps_at?: string;
   /** Last error from /register; cleared on success. */
   last_registration_error?: string;
+
+  // ============================================================
+  // Embedded Signup metadata (migration 038) — cached, human-readable
+  // Meta fields for the WhatsApp Management UI. Populated on connect
+  // and refreshed on demand; null on rows that haven't synced yet
+  // (including every pre-038 manually-connected row).
+  // ============================================================
+  /** The customer-facing WhatsApp number, e.g. "+1 415-555-0123". */
+  display_phone_number?: string;
+  /** Meta Business Manager (or WABA fallback) display name. */
+  business_name?: string;
+  /** Meta's `verified_name` for the phone number. */
+  display_name?: string;
+  quality_rating?: 'GREEN' | 'YELLOW' | 'RED' | string;
+  messaging_limit_tier?: string;
+  code_verification_status?: string;
+  last_synced_at?: string;
+  /** 'manual' (self-hosted, hand-entered) or 'embedded_signup'. */
+  onboarding_method?: 'manual' | 'embedded_signup';
+  /**
+   * Meta Business Manager id. Internal use only (re-fetching
+   * business_name on refresh) — never rendered in any UI.
+   */
+  business_id?: string;
 }
 
 // Raw Meta status enum. We persist this verbatim from Meta (sync + webhook)
