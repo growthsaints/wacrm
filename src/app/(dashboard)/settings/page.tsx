@@ -18,6 +18,7 @@ import { WhatsAppFlowsManager } from '@/components/settings/whatsapp-flows-manag
 import { CommerceSettings } from '@/components/settings/commerce-settings';
 import { FieldsAndTagsPanel } from '@/components/settings/fields-and-tags-panel';
 import { DealsSettings } from '@/components/settings/deals-settings';
+import { WalletBilling } from '@/components/settings/wallet-billing';
 import { MembersTab } from '@/components/settings/members-tab';
 import { ApiKeysSettings } from '@/components/settings/api-keys-settings';
 import {
@@ -67,6 +68,7 @@ export default function SettingsPage() {
     commerce: <CommerceSettings />,
     fields: <FieldsAndTagsPanel />,
     deals: <DealsSettings />,
+    billing: <WalletBilling />,
     members: <MembersTab />,
     api: <ApiKeysSettings />,
   };

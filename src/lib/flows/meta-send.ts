@@ -18,6 +18,7 @@ import {
   isRecipientNotAllowedError,
 } from '@/lib/whatsapp/phone-utils'
 import { supabaseAdmin } from './admin-client'
+import { resolveTemplateCategory, ensureWalletBalance, chargeWalletForSend } from '@/lib/billing/wallet'
 
 // ------------------------------------------------------------
 // Flows-side Meta sender (interactive variants).
@@ -511,6 +512,9 @@ export async function engineSendTemplate(
 
   const accessToken = decrypt(config.access_token)
 
+  const billingCategory = await resolveTemplateCategory(db, args.accountId, args.templateName, args.language)
+  await ensureWalletBalance(db, args.accountId, billingCategory)
+
   const attempt = async (phone: string): Promise<string> => {
     const r = await sendTemplateMessage({
       phoneNumberId: config.phone_number_id,
@@ -557,6 +561,8 @@ export async function engineSendTemplate(
   if (msgErr) {
     throw new Error(`sent to Meta but DB insert failed: ${msgErr.message}`)
   }
+
+  await chargeWalletForSend(db, args.accountId, billingCategory)
 
   await db
     .from('conversations')

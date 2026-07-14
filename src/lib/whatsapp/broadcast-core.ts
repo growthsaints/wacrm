@@ -29,6 +29,8 @@ import {
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
 import type { MessageTemplate } from '@/types';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
+import { categoryFromTemplate } from '@/lib/billing/rates';
+import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -64,6 +66,7 @@ interface PlannedRecipient {
 
 export interface BroadcastPlan {
   broadcastId: string;
+  accountId: string;
   templateName: string;
   templateLanguage: string;
   phoneNumberId: string;
@@ -236,6 +239,7 @@ export async function createBroadcast(
 
   return {
     broadcastId: broadcast.id,
+    accountId,
     templateName,
     templateLanguage,
     phoneNumberId: config.phone_number_id,
@@ -264,8 +268,23 @@ export async function deliverBroadcast(
   plan: BroadcastPlan
 ): Promise<void> {
   let sentCount = 0;
+  const billingCategory = categoryFromTemplate(plan.templateRow?.category);
 
   for (const recipient of plan.planned) {
+    // Checked per-recipient (not once for the whole broadcast) so a
+    // wallet that runs out partway through stops billing further sends
+    // instead of either over-charging or crashing the whole batch.
+    try {
+      await ensureWalletBalance(db, plan.accountId, billingCategory);
+    } catch (err) {
+      const message = err instanceof WalletError ? err.message : 'Wallet check failed';
+      await db
+        .from('broadcast_recipients')
+        .update({ status: 'failed', error_message: message })
+        .eq('id', recipient.recipientRowId);
+      continue;
+    }
+
     const variants = phoneVariants(recipient.phone);
     let sentMessageId: string | null = null;
     let lastError: string | null = null;
@@ -294,6 +313,7 @@ export async function deliverBroadcast(
 
     if (sentMessageId) {
       sentCount++;
+      await chargeWalletForSend(db, plan.accountId, billingCategory);
       await db
         .from('broadcast_recipients')
         .update({

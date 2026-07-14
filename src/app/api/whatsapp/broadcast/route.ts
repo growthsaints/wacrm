@@ -15,6 +15,8 @@ import {
   rateLimitResponse,
   RATE_LIMITS,
 } from '@/lib/rate-limit'
+import { categoryFromTemplate } from '@/lib/billing/rates'
+import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet'
 
 interface BroadcastResult {
   phone: string
@@ -174,6 +176,7 @@ export async function POST(request: Request) {
       )
     }
     const templateRow = rawTemplateRow ?? null
+    const billingCategory = categoryFromTemplate(templateRow?.category)
 
     const results: BroadcastResult[] = []
     let sentCount = 0
@@ -188,6 +191,18 @@ export async function POST(request: Request) {
           status: 'failed',
           error: 'Invalid phone number format',
         })
+        failedCount++
+        continue
+      }
+
+      // Checked per-recipient so a wallet that runs dry partway
+      // through a broadcast stops billing further sends rather than
+      // over-charging or aborting the whole batch.
+      try {
+        await ensureWalletBalance(supabase, accountId, billingCategory)
+      } catch (err) {
+        const message = err instanceof WalletError ? err.message : 'Wallet check failed'
+        results.push({ phone: recipient.phone, status: 'failed', error: message })
         failedCount++
         continue
       }
@@ -226,6 +241,7 @@ export async function POST(request: Request) {
       }
 
       if (sentMessageId) {
+        await chargeWalletForSend(supabase, accountId, billingCategory)
         results.push({
           phone: recipient.phone,
           status: 'sent',

@@ -1,0 +1,53 @@
+import { NextResponse } from 'next/server'
+import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { createRazorpayOrder } from '@/lib/billing/razorpay-client'
+import { MIN_RECHARGE_AMOUNT } from '@/lib/billing/rates'
+
+interface PostBody {
+  amount?: number
+}
+
+/** POST /api/billing/recharge — creates a Razorpay order for a wallet
+ *  top-up. The frontend opens Razorpay Checkout with the returned
+ *  order id; on success it calls /api/billing/recharge/verify, and the
+ *  webhook (/api/webhooks/razorpay) is the authoritative fallback. */
+export async function POST(request: Request) {
+  try {
+    const { accountId } = await requireRole('admin')
+
+    const body = (await request.json().catch(() => null)) as PostBody | null
+    const amount = body?.amount
+    if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < MIN_RECHARGE_AMOUNT) {
+      return NextResponse.json(
+        { error: `Minimum recharge amount is ₹${MIN_RECHARGE_AMOUNT}` },
+        { status: 400 },
+      )
+    }
+
+    const keyId = process.env.RAZORPAY_KEY_ID
+    const keySecret = process.env.RAZORPAY_KEY_SECRET
+    if (!keyId || !keySecret) {
+      return NextResponse.json(
+        { error: 'Razorpay is not configured on this server.' },
+        { status: 500 },
+      )
+    }
+
+    const order = await createRazorpayOrder({
+      keyId,
+      keySecret,
+      amountRupees: amount,
+      receipt: `wallet_${accountId}_${Date.now()}`,
+      accountId,
+    })
+
+    return NextResponse.json({
+      orderId: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      keyId,
+    })
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+}

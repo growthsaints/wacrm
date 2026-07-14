@@ -44,6 +44,8 @@ import {
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import { categoryFromTemplate } from '@/lib/billing/rates';
+import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet';
 
 export const MEDIA_KINDS = ['image', 'video', 'document', 'audio'] as const;
 export const VALID_MESSAGE_TYPES = [
@@ -329,6 +331,21 @@ export async function sendMessageToConversation(
     templateRow = data ?? null;
   }
 
+  // Wallet check — before touching Meta at all, so a message that
+  // can't be paid for never gets sent in the first place. Only
+  // billable for template sends (Marketing/Utility/Authentication);
+  // text/media/interactive replies are free-form "Service" and skip
+  // this entirely (rateForCategory('service') === 0).
+  const billingCategory = categoryFromTemplate(templateRow?.category);
+  try {
+    await ensureWalletBalance(db, accountId, billingCategory);
+  } catch (err) {
+    if (err instanceof WalletError) {
+      throw new SendMessageError(err.code, err.message, 402);
+    }
+    throw err;
+  }
+
   const attempt = async (phone: string): Promise<string> => {
     if (messageType === 'template') {
       const result = await sendTemplateMessage({
@@ -474,6 +491,8 @@ export async function sendMessageToConversation(
       500
     );
   }
+
+  await chargeWalletForSend(db, accountId, billingCategory, messageRecord.id);
 
   const lastMessageText =
     messageType === 'interactive'
