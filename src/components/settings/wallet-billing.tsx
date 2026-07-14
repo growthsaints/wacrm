@@ -10,6 +10,7 @@
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Script from 'next/script';
 import { toast } from 'sonner';
 import { Loader2, Wallet, IndianRupee } from 'lucide-react';
@@ -65,9 +66,10 @@ function formatInr(amount: number): string {
 }
 
 export function WalletBilling() {
+  const searchParams = useSearchParams();
   const [data, setData] = useState<WalletData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [rechargeOpen, setRechargeOpen] = useState(searchParams.get('recharge') === '1');
   const [amount, setAmount] = useState('1500');
   const [paying, setPaying] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
@@ -171,22 +173,37 @@ export function WalletBilling() {
       />
 
       <Card className="border-border bg-card">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">
-          <div className="flex items-center gap-3">
-            <div className="flex size-12 items-center justify-center rounded-xl bg-primary/10">
-              <Wallet className="size-6 text-primary" />
+        <CardContent className="space-y-4 py-6">
+          <div>
+            <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              Free Service Conversation
+            </p>
+            <div className="mt-2 h-1.5 w-full rounded-full bg-emerald-100 dark:bg-emerald-950">
+              <div className="h-1.5 w-full rounded-full bg-emerald-500" />
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground">Wallet balance</p>
-              <p className="text-2xl font-semibold text-foreground">
-                {formatInr(data?.balance ?? 0)}
-              </p>
+            <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+              <span>0</span>
+              <span>Unlimited</span>
             </div>
           </div>
-          <Button onClick={() => setRechargeOpen(true)}>
-            <IndianRupee className="size-4" />
-            Recharge
-          </Button>
+
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4">
+            <div className="flex items-center gap-3">
+              <div className="flex size-12 items-center justify-center rounded-xl bg-primary/10">
+                <Wallet className="size-6 text-primary" />
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">WhatsApp Conversation Credits</p>
+                <p className="text-2xl font-semibold text-foreground">
+                  {formatInr(data?.balance ?? 0)}
+                </p>
+              </div>
+            </div>
+            <Button onClick={() => setRechargeOpen(true)}>
+              <IndianRupee className="size-4" />
+              Buy More
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

@@ -3,16 +3,17 @@
 // ============================================================
 // Dashboard → wallet balance widget (admin+ only).
 //
-// A compact, always-visible balance + recharge shortcut — the actual
-// recharge flow (Razorpay Checkout) lives on Settings → Billing; this
-// just surfaces the number where an admin already looks every day,
-// the same way AiSensy/Interakt-style WhatsApp CRMs do.
+// AiSensy-style layout: a "Free Service Conversation" indicator
+// (service messages never cost anything in our model, so this is
+// always unlimited) plus the WhatsApp Conversation Credits balance
+// with a one-click "Buy More" shortcut into the recharge dialog on
+// Settings → Billing.
 // ============================================================
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Wallet, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
+import { buttonVariants } from '@/components/ui/button';
 
 export function WalletBalanceCard() {
   const { canEditSettings } = useAuth();
@@ -35,20 +36,34 @@ export function WalletBalanceCard() {
   if (!canEditSettings) return null;
 
   return (
-    <Link
-      href="/settings?tab=billing"
-      className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 transition-colors hover:bg-muted sm:w-64"
-    >
-      <div className="flex size-9 items-center justify-center rounded-lg bg-primary/10">
-        <Wallet className="size-4 text-primary" />
-      </div>
-      <div className="flex-1">
-        <p className="text-xs text-muted-foreground">Wallet balance</p>
-        <p className="text-sm font-semibold text-foreground">
-          {balance === null ? '—' : `₹${balance.toFixed(2)}`}
+    <div className="w-full space-y-3 rounded-xl border border-border bg-card p-4 sm:w-80">
+      <div>
+        <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+          Free Service Conversation
         </p>
+        <div className="mt-2 h-1.5 w-full rounded-full bg-emerald-100 dark:bg-emerald-950">
+          <div className="h-1.5 w-full rounded-full bg-emerald-500" />
+        </div>
+        <div className="mt-1 flex justify-between text-[11px] text-muted-foreground">
+          <span>0</span>
+          <span>Unlimited</span>
+        </div>
       </div>
-      <ChevronRight className="size-4 text-muted-foreground" />
-    </Link>
+
+      <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+        <div>
+          <p className="text-xs text-muted-foreground">WhatsApp Conversation Credits</p>
+          <p className="text-lg font-semibold text-foreground">
+            {balance === null ? '—' : `₹${balance.toFixed(2)}`}
+          </p>
+        </div>
+        <Link
+          href="/settings?tab=billing&recharge=1"
+          className={buttonVariants({ size: 'sm' })}
+        >
+          Buy More
+        </Link>
+      </div>
+    </div>
   );
 }
