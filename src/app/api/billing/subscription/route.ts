@@ -34,7 +34,13 @@ export async function POST(request: Request) {
       )
     }
 
-    const subscription = await createRazorpaySubscription({ keyId, keySecret, planId, accountId })
+    const subscription = await createRazorpaySubscription({
+      keyId,
+      keySecret,
+      planId,
+      accountId,
+      totalCount: 120, // effectively indefinite — renews until cancelled
+    })
 
     return NextResponse.json({ subscriptionId: subscription.id, keyId })
   } catch (err) {

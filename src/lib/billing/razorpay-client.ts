@@ -71,17 +71,23 @@ export async function createRazorpayOrder(args: {
 export interface RazorpaySubscription {
   id: string;
   status: string;
+  /** Razorpay-hosted payment page — can be sent to a customer directly
+   *  without building a Checkout.js page (used for the Managed plan's
+   *  one-off ₹4500 charge, sent by Super Admin). */
+  shortUrl: string | null;
 }
 
-/** Creates a recurring Razorpay Subscription against a pre-created
- *  Plan (monthly ₹1200 or quarterly ₹3000 — see docs/production-
- *  deployment-checklist.md for the Plan IDs). No `total_count` means
- *  it renews indefinitely until the customer or account cancels it. */
+/** Creates a Razorpay Subscription against a pre-created Plan.
+ *  `totalCount` controls how many billing cycles it runs for —
+ *  1 for the Managed plan's single ₹4500 charge (no auto-renewal),
+ *  120 (effectively indefinite) for the self-serve monthly/quarterly
+ *  plans, which keep renewing until the customer or account cancels. */
 export async function createRazorpaySubscription(args: {
   keyId: string;
   keySecret: string;
   planId: string;
   accountId: string;
+  totalCount: number;
 }): Promise<RazorpaySubscription> {
   const response = await fetch(`${RAZORPAY_API_BASE}/subscriptions`, {
     method: 'POST',
@@ -92,7 +98,7 @@ export async function createRazorpaySubscription(args: {
     body: JSON.stringify({
       plan_id: args.planId,
       customer_notify: 1,
-      total_count: 120, // Razorpay requires a cap; 120 cycles is effectively indefinite (10yr monthly / 30yr quarterly).
+      total_count: args.totalCount,
       notes: { account_id: args.accountId },
     }),
   });
@@ -101,7 +107,7 @@ export async function createRazorpaySubscription(args: {
     throw new Error(`Razorpay subscription creation failed: ${response.status} ${text}`);
   }
   const data = await response.json();
-  return { id: data.id, status: data.status };
+  return { id: data.id, status: data.status, shortUrl: data.short_url ?? null };
 }
 
 /** Verifies the signature Razorpay Checkout returns on successful

@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { toErrorResponse } from "@/lib/auth/account";
 import { requirePlatformAdmin } from "@/lib/auth/platform";
 import { platformAdminClient } from "@/lib/platform/admin-client";
+import { createRazorpaySubscription } from "@/lib/billing/razorpay-client";
 
 const PAGE_SIZE = 25;
 const MANAGED_PLAN_TERM_MONTHS = 3;
@@ -94,12 +95,15 @@ interface CreateManagedOrgBody {
 /**
  * POST /api/platform/organizations — creates a "Managed" plan account
  * directly (Super Admin provisions credentials on the client's
- * behalf; the ₹4500/3-month fee is collected outside the system —
- * bank transfer/UPI — so there's no Razorpay checkout here, just the
- * account setup). Reuses the same on_auth_user_created trigger that
- * public signup relies on (migration 017) to bootstrap the
- * profile/account row, then marks that account as an active managed
- * plan with a 3-month term and a 4-renewal allowance.
+ * behalf). Reuses the same on_auth_user_created trigger that public
+ * signup relies on (migration 017) to bootstrap the profile/account
+ * row, sets the account up as a managed plan with a 3-month term and
+ * a 4-renewal allowance, and creates a single-cycle (total_count: 1 —
+ * charges once, does not auto-renew) Razorpay subscription against
+ * the Managed plan for the ₹4500 fee. The response includes the
+ * subscription's hosted `paymentUrl` for Super Admin to send the
+ * client directly — plan_status stays 'inactive' until the webhook
+ * reports the payment as captured.
  */
 export async function POST(request: Request) {
   try {
@@ -147,14 +151,41 @@ export async function POST(request: Request) {
     const expiresAt = new Date();
     expiresAt.setMonth(expiresAt.getMonth() + MANAGED_PLAN_TERM_MONTHS);
 
+    const keyId = process.env.RAZORPAY_KEY_ID;
+    const keySecret = process.env.RAZORPAY_KEY_SECRET;
+    const managedPlanId = process.env.RAZORPAY_MANAGED_PLAN_ID;
+    let paymentUrl: string | null = null;
+    let razorpaySubscriptionId: string | null = null;
+
+    if (keyId && keySecret && managedPlanId) {
+      try {
+        const subscription = await createRazorpaySubscription({
+          keyId,
+          keySecret,
+          planId: managedPlanId,
+          accountId: profile.account_id,
+          totalCount: 1, // one charge only — this is a fixed 3-month term, not an auto-renewing subscription
+        });
+        paymentUrl = subscription.shortUrl;
+        razorpaySubscriptionId = subscription.id;
+      } catch (err) {
+        console.error("[platform/organizations] Razorpay subscription creation failed:", err);
+        // Account is already created — surface the payment-link failure
+        // but don't roll back the user/account; Super Admin can retry
+        // sharing a link or collect payment another way.
+      }
+    }
+
     const { data: account, error: updateErr } = await admin
       .from("accounts")
       .update({
         plan_type: "managed",
-        plan_status: "active",
+        plan_status: "inactive",
         plan_expires_at: expiresAt.toISOString(),
         managed_renewals_used: 0,
         managed_renewals_max: MANAGED_PLAN_RENEWALS_MAX,
+        razorpay_subscription_id: razorpaySubscriptionId,
+        razorpay_plan_id: managedPlanId ?? null,
       })
       .eq("id", profile.account_id)
       .select("id, name, plan_type, plan_status, plan_expires_at, managed_renewals_max")
@@ -163,7 +194,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    return NextResponse.json({ organization: account, credentials: { email, password } });
+    return NextResponse.json({
+      organization: account,
+      credentials: { email, password },
+      paymentUrl,
+    });
   } catch (err) {
     return toErrorResponse(err);
   }
