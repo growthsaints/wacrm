@@ -67,10 +67,10 @@ export async function POST(request: Request) {
 
   const admin = supabaseAdmin()
   const storeUrl = body.store_url.trim()
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? '').replace(/\/+$/, '')
+  const appUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? '').replace(/\/+$/, '')
   if (!appUrl) {
     return NextResponse.json(
-      { error: 'NEXT_PUBLIC_APP_URL is not configured — cannot register a reachable webhook.' },
+      { error: 'NEXT_PUBLIC_SITE_URL is not configured — cannot register a reachable webhook.' },
       { status: 500 },
     )
   }
