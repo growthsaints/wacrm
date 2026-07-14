@@ -169,7 +169,7 @@ export function MessageThread({
   const tTimer = useTranslations("Inbox.sessionTimer");
   const tQuote = useTranslations("Inbox.replyQuote");
 
-  const { user } = useAuth();
+  const { user, accountId } = useAuth();
   const { getPresence, getRow, now } = usePresence();
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -200,15 +200,21 @@ export function MessageThread({
   }, [isRefreshing, onRefresh]);
   const [replyTo, setReplyTo] = useState<ReplyDraft | null>(null);
 
-  // Profiles are bounded by RLS to rows the current user is allowed to
-  // see — today that's just the current user, but the dropdown keeps the
-  // shape ready for shared-team workspaces without a refactor.
+  // Explicitly scoped to the current account — RLS alone isn't enough
+  // here, since a platform admin can see profiles across every account
+  // (Super Admin dashboard), which would otherwise leak other tenants'
+  // team members into this account's assign dropdown.
   useEffect(() => {
+    if (!accountId) {
+      setProfiles([]);
+      return;
+    }
     let cancelled = false;
     const supabase = createClient();
     supabase
       .from("profiles")
       .select("*")
+      .eq("account_id", accountId)
       .order("full_name")
       .then(({ data, error }) => {
         if (cancelled) return;
@@ -221,7 +227,7 @@ export function MessageThread({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accountId]);
 
   // 24-hour session timer
   const sessionInfo = useMemo(() => {
