@@ -170,6 +170,7 @@ export function ContactForm({
             phone: phone.trim(),
             email: email.trim() || null,
             company: company.trim() || null,
+            source: 'manual',
           })
           .select('id')
           .single();

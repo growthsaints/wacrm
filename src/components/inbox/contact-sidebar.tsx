@@ -1,31 +1,53 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
-import type { Contact, Deal, ContactNote, Tag } from "@/types";
+import type { Contact, Conversation, Deal, ContactNote, Tag, Profile, Message } from "@/types";
 import {
   Phone,
   Mail,
   Copy,
   Check,
-  User,
   Tag as TagIcon,
   DollarSign,
   StickyNote,
   Plus,
+  UserCircle,
+  CircleDot,
+  Megaphone,
+  Sparkles,
+  Loader2,
+  Package,
+  History,
+  Image as ImageIcon,
+  FileText,
+  Mic,
+  Video as VideoIcon,
+  Images,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
+import { conversationStatusOption } from "@/lib/inbox/conversation-status";
+import { contactSourceLabel } from "@/lib/contacts/source-label";
+import { getContactCampaignSource, type CampaignSource } from "@/lib/contacts/campaign-source";
+import { buildContactTimeline } from "@/lib/timeline/build-timeline";
+import type { TimelineEvent } from "@/lib/timeline/types";
 
 interface ContactSidebarProps {
   contact: Contact | null;
+  /** Optional — when provided, the sidebar shows Assigned Agent, Status,
+   *  the AI suggestion panel, and the media gallery for this thread. */
+  conversation?: Conversation | null;
 }
 
-export function ContactSidebar({ contact }: ContactSidebarProps) {
+type MediaFilter = "all" | "image" | "video" | "document" | "audio";
+
+export function ContactSidebar({ contact, conversation = null }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
 
@@ -37,13 +59,21 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
   const [newNote, setNewNote] = useState("");
   const [addingNote, setAddingNote] = useState(false);
 
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [campaignSource, setCampaignSource] = useState<CampaignSource | null>(null);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [mediaMessages, setMediaMessages] = useState<Message[]>([]);
+  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+
+  const [suggestion, setSuggestion] = useState<string | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+
   const fetchContactData = useCallback(async () => {
     if (!contact) return;
 
     const supabase = createClient();
 
-    // Fetch deals, notes, and tags in parallel
-    const [dealsRes, notesRes, tagsRes] = await Promise.all([
+    const [dealsRes, notesRes, tagsRes, campaignRes, timelineEvents] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -58,6 +88,8 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         .from("contact_tags")
         .select("id, tag_id, tags(*)")
         .eq("contact_id", contact.id),
+      getContactCampaignSource(supabase, contact.id),
+      buildContactTimeline(supabase, contact.id),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
@@ -71,14 +103,59 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
         }));
       setTags(mapped);
     }
+    setCampaignSource(campaignRes);
+    setTimeline(timelineEvents);
   }, [contact]);
 
   // Load on contact change. setContactData/setTags run inside async
   // Supabase callbacks, not synchronously in the effect body.
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchContactData();
   }, [fetchContactData]);
+
+  // Account roster — resolves the assigned agent's display name. Kept as
+  // its own small query (mirrors message-thread.tsx's assign dropdown)
+  // rather than lifted to a shared context, consistent with this app's
+  // existing per-component data-fetching convention.
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+    supabase
+      .from("profiles")
+      .select("*")
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setProfiles(data as Profile[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Media gallery — pulls this conversation's image/video/document/audio
+  // messages so the sidebar can offer the Media/Images/Videos/Documents/
+  // Voice filters from Part 1 of the brief.
+  useEffect(() => {
+    if (!conversation) {
+      setMediaMessages([]);
+      return;
+    }
+    let cancelled = false;
+    const supabase = createClient();
+    supabase
+      .from("messages")
+      .select("*")
+      .eq("conversation_id", conversation.id)
+      .in("content_type", ["image", "video", "document", "audio"])
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (!error && data) setMediaMessages(data as Message[]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversation]);
 
   const handleCopyPhone = useCallback(async () => {
     if (!contact?.phone) return;
@@ -119,6 +196,50 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
     setAddingNote(false);
   }, [contact, newNote, accountId]);
 
+  const handleGetSuggestion = useCallback(async () => {
+    if (!conversation || suggesting) return;
+    setSuggesting(true);
+    setSuggestion(null);
+    try {
+      const res = await fetch("/api/ai/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conversation.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data.code === "ai_not_configured") {
+          toast.error(tSidebar("aiNotConfigured"));
+        } else {
+          toast.error(data.error ?? tSidebar("suggestionFailed"));
+        }
+        return;
+      }
+      const draft = typeof data.draft === "string" ? data.draft.trim() : "";
+      setSuggestion(draft || null);
+    } catch {
+      toast.error(tSidebar("suggestionFailed"));
+    } finally {
+      setSuggesting(false);
+    }
+  }, [conversation, suggesting, tSidebar]);
+
+  const handleCopySuggestion = useCallback(async () => {
+    if (!suggestion) return;
+    await navigator.clipboard.writeText(suggestion);
+    toast.success(tSidebar("suggestionCopied"));
+  }, [suggestion, tSidebar]);
+
+  const assignedAgent = useMemo(() => {
+    if (!conversation?.assigned_agent_id) return null;
+    return profiles.find((p) => p.user_id === conversation.assigned_agent_id) ?? null;
+  }, [conversation?.assigned_agent_id, profiles]);
+
+  const filteredMedia = useMemo(() => {
+    if (mediaFilter === "all") return mediaMessages;
+    return mediaMessages.filter((m) => m.content_type === mediaFilter);
+  }, [mediaMessages, mediaFilter]);
+
   if (!contact) {
     return (
       <div className="flex h-full w-70 items-center justify-center border-l border-border bg-card">
@@ -129,6 +250,7 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
   const displayName = contact.name || contact.phone;
   const initials = displayName.charAt(0).toUpperCase();
+  const statusOption = conversation ? conversationStatusOption(conversation.status) : null;
 
   return (
     <div className="flex h-full w-70 flex-col border-l border-border bg-card">
@@ -155,6 +277,30 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
             )}
           </div>
 
+          {/* Conversation status + assigned agent */}
+          {conversation && (
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="rounded-lg bg-muted px-3 py-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <CircleDot className="h-3 w-3" />
+                  {tSidebar("conversationStatus")}
+                </div>
+                <p className={cn("mt-1 truncate text-xs font-medium", statusOption?.color ?? "text-foreground")}>
+                  {statusOption?.label ?? conversation.status}
+                </p>
+              </div>
+              <div className="rounded-lg bg-muted px-3 py-2">
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                  <UserCircle className="h-3 w-3" />
+                  {tSidebar("assignedAgent")}
+                </div>
+                <p className="mt-1 truncate text-xs font-medium text-foreground">
+                  {assignedAgent?.full_name ?? tSidebar("unassigned")}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Phone */}
           <div className="mt-4 space-y-2">
             <button
@@ -176,6 +322,31 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
                 <span className="truncate">{contact.email}</span>
               </div>
             )}
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Lead source / Campaign source */}
+          <div className="grid grid-cols-1 gap-2">
+            <div className="flex items-center justify-between rounded-lg bg-muted px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Megaphone className="h-3.5 w-3.5" />
+                {tSidebar("leadSource")}
+              </span>
+              <span className="truncate text-xs font-medium text-foreground">
+                {contactSourceLabel(contact.source)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between rounded-lg bg-muted px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Megaphone className="h-3.5 w-3.5" />
+                {tSidebar("campaignSource")}
+              </span>
+              <span className="truncate text-xs font-medium text-foreground">
+                {campaignSource?.broadcastName ?? tSidebar("noCampaignSource")}
+              </span>
+            </div>
           </div>
 
           {/* Divider */}
@@ -209,6 +380,45 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
 
           {/* Divider */}
           <div className="my-4 border-t border-border" />
+
+          {/* AI Suggested Reply */}
+          {conversation && (
+            <>
+              <div>
+                <div className="flex items-center justify-between px-1">
+                  <span className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    <Sparkles className="h-3 w-3" />
+                    {tSidebar("aiSuggestion")}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={handleGetSuggestion}
+                    disabled={suggesting}
+                  >
+                    {suggesting ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      tSidebar("getSuggestion")
+                    )}
+                  </Button>
+                </div>
+                {suggestion && (
+                  <div className="mt-2 rounded-lg bg-muted px-3 py-2">
+                    <p className="whitespace-pre-wrap text-xs text-foreground">{suggestion}</p>
+                    <button
+                      onClick={handleCopySuggestion}
+                      className="mt-1.5 text-[10px] font-medium text-primary hover:underline"
+                    >
+                      {tSidebar("copySuggestion")}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="my-4 border-t border-border" />
+            </>
+          )}
 
           {/* Active Deals */}
           <div>
@@ -254,7 +464,23 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
           {/* Divider */}
           <div className="my-4 border-t border-border" />
 
-          {/* Notes */}
+          {/* Order Information — no e-commerce/orders integration
+              exists yet in this codebase, so this is an honest empty
+              state rather than fabricated data. */}
+          <div>
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <Package className="h-3 w-3" />
+              {tSidebar("orderInformation")}
+            </div>
+            <p className="mt-2 px-1 text-xs text-muted-foreground">
+              {tSidebar("orderInfoEmpty")}
+            </p>
+          </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Notes / Internal comments */}
           <div>
             <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <StickyNote className="h-3 w-3" />
@@ -296,8 +522,116 @@ export function ContactSidebar({ contact }: ContactSidebarProps) {
               </div>
             </div>
           </div>
+
+          {/* Divider */}
+          <div className="my-4 border-t border-border" />
+
+          {/* Media gallery */}
+          {conversation && (
+            <>
+              <div>
+                <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <Images className="h-3 w-3" />
+                  {tSidebar("media")}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {(
+                    [
+                      { value: "all", label: tSidebar("mediaAll") },
+                      { value: "image", label: tSidebar("mediaImages") },
+                      { value: "video", label: tSidebar("mediaVideos") },
+                      { value: "document", label: tSidebar("mediaDocuments") },
+                      { value: "audio", label: tSidebar("mediaVoice") },
+                    ] as { value: MediaFilter; label: string }[]
+                  ).map((f) => (
+                    <button
+                      key={f.value}
+                      onClick={() => setMediaFilter(f.value)}
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors",
+                        mediaFilter === f.value
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-muted-foreground hover:bg-muted/70"
+                      )}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+                {filteredMedia.length === 0 ? (
+                  <p className="mt-2 px-1 text-xs text-muted-foreground">{tSidebar("mediaEmpty")}</p>
+                ) : (
+                  <div className="mt-2 grid grid-cols-3 gap-1.5">
+                    {filteredMedia.map((m) => (
+                      <MediaThumb key={m.id} message={m} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="my-4 border-t border-border" />
+            </>
+          )}
+
+          {/* Conversation timeline */}
+          <div>
+            <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <History className="h-3 w-3" />
+              {tSidebar("timeline")}
+            </div>
+            {timeline.length === 0 ? (
+              <p className="mt-2 px-1 text-xs text-muted-foreground">{tSidebar("noTimelineEvents")}</p>
+            ) : (
+              <ol className="mt-2 space-y-3 border-l border-border pl-3">
+                {timeline.map((event) => (
+                  <li key={event.id} className="relative">
+                    <span className="absolute -left-[15.5px] top-1 h-1.5 w-1.5 rounded-full bg-primary" />
+                    <p className="text-xs text-foreground">{event.text}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {formatDistanceToNow(new Date(event.at), { addSuffix: true })}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
         </div>
       </ScrollArea>
     </div>
+  );
+}
+
+function MediaThumb({ message }: { message: Message }) {
+  if (message.content_type === "image" && message.media_url) {
+    return (
+      <a
+        href={message.media_url}
+        target="_blank"
+        rel="noreferrer"
+        className="block aspect-square overflow-hidden rounded-md bg-muted"
+      >
+        <img src={message.media_url} alt="" className="h-full w-full object-cover" />
+      </a>
+    );
+  }
+
+  const Icon =
+    message.content_type === "video"
+      ? VideoIcon
+      : message.content_type === "audio"
+        ? Mic
+        : message.content_type === "image"
+          ? ImageIcon
+          : FileText;
+
+  return (
+    <a
+      href={message.media_url ?? "#"}
+      target="_blank"
+      rel="noreferrer"
+      className="flex aspect-square flex-col items-center justify-center gap-1 rounded-md bg-muted text-muted-foreground hover:bg-muted/70"
+    >
+      <Icon className="h-5 w-5" />
+    </a>
   );
 }

@@ -9,12 +9,15 @@ import {
 } from './date-utils'
 import type {
   ActivityItem,
+  ContactGrowthPoint,
   ConversationsSeriesPoint,
   MetricsBundle,
   PipelineDonutData,
   PipelineStageSlice,
   ResponseTimeBucket,
   ResponseTimeSummary,
+  TopAgentStat,
+  TopCampaignStat,
 } from './types'
 
 // ------------------------------------------------------------
@@ -395,4 +398,140 @@ export async function loadActivity(db: DB, limit = 20): Promise<ActivityItem[]> 
   return items
     .sort((a, b) => (a.at > b.at ? -1 : a.at < b.at ? 1 : 0))
     .slice(0, limit)
+}
+
+// --- 6. Top agents ------------------------------------------------------
+
+export async function loadTopAgents(db: DB, limit = 5): Promise<TopAgentStat[]> {
+  const fourteenDaysAgo = daysAgoStart(13).toISOString()
+
+  const [profilesRes, conversationsRes, messagesRes] = await Promise.all([
+    db.from('profiles').select('user_id, full_name'),
+    db.from('conversations').select('assigned_agent_id, status'),
+    db
+      .from('messages')
+      .select('conversation_id, sender_type, sender_id, created_at')
+      .gte('created_at', fourteenDaysAgo)
+      .order('conversation_id', { ascending: true })
+      .order('created_at', { ascending: true }),
+  ])
+
+  const profiles = (profilesRes.data ?? []) as Array<{ user_id: string; full_name: string }>
+  const conversations = (conversationsRes.data ?? []) as Array<{
+    assigned_agent_id: string | null
+    status: string
+  }>
+  const messages = (messagesRes.data ?? []) as Array<{
+    conversation_id: string
+    sender_type: string
+    sender_id: string | null
+    created_at: string
+  }>
+
+  const assignedCount = new Map<string, number>()
+  const resolvedCount = new Map<string, number>()
+  for (const c of conversations) {
+    if (!c.assigned_agent_id) continue
+    assignedCount.set(c.assigned_agent_id, (assignedCount.get(c.assigned_agent_id) ?? 0) + 1)
+    if (c.status === 'closed' || c.status === 'archived') {
+      resolvedCount.set(c.assigned_agent_id, (resolvedCount.get(c.assigned_agent_id) ?? 0) + 1)
+    }
+  }
+
+  // Same "pair unreplied customer message with the next outbound
+  // message" approach as loadResponseTime, but bucketed by the
+  // responding agent's sender_id instead of day-of-week.
+  const responseMinutesByAgent = new Map<string, number[]>()
+  let currentConv = ''
+  let pendingCustomer: Date | null = null
+  for (const row of messages) {
+    if (row.conversation_id !== currentConv) {
+      currentConv = row.conversation_id
+      pendingCustomer = null
+    }
+    const ts = new Date(row.created_at)
+    if (row.sender_type === 'customer') {
+      if (!pendingCustomer) pendingCustomer = ts
+    } else if (pendingCustomer) {
+      if (row.sender_id) {
+        const diffMin = (ts.getTime() - pendingCustomer.getTime()) / 60_000
+        if (diffMin >= 0) {
+          const bucket = responseMinutesByAgent.get(row.sender_id) ?? []
+          bucket.push(diffMin)
+          responseMinutesByAgent.set(row.sender_id, bucket)
+        }
+      }
+      pendingCustomer = null
+    }
+  }
+
+  const stats: TopAgentStat[] = profiles.map((p) => {
+    const samples = responseMinutesByAgent.get(p.user_id) ?? []
+    return {
+      userId: p.user_id,
+      fullName: p.full_name,
+      assignedCount: assignedCount.get(p.user_id) ?? 0,
+      resolvedCount: resolvedCount.get(p.user_id) ?? 0,
+      avgResponseMinutes:
+        samples.length === 0 ? null : samples.reduce((a, b) => a + b, 0) / samples.length,
+    }
+  })
+
+  return stats
+    .sort((a, b) => b.resolvedCount - a.resolvedCount || b.assignedCount - a.assignedCount)
+    .slice(0, limit)
+}
+
+// --- 7. Top campaigns (broadcasts) --------------------------------------
+
+export async function loadTopCampaigns(db: DB, limit = 5): Promise<TopCampaignStat[]> {
+  const { data, error } = await db
+    .from('broadcasts')
+    .select('id, name, status, total_recipients, sent_count, delivered_count, read_count, replied_count')
+    .order('sent_count', { ascending: false })
+    .limit(limit)
+  if (error) throw error
+
+  return ((data ?? []) as Array<{
+    id: string
+    name: string
+    status: string
+    total_recipients: number
+    sent_count: number
+    delivered_count: number
+    read_count: number
+    replied_count: number
+  }>).map((b) => ({
+    id: b.id,
+    name: b.name,
+    status: b.status,
+    totalRecipients: b.total_recipients,
+    sentCount: b.sent_count,
+    deliveredCount: b.delivered_count,
+    readCount: b.read_count,
+    repliedCount: b.replied_count,
+  }))
+}
+
+// --- 8. Contact growth ---------------------------------------------------
+
+export async function loadContactGrowth(db: DB, rangeDays: number): Promise<ContactGrowthPoint[]> {
+  const start = daysAgoStart(rangeDays - 1).toISOString()
+  const { data, error } = await db
+    .from('contacts')
+    .select('created_at')
+    .gte('created_at', start)
+    .order('created_at', { ascending: true })
+  if (error) throw error
+
+  const keys = lastNDayKeys(rangeDays)
+  const buckets = new Map<string, number>()
+  for (const k of keys) buckets.set(k, 0)
+
+  for (const row of (data ?? []) as { created_at: string }[]) {
+    const key = localDayKey(row.created_at)
+    if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + 1)
+  }
+
+  return keys.map((day) => ({ day, count: buckets.get(day) ?? 0 }))
 }

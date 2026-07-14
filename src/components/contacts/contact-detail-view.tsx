@@ -38,8 +38,14 @@ import {
   X,
   DollarSign,
   LayoutTemplate,
+  History,
+  Gauge,
+  MessageSquare,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { formatDistanceToNow } from 'date-fns';
+import { buildContactTimeline } from '@/lib/timeline/build-timeline';
+import type { TimelineEvent } from '@/lib/timeline/types';
 
 interface ContactDetailViewProps {
   open: boolean;
@@ -95,6 +101,11 @@ export function ContactDetailView({
   // Deals tab
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loadingDeals, setLoadingDeals] = useState(false);
+
+  // Activity tab
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [loadingTimeline, setLoadingTimeline] = useState(false);
+  const [conversationCount, setConversationCount] = useState(0);
 
   const fetchContact = useCallback(async () => {
     if (!contactId) return;
@@ -179,6 +190,21 @@ export function ContactDetailView({
     setLoadingDeals(false);
   }, [contactId, supabase]);
 
+  const fetchTimeline = useCallback(async () => {
+    if (!contactId) return;
+    setLoadingTimeline(true);
+    const [events, convCount] = await Promise.all([
+      buildContactTimeline(supabase, contactId),
+      supabase
+        .from('conversations')
+        .select('id', { count: 'exact', head: true })
+        .eq('contact_id', contactId),
+    ]);
+    setTimeline(events);
+    setConversationCount(convCount.count ?? 0);
+    setLoadingTimeline(false);
+  }, [contactId, supabase]);
+
   useEffect(() => {
     if (open && contactId) {
       fetchContact();
@@ -186,8 +212,18 @@ export function ContactDetailView({
       fetchNotes();
       fetchCustomFields();
       fetchDeals();
+      fetchTimeline();
     }
-  }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
+  }, [
+    open,
+    contactId,
+    fetchContact,
+    fetchTags,
+    fetchNotes,
+    fetchCustomFields,
+    fetchDeals,
+    fetchTimeline,
+  ]);
 
   async function copyPhone() {
     if (!contact) return;
@@ -465,6 +501,12 @@ export function ContactDetailView({
                   {t('tabs.details')}
                 </TabsTrigger>
                 <TabsTrigger
+                  value="activity"
+                  className="data-active:bg-muted data-active:text-primary text-muted-foreground"
+                >
+                  {t('tabs.activity')}
+                </TabsTrigger>
+                <TabsTrigger
                   value="tags"
                   className="data-active:bg-muted data-active:text-primary text-muted-foreground"
                 >
@@ -541,6 +583,54 @@ export function ContactDetailView({
                     {t('saveChangesBtn')}
                   </Button>
                 </div>
+              </TabsContent>
+
+              {/* Activity Tab */}
+              <TabsContent value="activity" className="flex-1 overflow-y-auto px-4 py-3">
+                <div className="mb-3 grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-border/50 bg-muted/50 p-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      <Gauge className="size-3" />
+                      {t('activityTab.leadScore')}
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-foreground">
+                      {contact?.lead_score ?? t('activityTab.leadScoreEmpty')}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-border/50 bg-muted/50 p-3">
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      <MessageSquare className="size-3" />
+                      {t('activityTab.conversationCount')}
+                    </div>
+                    <p className="mt-1 text-sm font-semibold text-foreground">
+                      {conversationCount}
+                    </p>
+                  </div>
+                </div>
+
+                {loadingTimeline ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : timeline.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">
+                    {t('activityTab.noActivity')}
+                  </p>
+                ) : (
+                  <ol className="space-y-3 border-l border-border pl-3">
+                    {timeline.map((event) => (
+                      <li key={event.id} className="relative">
+                        <span className="absolute -left-[15.5px] top-1 flex size-3 items-center justify-center rounded-full bg-primary/20">
+                          <History className="size-2 text-primary" />
+                        </span>
+                        <p className="text-sm text-foreground">{event.text}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(event.at), { addSuffix: true })}
+                        </p>
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </TabsContent>
 
               {/* Tags Tab */}

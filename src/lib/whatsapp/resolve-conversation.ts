@@ -105,6 +105,7 @@ export async function resolveConversationByPhone(
         user_id: ownerUserId,
         phone: sanitized,
         name: name || sanitized,
+        source: 'api',
       })
       .select('id')
       .single();

@@ -3,8 +3,9 @@
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Broadcast } from '@/types';
+import { Broadcast, BroadcastStatus } from '@/types';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -13,11 +14,25 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Radio, Plus, Loader2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Radio, Plus, Loader2, Search, Filter, ChevronDown } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
 import { useTranslations } from 'next-intl';
+
+const BROADCAST_STATUSES: readonly BroadcastStatus[] = [
+  'draft',
+  'scheduled',
+  'sending',
+  'sent',
+  'failed',
+];
 
 /**
  * Poll cadence while any broadcast is sending. Kept modest so we don't
@@ -65,6 +80,8 @@ export default function BroadcastsPage() {
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<BroadcastStatus | 'all'>('all');
 
   // Used to kick off polling only while something is actively sending.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -94,6 +111,22 @@ export default function BroadcastsPage() {
     () => broadcasts.some((b) => b.status === 'sending'),
     [broadcasts],
   );
+
+  const filtered = useMemo(() => {
+    let result = broadcasts;
+    if (statusFilter !== 'all') {
+      result = result.filter((b) => b.status === statusFilter);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter(
+        (b) =>
+          b.name.toLowerCase().includes(q) ||
+          b.template_name.toLowerCase().includes(q),
+      );
+    }
+    return result;
+  }, [broadcasts, search, statusFilter]);
 
   useEffect(() => {
     function startPolling() {
@@ -198,6 +231,48 @@ export default function BroadcastsPage() {
         </GatedButton>
       </div>
 
+      {broadcasts.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-48">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('searchPlaceholder')}
+              className="border-border bg-card pl-9 text-sm"
+            />
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="outline" size="sm" className="border-border text-muted-foreground hover:bg-muted" />
+              }
+            >
+              <Filter className="h-3.5 w-3.5" />
+              {statusFilter === 'all' ? t('allStatuses') : tStatus(statusFilter)}
+              <ChevronDown className="h-3 w-3" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="border-border bg-popover">
+              <DropdownMenuItem
+                onClick={() => setStatusFilter('all')}
+                className={statusFilter === 'all' ? 'text-primary' : 'text-popover-foreground'}
+              >
+                {t('allStatuses')}
+              </DropdownMenuItem>
+              {BROADCAST_STATUSES.map((s) => (
+                <DropdownMenuItem
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={statusFilter === s ? 'text-primary' : 'text-popover-foreground'}
+                >
+                  {tStatus(s)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
+
       {broadcasts.length === 0 ? (
         <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-border bg-card">
           <Radio className="mb-3 h-10 w-10 text-muted-foreground" />
@@ -214,6 +289,11 @@ export default function BroadcastsPage() {
             <Plus className="h-4 w-4" />
             {t('newBroadcast')}
           </GatedButton>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex h-64 flex-col items-center justify-center rounded-xl border border-border bg-card">
+          <Radio className="mb-3 h-10 w-10 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">{t('noBroadcastsMatch')}</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
@@ -232,7 +312,7 @@ export default function BroadcastsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {broadcasts.map((broadcast) => {
+              {filtered.map((broadcast) => {
                 const status = getBroadcastStatus(broadcast.status);
                 return (
                   <TableRow

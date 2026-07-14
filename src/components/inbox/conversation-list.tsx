@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useAuth } from "@/hooks/use-auth";
 import {
   CONVERSATION_SELECT,
   matchesContactFilters,
@@ -9,7 +10,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X } from "lucide-react";
+import { Search, ChevronDown, X, Pin, Star } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
@@ -21,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "sonner";
 
 interface ConversationListProps {
   activeConversationId: string | null;
@@ -34,17 +36,32 @@ interface ConversationListProps {
    * or the tab was throttled. Optional so existing callers keep working.
    */
   resyncToken?: number;
+  /**
+   * Patches a single conversation in the parent's list (and its active
+   * conversation, if selected) — the same pattern MessageThread's
+   * onStatusChange/onAssignChange use, generalised so the Pin/Favorite
+   * toggles below don't need their own bespoke plumbing. Optional so
+   * existing callers/tests keep working.
+   */
+  onConversationPatched?: (id: string, patch: Partial<Conversation>) => void;
 }
 
 const STATUS_COLORS: Record<ConversationStatus, string> = {
   open: "bg-primary",
   pending: "bg-amber-500",
   closed: "bg-muted-foreground",
+  archived: "bg-muted-foreground/60",
 };
 
 
 
-type InboxFilter = ConversationStatus | "all" | "unread";
+type InboxFilter =
+  | ConversationStatus
+  | "all"
+  | "unread"
+  | "pinned"
+  | "favorites"
+  | "assigned_me";
 
 export function ConversationList({
   activeConversationId,
@@ -52,15 +69,21 @@ export function ConversationList({
   conversations,
   onConversationsLoaded,
   resyncToken = 0,
+  onConversationPatched,
 }: ConversationListProps) {
   const t = useTranslations("Inbox.conversationList");
-  
+  const { user } = useAuth();
+
   const FILTER_OPTIONS: { label: string; value: InboxFilter }[] = useMemo(() => [
     { label: t("filterAll"), value: "all" },
     { label: t("filterUnread"), value: "unread" },
+    { label: t("filterPinned"), value: "pinned" },
+    { label: t("filterFavorites"), value: "favorites" },
+    { label: t("filterAssignedToMe"), value: "assigned_me" },
     { label: t("filterOpen"), value: "open" },
     { label: t("filterPending"), value: "pending" },
     { label: t("filterClosed"), value: "closed" },
+    { label: t("filterArchived"), value: "archived" },
   ], [t]);
 
   const [search, setSearch] = useState("");
@@ -163,7 +186,17 @@ export function ConversationList({
 
     if (filter === "unread") {
       result = result.filter((c) => c.unread_count > 0);
-    } else if (filter !== "all") {
+    } else if (filter === "pinned") {
+      result = result.filter((c) => c.is_pinned);
+    } else if (filter === "favorites") {
+      result = result.filter((c) => c.is_favorite);
+    } else if (filter === "assigned_me") {
+      result = result.filter((c) => c.assigned_agent_id === user?.id);
+    } else if (filter === "all") {
+      // Archived threads are tucked away by design — only the explicit
+      // "Archived" filter surfaces them.
+      result = result.filter((c) => c.status !== "archived");
+    } else {
       result = result.filter((c) => c.status === filter);
     }
 
@@ -187,8 +220,63 @@ export function ConversationList({
       });
     }
 
-    return result;
-  }, [conversations, filter, search, selectedTagIds, selectedCompany]);
+    // Pinned conversations always float to the top, same as WhatsApp/
+    // Interakt-style inboxes — a stable sort keeps everything else in
+    // its existing last-message-desc order.
+    return [...result].sort((a, b) => {
+      const ap = a.is_pinned ? 1 : 0;
+      const bp = b.is_pinned ? 1 : 0;
+      return bp - ap;
+    });
+  }, [conversations, filter, search, selectedTagIds, selectedCompany, user?.id]);
+
+  const togglePin = useCallback(
+    async (conv: Conversation) => {
+      const nextPinned = !conv.is_pinned;
+      const supabase = createClient();
+      const { error } = await supabase
+        .from("conversations")
+        .update({ is_pinned: nextPinned })
+        .eq("id", conv.id);
+      if (error) {
+        toast.error(t("pinFailed"));
+        return;
+      }
+      onConversationPatched?.(conv.id, { is_pinned: nextPinned });
+    },
+    [onConversationPatched, t]
+  );
+
+  const toggleFavorite = useCallback(
+    async (conv: Conversation) => {
+      if (!user?.id) return;
+      const supabase = createClient();
+      if (conv.is_favorite) {
+        const { error } = await supabase
+          .from("conversation_favorites")
+          .delete()
+          .eq("conversation_id", conv.id)
+          .eq("user_id", user.id);
+        if (error) {
+          toast.error(t("favoriteFailed"));
+          return;
+        }
+        onConversationPatched?.(conv.id, { is_favorite: false });
+      } else {
+        const { error } = await supabase.from("conversation_favorites").insert({
+          conversation_id: conv.id,
+          account_id: conv.contact?.account_id,
+          user_id: user.id,
+        });
+        if (error) {
+          toast.error(t("favoriteFailed"));
+          return;
+        }
+        onConversationPatched?.(conv.id, { is_favorite: true });
+      }
+    },
+    [onConversationPatched, t, user]
+  );
 
   const toggleTag = useCallback((id: string) => {
     setSelectedTagIds((prev) =>
@@ -413,6 +501,8 @@ export function ConversationList({
                 conversation={conv}
                 isActive={conv.id === activeConversationId}
                 onSelect={handleSelect}
+                onTogglePin={togglePin}
+                onToggleFavorite={toggleFavorite}
                 t={t}
               />
             ))}
@@ -427,6 +517,8 @@ interface ConversationItemProps {
   conversation: Conversation;
   isActive: boolean;
   onSelect: (conversation: Conversation) => void;
+  onTogglePin: (conversation: Conversation) => void;
+  onToggleFavorite: (conversation: Conversation) => void;
   t: ReturnType<typeof useTranslations>;
 }
 
@@ -434,6 +526,8 @@ function ConversationItem({
   conversation,
   isActive,
   onSelect,
+  onTogglePin,
+  onToggleFavorite,
   t,
 }: ConversationItemProps) {
   const contact = conversation.contact;
@@ -444,6 +538,22 @@ function ConversationItem({
     onSelect(conversation);
   }, [onSelect, conversation]);
 
+  const handlePinClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onTogglePin(conversation);
+    },
+    [onTogglePin, conversation]
+  );
+
+  const handleFavoriteClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onToggleFavorite(conversation);
+    },
+    [onToggleFavorite, conversation]
+  );
+
   const timeAgo = conversation.last_message_at
     ? formatDistanceToNow(new Date(conversation.last_message_at), {
         addSuffix: false,
@@ -451,10 +561,19 @@ function ConversationItem({
     : "";
 
   return (
-    <button
+    // `role="button"` div (not a real <button>) so the Pin/Favorite
+    // toggles can be real nested <button>s — a <button> inside a
+    // <button> is invalid HTML and breaks click handling in some
+    // browsers.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") handleClick();
+      }}
       className={cn(
-        "flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
+        "group flex w-full cursor-pointer items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50",
         isActive && "border-l-2 border-primary bg-muted/70"
       )}
     >
@@ -474,10 +593,39 @@ function ConversationItem({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-medium text-foreground">
-            {displayName}
+          <span className="flex min-w-0 items-center gap-1 truncate text-sm font-medium text-foreground">
+            {conversation.is_pinned && (
+              <Pin className="h-3 w-3 shrink-0 fill-current text-muted-foreground" />
+            )}
+            <span className="truncate">{displayName}</span>
           </span>
-          <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo}</span>
+          <div className="flex shrink-0 items-center gap-1">
+            <span className="text-[10px] text-muted-foreground">{timeAgo}</span>
+            <button
+              type="button"
+              onClick={handlePinClick}
+              aria-label={conversation.is_pinned ? t("unpin") : t("pin")}
+              title={conversation.is_pinned ? t("unpin") : t("pin")}
+              className={cn(
+                "rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100",
+                conversation.is_pinned && "opacity-100 text-primary"
+              )}
+            >
+              <Pin className={cn("h-3 w-3", conversation.is_pinned && "fill-current")} />
+            </button>
+            <button
+              type="button"
+              onClick={handleFavoriteClick}
+              aria-label={conversation.is_favorite ? t("unfavorite") : t("favorite")}
+              title={conversation.is_favorite ? t("unfavorite") : t("favorite")}
+              className={cn(
+                "rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100",
+                conversation.is_favorite && "opacity-100 text-amber-400"
+              )}
+            >
+              <Star className={cn("h-3 w-3", conversation.is_favorite && "fill-current")} />
+            </button>
+          </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <p className="truncate text-xs text-muted-foreground">
@@ -499,6 +647,6 @@ function ConversationItem({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }

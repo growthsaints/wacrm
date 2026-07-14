@@ -5,28 +5,40 @@ import type { Conversation, Contact, Tag } from "@/types";
  * can filter conversations by contact tag without a second round-trip.
  * `contact_tags(tags(*))` returns the join rows; {@link normalizeConversation}
  * flattens them onto `contact.tags`.
+ *
+ * `conversation_favorites(id)` embeds the CALLER's own favorite row for
+ * this conversation, if any — the table's RLS (migration 039) already
+ * restricts every row to `user_id = auth.uid()`, so any row that comes
+ * back here is guaranteed to be the current agent's, not a teammate's.
  */
 export const CONVERSATION_SELECT =
-  "*, contact:contacts(*, contact_tags(tags(*)))";
+  "*, contact:contacts(*, contact_tags(tags(*))), conversation_favorites(id)";
 
 /** Raw shape returned by {@link CONVERSATION_SELECT} before flattening. */
 type RawContact = Contact & { contact_tags?: { tags: Tag | null }[] };
 type RawConversation = Omit<Conversation, "contact"> & {
   contact?: RawContact | null;
+  conversation_favorites?: { id: string }[] | null;
 };
 
 /**
- * Flatten the embedded `contact_tags(tags(*))` join into `contact.tags`.
- * Safe to call on rows fetched with {@link CONVERSATION_SELECT}; a row with
- * no contact (e.g. a freshly-inserted conversation) passes through untouched.
+ * Flatten the embedded `contact_tags(tags(*))` join into `contact.tags`,
+ * and `conversation_favorites(id)` into a boolean `is_favorite`. Safe to
+ * call on rows fetched with {@link CONVERSATION_SELECT}; a row with no
+ * contact (e.g. a freshly-inserted conversation) passes through untouched.
  */
 export function normalizeConversation(raw: RawConversation): Conversation {
-  const rawContact = raw.contact;
-  if (!rawContact) return raw as Conversation;
+  const { conversation_favorites, contact: rawContact, ...rest } = raw;
+  const is_favorite = (conversation_favorites ?? []).length > 0;
+
+  if (!rawContact) {
+    return { ...rest, contact: rawContact, is_favorite } as Conversation;
+  }
 
   const { contact_tags, ...contact } = rawContact;
   return {
-    ...raw,
+    ...rest,
+    is_favorite,
     contact: {
       ...contact,
       tags: (contact_tags ?? [])

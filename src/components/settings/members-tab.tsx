@@ -66,6 +66,9 @@ import { useTranslations } from 'next-intl';
 import { RequireRole } from '@/components/auth/require-role';
 import { useAuth } from '@/hooks/use-auth';
 import { usePresence } from '@/hooks/use-presence';
+import { createClient } from '@/lib/supabase/client';
+import { loadTopAgents } from '@/lib/dashboard/queries';
+import type { TopAgentStat } from '@/lib/dashboard/types';
 import type { AccountRole } from '@/lib/auth/roles';
 import { presenceLabel, summarize } from '@/lib/presence';
 import {
@@ -133,6 +136,7 @@ export function MembersTab() {
   const [members, setMembers] = useState<Member[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [agentStats, setAgentStats] = useState<Map<string, TopAgentStat>>(new Map());
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
@@ -179,6 +183,24 @@ export function MembersTab() {
   useEffect(() => {
     void loadEverything();
   }, [loadEverything]);
+
+  // Agent Workspace stats (assigned / resolved chats, avg. first
+  // response) — reuses the exact same aggregation the dashboard's Top
+  // Agents widget uses (src/lib/dashboard/queries.ts) rather than a
+  // second implementation, keyed here by user_id for the roster.
+  useEffect(() => {
+    let cancelled = false;
+    const db = createClient();
+    loadTopAgents(db, 500)
+      .then((stats) => {
+        if (cancelled) return;
+        setAgentStats(new Map(stats.map((s) => [s.userId, s])));
+      })
+      .catch((err) => console.error('[MembersTab] agent stats failed:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleRoleChange(member: Member, nextRole: AccountRole) {
     if (member.role === nextRole) return;
@@ -398,6 +420,33 @@ export function MembersTab() {
                       )}
                     </div>
                   </div>
+
+                  {/* Agent Workspace stats — assigned/resolved chats
+                      and avg. first response, desktop-only like the
+                      joined date (same density reasoning). Blank for
+                      viewers/admins who are never assigned chats. */}
+                  {(() => {
+                    const stats = agentStats.get(member.user_id);
+                    if (!stats || (stats.assignedCount === 0 && stats.resolvedCount === 0)) return null;
+                    return (
+                      <div className="hidden sm:flex items-center gap-4 text-right text-xs text-muted-foreground">
+                        <span>
+                          {t('assignedChats')}: <span className="font-medium text-foreground">{stats.assignedCount}</span>
+                        </span>
+                        <span>
+                          {t('resolvedChats')}: <span className="font-medium text-foreground">{stats.resolvedCount}</span>
+                        </span>
+                        <span>
+                          {t('avgResponse')}:{' '}
+                          <span className="font-medium text-foreground">
+                            {stats.avgResponseMinutes === null
+                              ? t('noSamples')
+                              : `${Math.round(stats.avgResponseMinutes)}m`}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  })()}
 
                   {/* Joined date stays desktop-only. The mobile row's
                       vertical density makes the joined date noise. */}

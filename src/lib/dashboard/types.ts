@@ -65,3 +65,28 @@ export interface ActivityItem {
   /** Optional deep-link for the whole row (not all items have a target). */
   href?: string
 }
+
+export interface TopAgentStat {
+  userId: string
+  fullName: string
+  assignedCount: number
+  resolvedCount: number
+  /** Null when the agent has no first-response samples in the window. */
+  avgResponseMinutes: number | null
+}
+
+export interface TopCampaignStat {
+  id: string
+  name: string
+  status: string
+  totalRecipients: number
+  sentCount: number
+  deliveredCount: number
+  readCount: number
+  repliedCount: number
+}
+
+export interface ContactGrowthPoint {
+  day: string // YYYY-MM-DD local
+  count: number
+}

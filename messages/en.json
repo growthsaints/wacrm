@@ -124,6 +124,35 @@
     },
     "emptyState": {
       "title": "Not enough data yet"
+    },
+    "topAgents": {
+      "title": "Top Agents",
+      "description": "Assigned / resolved chats and avg. first response, last 14 days",
+      "agent": "Agent",
+      "assigned": "Assigned",
+      "resolved": "Resolved",
+      "avgResponse": "Avg. response",
+      "noSamples": "—",
+      "noAgents": "No teammates yet",
+      "noAgentsHint": "Invite teammates in Settings → Members to see agent stats here."
+    },
+    "topCampaigns": {
+      "title": "Top Campaigns",
+      "description": "Broadcasts ranked by messages sent",
+      "campaign": "Campaign",
+      "sent": "Sent",
+      "delivered": "Delivered",
+      "read": "Read",
+      "replied": "Replied",
+      "noCampaigns": "No broadcasts yet",
+      "noCampaignsHint": "Send a broadcast to see campaign performance here."
+    },
+    "contactGrowth": {
+      "title": "Contact Growth",
+      "description": "New contacts over time",
+      "days": "{count} days",
+      "noActivity": "No new contacts in this range",
+      "noActivityHint": "New contacts will populate this chart as they're added."
     }
   },
   "Inbox": {
@@ -137,13 +166,23 @@
       "filterOpen": "Open",
       "filterPending": "Pending",
       "filterClosed": "Closed",
+      "filterArchived": "Archived",
+      "filterPinned": "Pinned",
+      "filterFavorites": "Favorites",
+      "filterAssignedToMe": "Assigned to me",
       "tags": "Tags",
       "company": "Company",
       "allCompanies": "All companies",
       "clearAll": "Clear all",
       "noConversations": "No conversations found",
       "noMessagesYet": "No messages yet",
-      "unknown": "Unknown"
+      "unknown": "Unknown",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "favorite": "Add to favorites",
+      "unfavorite": "Remove from favorites",
+      "pinFailed": "Failed to update pin",
+      "favoriteFailed": "Failed to update favorite"
     },
     "messageThread": {
       "backToConversations": "Back to conversations",
@@ -157,6 +196,7 @@
       "statusOpen": "Open",
       "statusPending": "Pending",
       "statusClosed": "Closed",
+      "statusArchived": "Archived",
       "assign": "Assign",
       "assigned": "Assigned",
       "unassign": "Unassign",
@@ -258,11 +298,35 @@
     "sidebar": {
       "contactInfo": "Contact info",
       "tags": "Tags",
-      "notes": "Notes",
+      "notes": "Internal comments",
       "deals": "Deals",
       "noTags": "No tags",
       "noDeals": "No deals",
-      "addNotePlaceholder": "Add a note..."
+      "addNotePlaceholder": "Add a note...",
+      "assignedAgent": "Assigned agent",
+      "unassigned": "Unassigned",
+      "conversationStatus": "Status",
+      "leadSource": "Lead source",
+      "campaignSource": "Campaign source",
+      "noCampaignSource": "No campaign attributed",
+      "aiSuggestion": "AI suggested reply",
+      "getSuggestion": "Suggest a reply",
+      "suggesting": "Thinking…",
+      "copySuggestion": "Copy",
+      "suggestionCopied": "Copied to clipboard",
+      "suggestionFailed": "Couldn't get a suggestion",
+      "aiNotConfigured": "AI isn't set up yet — enable it in Settings → AI Assistant.",
+      "orderInformation": "Order information",
+      "orderInfoEmpty": "No order integration connected for this account.",
+      "timeline": "Conversation timeline",
+      "noTimelineEvents": "No activity yet.",
+      "media": "Shared media",
+      "mediaEmpty": "No media shared in this conversation yet.",
+      "mediaAll": "All",
+      "mediaImages": "Images",
+      "mediaVideos": "Videos",
+      "mediaDocuments": "Documents",
+      "mediaVoice": "Voice"
     },
     "aiBanner": {
       "pausedTitle": "AI assistant is paused here",
@@ -381,7 +445,10 @@
       "enterCustomField": "Enter {name}...",
       "activityTab": {
         "title": "Activity History",
-        "noActivity": "No activity yet."
+        "noActivity": "No activity yet.",
+        "leadScore": "Lead score",
+        "leadScoreEmpty": "Not scored yet",
+        "conversationCount": "Conversations"
       },
       "notesTab": {
         "title": "Internal Notes",
@@ -604,7 +671,10 @@
         "date": "Date"
       },
       "errorLoad": "Failed to load broadcasts",
-      "retry": "Retry"
+      "retry": "Retry",
+      "searchPlaceholder": "Search by name or template…",
+      "allStatuses": "All statuses",
+      "noBroadcastsMatch": "No broadcasts match your filters."
     },
     "status": {
       "draft": "Draft",
@@ -1229,6 +1299,10 @@
       "you": "You",
       "unnamed": "Unnamed",
       "joined": "Joined {date}",
+      "assignedChats": "Assigned",
+      "resolvedChats": "Resolved",
+      "avgResponse": "Avg. response",
+      "noSamples": "—",
       "remove": "Remove",
       "removedToast": "Removed {name}",
       "updatedToast": "Updated {name} to {role}",

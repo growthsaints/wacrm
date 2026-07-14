@@ -108,6 +108,17 @@ export interface Contact {
   email?: string;
   company?: string;
   avatar_url?: string;
+  /**
+   * How this contact entered the CRM. Null on rows created before
+   * migration 039 — rendered as "Unknown" rather than guessed.
+   * Migration 039.
+   */
+  source?: 'manual' | 'import' | 'api' | 'whatsapp_inbound' | null;
+  /**
+   * Reserved for a future lead-scoring model. No scoring logic exists
+   * yet — always null until that engine ships. Migration 039.
+   */
+  lead_score?: number | null;
   created_at: string;
   updated_at: string;
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
@@ -155,7 +166,7 @@ export interface ContactNote {
   created_at: string;
 }
 
-export type ConversationStatus = 'open' | 'pending' | 'closed';
+export type ConversationStatus = 'open' | 'pending' | 'closed' | 'archived';
 
 export interface Conversation {
   id: string;
@@ -163,6 +174,15 @@ export interface Conversation {
   contact_id: string;
   status: ConversationStatus;
   assigned_agent_id?: string;
+  /** Set (trigger-derived) whenever assigned_agent_id changes; null when
+   *  unassigned. Migration 039. */
+  assigned_at?: string | null;
+  /** Team-wide pin, shown to every account member. Migration 039. */
+  is_pinned?: boolean;
+  /** Derived client-side from the embedded `conversation_favorites` join
+   *  (see CONVERSATION_SELECT) — true when the CALLER has bookmarked this
+   *  conversation. Not a DB column. Migration 039. */
+  is_favorite?: boolean;
   last_message_text?: string;
   last_message_at?: string;
   unread_count: number;
@@ -181,6 +201,18 @@ export interface Conversation {
   ai_autoreply_disabled?: boolean;
   ai_reply_count?: number;
   ai_handoff_summary?: string | null;
+}
+
+/**
+ * Per-agent bookmark on a conversation — distinct from `is_pinned`
+ * (team-wide). One row per (conversation, user). Migration 039.
+ */
+export interface ConversationFavorite {
+  id: string;
+  conversation_id: string;
+  account_id: string;
+  user_id: string;
+  created_at: string;
 }
 
 // ============================================================

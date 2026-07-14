@@ -13,17 +13,23 @@ import {
 
 import {
   loadActivity,
+  loadContactGrowth,
   loadConversationsSeries,
   loadMetrics,
   loadPipelineDonut,
   loadResponseTime,
+  loadTopAgents,
+  loadTopCampaigns,
 } from '@/lib/dashboard/queries'
 import type {
   ActivityItem,
+  ContactGrowthPoint,
   ConversationsSeriesPoint,
   MetricsBundle,
   PipelineDonutData,
   ResponseTimeSummary,
+  TopAgentStat,
+  TopCampaignStat,
 } from '@/lib/dashboard/types'
 
 import { MetricCard } from '@/components/dashboard/metric-card'
@@ -33,6 +39,9 @@ import { ConversationsChart } from '@/components/dashboard/conversations-chart'
 import { PipelineDonut } from '@/components/dashboard/pipeline-donut'
 import { ResponseTimeChart } from '@/components/dashboard/response-time-chart'
 import { ActivityFeed } from '@/components/dashboard/activity-feed'
+import { TopAgentsTable } from '@/components/dashboard/top-agents-table'
+import { TopCampaignsTable } from '@/components/dashboard/top-campaigns-table'
+import { ContactGrowthChart } from '@/components/dashboard/contact-growth-chart'
 
 import { useTranslations } from 'next-intl'
 
@@ -63,6 +72,20 @@ export default function DashboardPage() {
 
   const [activity, setActivity] = useState<ActivityItem[] | null>(null)
   const [activityLoading, setActivityLoading] = useState(true)
+
+  const [topAgents, setTopAgents] = useState<TopAgentStat[] | null>(null)
+  const [topAgentsLoading, setTopAgentsLoading] = useState(true)
+
+  const [topCampaigns, setTopCampaigns] = useState<TopCampaignStat[] | null>(null)
+  const [topCampaignsLoading, setTopCampaignsLoading] = useState(true)
+
+  const [growthRange, setGrowthRange] = useState<RangeDays>(30)
+  const [growthSeries, setGrowthSeries] = useState<Record<RangeDays, ContactGrowthPoint[] | null>>({
+    7: null,
+    30: null,
+    90: null,
+  })
+  const [growthLoading, setGrowthLoading] = useState(true)
 
   const loadAll = useCallback(() => {
     const db = createClient()
@@ -97,6 +120,21 @@ export default function DashboardPage() {
       .then((a) => setActivity(a))
       .catch((err) => console.error('[dashboard] activity failed:', err))
       .finally(() => setActivityLoading(false))
+
+    void loadTopAgents(db)
+      .then((a) => setTopAgents(a))
+      .catch((err) => console.error('[dashboard] top agents failed:', err))
+      .finally(() => setTopAgentsLoading(false))
+
+    void loadTopCampaigns(db)
+      .then((c) => setTopCampaigns(c))
+      .catch((err) => console.error('[dashboard] top campaigns failed:', err))
+      .finally(() => setTopCampaignsLoading(false))
+
+    void loadContactGrowth(db, 30)
+      .then((g) => setGrowthSeries((prev) => ({ ...prev, 30: g })))
+      .catch((err) => console.error('[dashboard] contact growth failed:', err))
+      .finally(() => setGrowthLoading(false))
   }, [])
 
   useEffect(() => {
@@ -119,6 +157,20 @@ export default function DashboardPage() {
         .finally(() => setSeriesLoading(false))
     },
     [series],
+  )
+
+  const handleGrowthRangeChange = useCallback(
+    (r: RangeDays) => {
+      setGrowthRange(r)
+      if (growthSeries[r] !== null) return
+      setGrowthLoading(true)
+      const db = createClient()
+      loadContactGrowth(db, r)
+        .then((g) => setGrowthSeries((prev) => ({ ...prev, [r]: g })))
+        .catch((err) => console.error('[dashboard] contact growth failed:', err))
+        .finally(() => setGrowthLoading(false))
+    },
+    [growthSeries],
   )
 
   return (
@@ -218,6 +270,18 @@ export default function DashboardPage() {
 
       {/* Response time */}
       <ResponseTimeChart data={responseTime} loading={responseTimeLoading} />
+
+      {/* Top agents / campaigns + contact growth */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <TopAgentsTable data={topAgents} loading={topAgentsLoading} />
+        <TopCampaignsTable data={topCampaigns} loading={topCampaignsLoading} />
+      </div>
+      <ContactGrowthChart
+        series={growthSeries}
+        loading={growthLoading}
+        range={growthRange}
+        onRangeChange={handleGrowthRangeChange}
+      />
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />

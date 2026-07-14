@@ -1040,6 +1040,7 @@ async function findOrCreateContact(
       user_id: configOwnerUserId,
       phone,
       name: name || phone,
+      source: 'whatsapp_inbound',
     })
     .select()
     .single()
