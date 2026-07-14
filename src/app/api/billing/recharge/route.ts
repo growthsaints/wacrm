@@ -33,11 +33,14 @@ export async function POST(request: Request) {
       )
     }
 
+    // Razorpay caps `receipt` at 40 chars — a full UUID + timestamp
+    // blows past that, so use only the account id's first 8 chars
+    // (this is just our own reference string, not looked up by it).
     const order = await createRazorpayOrder({
       keyId,
       keySecret,
       amountRupees: amount,
-      receipt: `wallet_${accountId}_${Date.now()}`,
+      receipt: `wr_${accountId.slice(0, 8)}_${Date.now()}`,
       accountId,
     })
 

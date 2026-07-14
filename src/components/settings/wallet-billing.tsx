@@ -192,22 +192,6 @@ export function WalletBilling() {
 
       <Card className="border-border bg-card">
         <CardContent className="py-6">
-          <h3 className="mb-3 text-sm font-medium text-foreground">Per-message rates</h3>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {Object.entries(data?.rates ?? {}).map(([category, rate]) => (
-              <div key={category} className="rounded-lg border border-border p-3">
-                <p className="text-xs text-muted-foreground">{CATEGORY_LABEL[category] ?? category}</p>
-                <p className="text-sm font-medium text-foreground">
-                  {rate === 0 ? 'Free' : formatInr(rate)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-border bg-card">
-        <CardContent className="py-6">
           <h3 className="mb-3 text-sm font-medium text-foreground">Recent transactions</h3>
           {(data?.transactions.length ?? 0) === 0 ? (
             <p className="text-sm text-muted-foreground">No transactions yet.</p>

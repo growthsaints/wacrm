@@ -45,6 +45,7 @@ import { TopAgentsTable } from '@/components/dashboard/top-agents-table'
 import { TopCampaignsTable } from '@/components/dashboard/top-campaigns-table'
 import { ContactGrowthChart } from '@/components/dashboard/contact-growth-chart'
 import { AutomationAnalyticsTable } from '@/components/dashboard/automation-analytics-table'
+import { WalletBalanceCard } from '@/components/dashboard/wallet-balance-card'
 
 import { useTranslations } from 'next-intl'
 
@@ -187,11 +188,14 @@ export default function DashboardPage() {
   return (
     <div className="space-y-5">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('description')}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('description')}
+          </p>
+        </div>
+        <WalletBalanceCard />
       </div>
 
       {/* Metric cards */}
