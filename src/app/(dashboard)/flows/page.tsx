@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -16,6 +16,10 @@ import {
   HelpCircle,
   UserPlus,
   FileText,
+  Search,
+  Copy,
+  Download,
+  Upload,
 } from "lucide-react";
 
 import { useTranslations } from "next-intl";
@@ -32,6 +36,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,10 +58,11 @@ interface FlowRow {
   name: string;
   description: string | null;
   status: "draft" | "active" | "archived";
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: string;
   trigger_config: { keywords?: string[] } | Record<string, unknown>;
   execution_count: number;
   last_executed_at: string | null;
+  category: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,6 +104,10 @@ export default function FlowsPage() {
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("__all__");
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,6 +207,128 @@ export default function FlowsPage() {
     }
   }
 
+  // Part 9 — Duplicate: fetch the source flow's full node graph, then
+  // create a new draft flow with the same trigger + nodes rather than
+  // just the header (a "duplicate" that dropped the graph wouldn't be
+  // useful).
+  async function handleDuplicate(flow: FlowRow) {
+    setDuplicatingId(flow.id);
+    try {
+      const res = await fetch(`/api/flows/${flow.id}`);
+      if (!res.ok) throw new Error(`Load failed: ${res.status}`);
+      const { flow: source, nodes } = (await res.json()) as {
+        flow: FlowRow & { trigger_config: Record<string, unknown>; entry_node_id: string | null };
+        nodes: Array<{ node_key: string; node_type: string; config: Record<string, unknown>; position_x: number; position_y: number }>;
+      };
+      const createRes = await fetch("/api/flows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: t("duplicateName", { name: source.name }),
+          description: source.description,
+          trigger_type: source.trigger_type,
+          trigger_config: source.trigger_config,
+        }),
+      });
+      if (!createRes.ok) throw new Error(`Create failed: ${createRes.status}`);
+      const { flow: created } = (await createRes.json()) as { flow: FlowRow };
+
+      if (nodes.length > 0) {
+        await fetch(`/api/flows/${created.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entry_node_id: source.entry_node_id, nodes }),
+        });
+      }
+      setFlows((prev) => [created, ...prev]);
+      toast.success(t("duplicateSuccess"));
+    } catch (err) {
+      console.error(err);
+      toast.error(t("duplicateError"));
+    } finally {
+      setDuplicatingId(null);
+    }
+  }
+
+  // Part 9 — Export: a plain JSON download of the flow + node graph,
+  // re-importable via handleImport below.
+  async function handleExport(flow: FlowRow) {
+    try {
+      const res = await fetch(`/api/flows/${flow.id}`);
+      if (!res.ok) throw new Error(`Load failed: ${res.status}`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `flow-${flow.name.replace(/[^a-z0-9-_]+/gi, "-").toLowerCase()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      toast.error(t("exportError"));
+    }
+  }
+
+  // Part 9 — Import: the inverse of Export. Creates a new draft flow
+  // from a previously-exported JSON file.
+  async function handleImportFile(file: File) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as {
+        flow: { name: string; description: string | null; trigger_type: string; trigger_config: Record<string, unknown>; entry_node_id: string | null };
+        nodes: Array<{ node_key: string; node_type: string; config: Record<string, unknown>; position_x: number; position_y: number }>;
+      };
+      const createRes = await fetch("/api/flows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: parsed.flow.name,
+          description: parsed.flow.description,
+          trigger_type: parsed.flow.trigger_type,
+          trigger_config: parsed.flow.trigger_config,
+        }),
+      });
+      if (!createRes.ok) {
+        const json = await createRes.json().catch(() => ({}));
+        throw new Error(json.error ?? `Create failed: ${createRes.status}`);
+      }
+      const { flow: created } = (await createRes.json()) as { flow: FlowRow };
+      if (parsed.nodes?.length > 0) {
+        await fetch(`/api/flows/${created.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entry_node_id: parsed.flow.entry_node_id, nodes: parsed.nodes }),
+        });
+      }
+      setFlows((prev) => [created, ...prev]);
+      toast.success(t("importSuccess"));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : t("importError");
+      toast.error(msg);
+    }
+  }
+
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const f of flows) if (f.category) set.add(f.category);
+    return Array.from(set).sort();
+  }, [flows]);
+
+  const filteredFlows = useMemo(() => {
+    let result = flows;
+    if (categoryFilter !== "__all__") {
+      result = result.filter((f) => f.category === categoryFilter);
+    }
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      result = result.filter((f) => f.name.toLowerCase().includes(q));
+    }
+    return result;
+  }, [flows, search, categoryFilter]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -213,14 +351,31 @@ export default function FlowsPage() {
             {t("description")}
           </p>
         </div>
-        <GatedButton
-          canAct={canCreate}
-          gateReason="create flows"
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus className="h-4 w-4" />
-          {t("newFlow")}
-        </GatedButton>
+        <div className="flex items-center gap-2">
+          <input
+            ref={importInputRef}
+            type="file"
+            accept="application/json"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) void handleImportFile(file);
+              e.target.value = "";
+            }}
+          />
+          <Button variant="outline" onClick={() => importInputRef.current?.click()}>
+            <Upload className="h-4 w-4" />
+            {t("import")}
+          </Button>
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create flows"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            {t("newFlow")}
+          </GatedButton>
+        </div>
       </header>
 
       {flows.length === 0 ? (
@@ -230,17 +385,53 @@ export default function FlowsPage() {
           t={t}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {flows.map((flow) => (
-            <FlowCard
-              key={flow.id}
-              flow={flow}
-              onEdit={() => router.push(`/flows/${flow.id}`)}
-              onDelete={() => handleDelete(flow)}
-              t={t}
-            />
-          ))}
-        </div>
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-48">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("searchPlaceholder")}
+                className="border-border bg-card pl-9 text-sm"
+              />
+            </div>
+            {categories.length > 0 && (
+              <Select value={categoryFilter} onValueChange={(v) => v && setCategoryFilter(v)}>
+                <SelectTrigger className="w-48 bg-card">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">{t("allCategories")}</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {filteredFlows.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">{t("noMatch")}</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {filteredFlows.map((flow) => (
+                <FlowCard
+                  key={flow.id}
+                  flow={flow}
+                  onEdit={() => router.push(`/flows/${flow.id}`)}
+                  onDelete={() => handleDelete(flow)}
+                  onDuplicate={() => handleDuplicate(flow)}
+                  onExport={() => handleExport(flow)}
+                  duplicating={duplicatingId === flow.id}
+                  t={t}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -360,11 +551,17 @@ function FlowCard({
   flow,
   onEdit,
   onDelete,
+  onDuplicate,
+  onExport,
+  duplicating,
   t,
 }: {
   flow: FlowRow;
   onEdit: () => void;
   onDelete: () => void;
+  onDuplicate: () => void;
+  onExport: () => void;
+  duplicating: boolean;
   t: ReturnType<typeof useTranslations>;
 }) {
   const triggerSummary = describeTrigger(flow, t);
@@ -406,10 +603,22 @@ function FlowCard({
         </span>
       </div>
 
-      <div className="mt-4 flex items-center justify-end gap-2 border-t border-border pt-3">
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-1 border-t border-border pt-3">
         <Button variant="ghost" size="sm" onClick={onEdit}>
           <Pencil className="h-3.5 w-3.5" />
           {t("edit")}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDuplicate} disabled={duplicating}>
+          {duplicating ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Copy className="h-3.5 w-3.5" />
+          )}
+          {t("duplicate")}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onExport}>
+          <Download className="h-3.5 w-3.5" />
+          {t("export")}
         </Button>
         <Button
           variant="ghost"
@@ -436,5 +645,11 @@ function describeTrigger(flow: FlowRow, t: ReturnType<typeof useTranslations>): 
   if (flow.trigger_type === "first_inbound_message") {
     return t("triggerFirstInbound");
   }
-  return t("triggerManual");
+  if (flow.trigger_type === "manual") {
+    return t("triggerManual");
+  }
+  // Milestone 4's unified-engine trigger types (tag_added, order_paid,
+  // schedule, webhook, …) don't need a bespoke summary each — the raw
+  // trigger_type reads fine as a fallback label.
+  return flow.trigger_type.replace(/_/g, ' ');
 }

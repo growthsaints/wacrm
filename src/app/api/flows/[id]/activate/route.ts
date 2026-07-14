@@ -70,7 +70,7 @@ export async function POST(
     const [{ data: flow }, { data: nodes }] = await Promise.all([
       admin
         .from('flows')
-        .select('name, trigger_type, trigger_config, entry_node_id')
+        .select('*')
         .eq('id', id)
         .maybeSingle(),
       admin
@@ -84,7 +84,7 @@ export async function POST(
     const issues = validateFlowForActivation(
       flow as {
         name: string
-        trigger_type: 'keyword' | 'first_inbound_message' | 'manual'
+        trigger_type: import('@/lib/flows/types').FlowTriggerType
         trigger_config: Record<string, unknown>
         entry_node_id: string | null
       },
@@ -103,6 +103,34 @@ export async function POST(
         },
         { status: 422 },
       )
+    }
+
+    // Publish-time version snapshot (Part 9 version history) — one row
+    // per activation, capturing the full flow + node graph so it can
+    // be restored later. Best-effort: a snapshot failure shouldn't
+    // block activation itself.
+    const nextVersion = (flow.current_version as number) + 1
+    const { error: snapErr } = await admin.from('flow_versions').insert({
+      flow_id: id,
+      account_id: flow.account_id,
+      version: nextVersion,
+      snapshot: { flow, nodes: nodes ?? [] },
+      published_by: user.id,
+    })
+    if (!snapErr) {
+      await admin.from('flows').update({ current_version: nextVersion }).eq('id', id)
+    } else {
+      console.error('[flows] version snapshot failed:', snapErr.message)
+    }
+
+    // Auto-generate the inbound-webhook token the first time a
+    // webhook-triggered flow is activated (covers flows created before
+    // the trigger_type was chosen, or switched to 'webhook' later).
+    if (flow.trigger_type === 'webhook' && !flow.webhook_token) {
+      await admin
+        .from('flows')
+        .update({ webhook_token: crypto.randomUUID() })
+        .eq('id', id)
     }
   }
 

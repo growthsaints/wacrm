@@ -20,7 +20,7 @@ export async function buildContactTimeline(
   contactId: string,
   limit = 100,
 ): Promise<TimelineEvent[]> {
-  const [contactRes, conversationsRes, tagsRes, notesRes, dealsRes, recipientsRes] =
+  const [contactRes, conversationsRes, tagsRes, notesRes, dealsRes, recipientsRes, ordersRes] =
     await Promise.all([
       db
         .from('contacts')
@@ -55,6 +55,12 @@ export async function buildContactTimeline(
         .select('id, status, sent_at, created_at, broadcast:broadcasts(id, name, template_name)')
         .eq('contact_id', contactId)
         .order('created_at', { ascending: false })
+        .limit(20),
+      db
+        .from('commerce_orders')
+        .select('id, order_number, status, total, currency, placed_at, created_at')
+        .eq('contact_id', contactId)
+        .order('placed_at', { ascending: false })
         .limit(20),
     ])
 
@@ -157,6 +163,24 @@ export async function buildContactTimeline(
           : `Broadcast "${broadcast.name}" sent (${broadcast.template_name})`,
       at: r.sent_at ?? r.created_at,
       href: `/broadcasts/${broadcast.id}`,
+    })
+  }
+
+  const orders = (ordersRes.data ?? []) as Array<{
+    id: string
+    order_number: string | null
+    status: string
+    total: number
+    currency: string
+    placed_at: string | null
+    created_at: string
+  }>
+  for (const o of orders) {
+    events.push({
+      id: `order-${o.id}`,
+      kind: 'order',
+      text: `Order ${o.order_number ?? o.id.slice(0, 8)} ${o.status} — ${o.currency} ${o.total.toFixed(2)}`,
+      at: o.placed_at ?? o.created_at,
     })
   }
 

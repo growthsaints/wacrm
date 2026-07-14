@@ -19,14 +19,22 @@
 import {
   Flag,
   GitFork,
+  Globe,
   Inbox,
   ListChecks,
   ListPlus,
   MessageCircle,
+  Milestone,
   Paperclip,
   PlayCircle,
+  Send,
+  Signpost,
   Tag,
+  Timer,
+  UserCog,
   UserPlus,
+  UserRoundPlus,
+  Webhook,
   Workflow,
 } from 'lucide-react';
 
@@ -43,12 +51,22 @@ import { cn } from '@/lib/utils';
 export type NodeType =
   | 'start'
   | 'send_message'
+  | 'send_template'
   | 'send_buttons'
   | 'send_list'
   | 'send_media'
+  | 'send_whatsapp_flow'
   | 'collect_input'
   | 'condition'
+  | 'branch'
   | 'set_tag'
+  | 'assign_agent'
+  | 'create_contact'
+  | 'update_contact'
+  | 'update_custom_field'
+  | 'delay'
+  | 'webhook'
+  | 'http_fetch'
   | 'handoff'
   | 'end';
 
@@ -77,12 +95,14 @@ export interface BuilderNode {
 // the canvas, so `start` is just the entry point under Flow control.
 // ------------------------------------------------------------
 
-export type NodeCategory = 'messaging' | 'logic' | 'flow';
+export type NodeCategory = 'messaging' | 'logic' | 'contact' | 'integration' | 'flow';
 
 /** Category labels + the order they render in the add-step menu. */
 export const NODE_CATEGORIES: { id: NodeCategory; label: string }[] = [
   { id: 'messaging', label: 'Messaging' },
   { id: 'logic', label: 'Logic & data' },
+  { id: 'contact', label: 'Contact & agent' },
+  { id: 'integration', label: 'Integrations' },
   { id: 'flow', label: 'Flow control' },
 ];
 
@@ -150,7 +170,7 @@ export const NODE_META: Record<
     icon: Tag,
     color: 'text-pink-400',
     blurb: 'Adds or removes a contact tag',
-    category: 'logic',
+    category: 'contact',
   },
   handoff: {
     label: 'Handoff to agent',
@@ -165,6 +185,76 @@ export const NODE_META: Record<
     color: 'text-muted-foreground',
     blurb: 'Ends the flow',
     category: 'flow',
+  },
+  send_template: {
+    label: 'Send template',
+    icon: Send,
+    color: 'text-violet-400',
+    blurb: 'Sends an approved WhatsApp template',
+    category: 'messaging',
+  },
+  send_whatsapp_flow: {
+    label: 'Send WhatsApp Flow',
+    icon: Workflow,
+    color: 'text-emerald-400',
+    blurb: 'Launches an official WhatsApp Flow',
+    category: 'messaging',
+  },
+  branch: {
+    label: 'Branch',
+    icon: Signpost,
+    color: 'text-orange-400',
+    blurb: 'Routes to one of several paths by value',
+    category: 'logic',
+  },
+  assign_agent: {
+    label: 'Assign agent',
+    icon: UserCog,
+    color: 'text-amber-300',
+    blurb: 'Assigns the conversation to an agent (bot keeps running)',
+    category: 'contact',
+  },
+  create_contact: {
+    label: 'Create contact',
+    icon: UserRoundPlus,
+    color: 'text-lime-400',
+    blurb: 'Creates a new contact from captured data',
+    category: 'contact',
+  },
+  update_contact: {
+    label: 'Update contact',
+    icon: UserCog,
+    color: 'text-lime-500',
+    blurb: 'Writes name / email / company',
+    category: 'contact',
+  },
+  update_custom_field: {
+    label: 'Update custom field',
+    icon: Milestone,
+    color: 'text-yellow-400',
+    blurb: 'Writes a custom field value',
+    category: 'contact',
+  },
+  delay: {
+    label: 'Delay',
+    icon: Timer,
+    color: 'text-blue-400',
+    blurb: 'Waits before continuing',
+    category: 'integration',
+  },
+  webhook: {
+    label: 'Webhook',
+    icon: Webhook,
+    color: 'text-slate-400',
+    blurb: 'Fires a one-way outbound notification',
+    category: 'integration',
+  },
+  http_fetch: {
+    label: 'HTTP request',
+    icon: Globe,
+    color: 'text-cyan-500',
+    blurb: 'Calls an API and captures the response',
+    category: 'integration',
   },
 };
 
@@ -207,6 +297,16 @@ const NODE_HUE: Record<NodeType, { l: number; c: number; h: number }> = {
   set_tag: { l: 0.65, c: 0.15, h: 350 }, // pink
   handoff: { l: 0.65, c: 0.17, h: 16 }, // rose — hands off
   end: { l: 0.55, c: 0.01, h: 260 }, // neutral grey — terminal
+  send_template: { l: 0.6, c: 0.16, h: 300 }, // violet, close to send_message
+  send_whatsapp_flow: { l: 0.62, c: 0.13, h: 158 }, // emerald, echoes start
+  branch: { l: 0.7, c: 0.15, h: 45 }, // orange — a fork with more than 2 paths
+  assign_agent: { l: 0.68, c: 0.13, h: 70 }, // amber, adjacent to handoff
+  create_contact: { l: 0.65, c: 0.14, h: 120 }, // lime
+  update_contact: { l: 0.62, c: 0.13, h: 130 }, // lime, slightly deeper
+  update_custom_field: { l: 0.7, c: 0.14, h: 95 }, // yellow
+  delay: { l: 0.62, c: 0.14, h: 230 }, // blue
+  webhook: { l: 0.55, c: 0.02, h: 250 }, // slate — fire-and-forget
+  http_fetch: { l: 0.65, c: 0.12, h: 195 }, // cyan
 };
 
 export interface NodeColors {
@@ -423,6 +523,49 @@ export function summarizeNode(
     case 'handoff': {
       const note = typeof cfg.note === 'string' ? cfg.note : '';
       return note.length > 0 ? truncate(note) : null;
+    }
+    case 'send_template': {
+      const name = typeof cfg.template_name === 'string' ? cfg.template_name : '';
+      return name ? `Template: ${name}` : null;
+    }
+    case 'send_whatsapp_flow': {
+      const cta = typeof cfg.cta_label === 'string' ? cfg.cta_label : '';
+      return cta ? `CTA: ${truncate(cta, 30)}` : null;
+    }
+    case 'branch': {
+      const key = typeof cfg.subject_key === 'string' ? cfg.subject_key : '';
+      const count = Array.isArray(cfg.cases) ? cfg.cases.length : 0;
+      return key ? `${key} · ${count} case${count === 1 ? '' : 's'}` : null;
+    }
+    case 'assign_agent': {
+      return cfg.mode === 'round_robin' ? 'Round robin' : 'Specific agent';
+    }
+    case 'create_contact': {
+      const phone = typeof cfg.phone === 'string' ? cfg.phone : '';
+      return phone ? truncate(phone, 40) : null;
+    }
+    case 'update_contact': {
+      const field = typeof cfg.field === 'string' ? cfg.field : '';
+      return field ? `Set ${field}` : null;
+    }
+    case 'update_custom_field': {
+      return typeof cfg.custom_field_id === 'string' && cfg.custom_field_id
+        ? 'Custom field'
+        : null;
+    }
+    case 'delay': {
+      const amount = typeof cfg.amount === 'number' ? cfg.amount : null;
+      const unit = typeof cfg.unit === 'string' ? cfg.unit : '';
+      return amount ? `${amount} ${unit}` : null;
+    }
+    case 'webhook': {
+      const url = typeof cfg.url === 'string' ? cfg.url : '';
+      return url ? truncate(url, 50) : null;
+    }
+    case 'http_fetch': {
+      const method = typeof cfg.method === 'string' ? cfg.method : '';
+      const url = typeof cfg.url === 'string' ? cfg.url : '';
+      return url ? `${method} ${truncate(url, 40)}` : null;
     }
   }
 }

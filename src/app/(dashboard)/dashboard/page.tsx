@@ -13,6 +13,7 @@ import {
 
 import {
   loadActivity,
+  loadAutomationAnalytics,
   loadContactGrowth,
   loadConversationsSeries,
   loadMetrics,
@@ -23,6 +24,7 @@ import {
 } from '@/lib/dashboard/queries'
 import type {
   ActivityItem,
+  AutomationAnalyticsSummary,
   ContactGrowthPoint,
   ConversationsSeriesPoint,
   MetricsBundle,
@@ -42,6 +44,7 @@ import { ActivityFeed } from '@/components/dashboard/activity-feed'
 import { TopAgentsTable } from '@/components/dashboard/top-agents-table'
 import { TopCampaignsTable } from '@/components/dashboard/top-campaigns-table'
 import { ContactGrowthChart } from '@/components/dashboard/contact-growth-chart'
+import { AutomationAnalyticsTable } from '@/components/dashboard/automation-analytics-table'
 
 import { useTranslations } from 'next-intl'
 
@@ -78,6 +81,9 @@ export default function DashboardPage() {
 
   const [topCampaigns, setTopCampaigns] = useState<TopCampaignStat[] | null>(null)
   const [topCampaignsLoading, setTopCampaignsLoading] = useState(true)
+
+  const [automationAnalytics, setAutomationAnalytics] = useState<AutomationAnalyticsSummary | null>(null)
+  const [automationAnalyticsLoading, setAutomationAnalyticsLoading] = useState(true)
 
   const [growthRange, setGrowthRange] = useState<RangeDays>(30)
   const [growthSeries, setGrowthSeries] = useState<Record<RangeDays, ContactGrowthPoint[] | null>>({
@@ -135,6 +141,11 @@ export default function DashboardPage() {
       .then((g) => setGrowthSeries((prev) => ({ ...prev, 30: g })))
       .catch((err) => console.error('[dashboard] contact growth failed:', err))
       .finally(() => setGrowthLoading(false))
+
+    void loadAutomationAnalytics(db)
+      .then((a) => setAutomationAnalytics(a))
+      .catch((err) => console.error('[dashboard] automation analytics failed:', err))
+      .finally(() => setAutomationAnalyticsLoading(false))
   }, [])
 
   useEffect(() => {
@@ -282,6 +293,9 @@ export default function DashboardPage() {
         range={growthRange}
         onRangeChange={handleGrowthRangeChange}
       />
+
+      {/* Automation + flow analytics */}
+      <AutomationAnalyticsTable data={automationAnalytics} loading={automationAnalyticsLoading} />
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />

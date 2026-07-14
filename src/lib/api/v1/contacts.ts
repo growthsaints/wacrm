@@ -205,6 +205,19 @@ export async function setContactTags(
       .insert(toAdd.map((tag_id) => ({ contact_id: contactId, tag_id })));
     if (error) throw new ContactError('Failed to update contact tags', 500);
   }
+
+  // Unified engine dispatch (Milestone 4, Part 6) — fire-and-forget,
+  // one per tag actually added/removed so a per-tag trigger_config
+  // filter (see flows.trigger_config.tag_id) matches correctly.
+  if (toAdd.length > 0 || toRemove.length > 0) {
+    const { dispatchEventToFlows } = await import('@/lib/flows/engine');
+    for (const tagId of toAdd) {
+      void dispatchEventToFlows({ accountId, contactId, triggerType: 'tag_added', context: { tag_id: tagId } }).catch(() => {});
+    }
+    for (const tagId of toRemove) {
+      void dispatchEventToFlows({ accountId, contactId, triggerType: 'tag_removed', context: { tag_id: tagId } }).catch(() => {});
+    }
+  }
 }
 
 /** Fetch + serialize a single contact scoped to the account, or null. */

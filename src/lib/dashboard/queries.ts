@@ -9,6 +9,8 @@ import {
 } from './date-utils'
 import type {
   ActivityItem,
+  AutomationAnalyticsItem,
+  AutomationAnalyticsSummary,
   ContactGrowthPoint,
   ConversationsSeriesPoint,
   MetricsBundle,
@@ -534,4 +536,90 @@ export async function loadContactGrowth(db: DB, rangeDays: number): Promise<Cont
   }
 
   return keys.map((day) => ({ day, count: buckets.get(day) ?? 0 }))
+}
+
+// --- 9. Automation + flow analytics (Milestone 4, Part 8) ---------------
+
+export async function loadAutomationAnalytics(db: DB, limit = 8): Promise<AutomationAnalyticsSummary> {
+  const thirtyDaysAgo = daysAgoStart(29).toISOString()
+
+  const [automationsRes, logsRes, flowsRes, runsRes] = await Promise.all([
+    db.from('automations').select('id, name'),
+    db
+      .from('automation_logs')
+      .select('automation_id, status')
+      .gte('created_at', thirtyDaysAgo),
+    db.from('flows').select('id, name'),
+    db
+      .from('flow_runs')
+      .select('flow_id, status, started_at, ended_at')
+      .gte('started_at', thirtyDaysAgo),
+  ])
+
+  const automations = (automationsRes.data ?? []) as Array<{ id: string; name: string }>
+  const logs = (logsRes.data ?? []) as Array<{ automation_id: string; status: string }>
+  const flows = (flowsRes.data ?? []) as Array<{ id: string; name: string }>
+  const runs = (runsRes.data ?? []) as Array<{
+    flow_id: string
+    status: string
+    started_at: string
+    ended_at: string | null
+  }>
+
+  const items: AutomationAnalyticsItem[] = []
+
+  for (const a of automations) {
+    const forThis = logs.filter((l) => l.automation_id === a.id)
+    if (forThis.length === 0) continue
+    const successCount = forThis.filter((l) => l.status === 'success').length
+    const failureCount = forThis.filter((l) => l.status === 'failed').length
+    items.push({
+      id: a.id,
+      name: a.name,
+      engine: 'automation',
+      executionCount: forThis.length,
+      successCount,
+      failureCount,
+      successRate: Math.round((successCount / forThis.length) * 100),
+      // automation_logs has no duration column — honest null rather
+      // than a fabricated timing.
+      avgExecutionMinutes: null,
+    })
+  }
+
+  for (const f of flows) {
+    const forThis = runs.filter((r) => r.flow_id === f.id)
+    if (forThis.length === 0) continue
+    const successCount = forThis.filter((r) => r.status === 'completed' || r.status === 'handed_off').length
+    const failureCount = forThis.filter((r) => r.status === 'failed' || r.status === 'timed_out').length
+    const durations = forThis
+      .filter((r) => r.ended_at)
+      .map((r) => (new Date(r.ended_at!).getTime() - new Date(r.started_at).getTime()) / 60_000)
+      .filter((m) => m >= 0)
+    items.push({
+      id: f.id,
+      name: f.name,
+      engine: 'flow',
+      executionCount: forThis.length,
+      successCount,
+      failureCount,
+      successRate: Math.round((successCount / forThis.length) * 100),
+      avgExecutionMinutes:
+        durations.length === 0 ? null : durations.reduce((a, b) => a + b, 0) / durations.length,
+    })
+  }
+
+  const totalExecutions = items.reduce((sum, i) => sum + i.executionCount, 0)
+  const totalSuccesses = items.reduce((sum, i) => sum + i.successCount, 0)
+  const totalFailures = items.reduce((sum, i) => sum + i.failureCount, 0)
+
+  return {
+    totalExecutions,
+    totalSuccesses,
+    totalFailures,
+    successRate: totalExecutions === 0 ? 0 : Math.round((totalSuccesses / totalExecutions) * 100),
+    topPerforming: items
+      .sort((a, b) => b.executionCount - a.executionCount)
+      .slice(0, limit),
+  }
 }

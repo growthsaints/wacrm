@@ -176,23 +176,129 @@ export interface SetTagNodeConfig {
 // Terminal nodes carry no config — they just stop the run.
 export type EndNodeConfig = Record<string, never>;
 
+// ============================================================
+// Milestone 4 — unified-engine node types.
+// ============================================================
+
+export interface SendTemplateNodeConfig {
+  template_name: string;
+  language?: string;
+  /** Positional {{1}}, {{2}}, … values; supports {{vars.*}} interpolation. */
+  variables?: string[];
+  next_node_key: string;
+}
+
+/** Sends a WhatsApp Flow (Meta's official product) as an interactive message. */
+export interface SendWhatsAppFlowNodeConfig {
+  whatsapp_flow_id: string;
+  /** Body text shown above the "open flow" CTA. */
+  text: string;
+  /** Label on the CTA button (Meta caps at 20 chars). */
+  cta_label: string;
+  /** Optional first-screen data payload, JSON-encoded per Meta's flow_action_payload. */
+  screen_data?: Record<string, unknown>;
+  next_node_key: string;
+}
+
+export interface AssignAgentNodeConfig {
+  mode: "specific" | "round_robin";
+  agent_id?: string;
+  next_node_key: string;
+}
+
+export interface CreateContactNodeConfig {
+  /** Supports {{vars.*}} interpolation — typically populated from a
+   *  prior collect_input or http_fetch capture. */
+  phone: string;
+  name?: string;
+  email?: string;
+  company?: string;
+  next_node_key: string;
+}
+
+export interface UpdateContactNodeConfig {
+  /** Built-in column to write. Custom fields use update_custom_field instead. */
+  field: "name" | "email" | "company";
+  value: string;
+  next_node_key: string;
+}
+
+export interface UpdateCustomFieldNodeConfig {
+  custom_field_id: string;
+  value: string;
+  next_node_key: string;
+}
+
+/** Suspends the run for a fixed duration, then auto-resumes via the
+ *  automation_jobs queue (job_type = 'flow_resume'). Mirrors the
+ *  automations engine's `wait` step. */
+export interface DelayNodeConfig {
+  amount: number;
+  unit: "minutes" | "hours" | "days";
+  next_node_key: string;
+}
+
+/** Fire-and-forget outbound notification. No response is read. */
+export interface WebhookNodeConfig {
+  url: string;
+  headers?: Record<string, string>;
+  /** JSON body template; supports {{vars.*}} interpolation. Defaults
+   *  to the run's vars when omitted. */
+  body_template?: string;
+  next_node_key: string;
+}
+
+/** Outbound HTTP call whose JSON response is captured into vars for
+ *  downstream nodes (condition, send_message interpolation, etc.). */
+export interface HttpFetchNodeConfig {
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url: string;
+  headers?: Record<string, string>;
+  body_template?: string;
+  /** Dot-path (e.g. "data.order.status") extracted from the JSON
+   *  response into vars[capture_as]. Omit to skip capture. */
+  response_path?: string;
+  capture_as?: string;
+  next_node_key: string;
+}
+
 /**
- * Total union — every concrete node_type the v1 engine understands.
+ * Ordered multi-way switch — evaluates each case in order and
+ * advances to the first match's target, or `default_next` if none
+ * match. More general than chained `condition` nodes for the common
+ * "route by status" shape (order status, tag, custom field).
+ */
+export interface BranchNodeConfig {
+  subject: ConditionSubject;
+  subject_key: string;
+  cases: Array<{ value: string; next_node_key: string }>;
+  default_next: string;
+}
+
+/**
+ * Total union — every concrete node_type the engine understands.
  * Add new node types here and the engine's switch will flag missing
  * cases via TypeScript's exhaustiveness check.
- *
- * v1.5+ additions (collect_input, condition, set_tag, http_fetch) will
- * extend this union — out-of-scope for the v1 engine PR.
  */
 export type FlowNodeConfig =
   | { node_type: "start"; config: StartNodeConfig }
   | { node_type: "send_message"; config: SendMessageNodeConfig }
+  | { node_type: "send_template"; config: SendTemplateNodeConfig }
   | { node_type: "send_buttons"; config: SendButtonsNodeConfig }
   | { node_type: "send_list"; config: SendListNodeConfig }
   | { node_type: "send_media"; config: SendMediaNodeConfig }
+  | { node_type: "send_whatsapp_flow"; config: SendWhatsAppFlowNodeConfig }
   | { node_type: "collect_input"; config: CollectInputNodeConfig }
   | { node_type: "condition"; config: ConditionNodeConfig }
+  | { node_type: "branch"; config: BranchNodeConfig }
   | { node_type: "set_tag"; config: SetTagNodeConfig }
+  | { node_type: "assign_agent"; config: AssignAgentNodeConfig }
+  | { node_type: "create_contact"; config: CreateContactNodeConfig }
+  | { node_type: "update_contact"; config: UpdateContactNodeConfig }
+  | { node_type: "update_custom_field"; config: UpdateCustomFieldNodeConfig }
+  | { node_type: "delay"; config: DelayNodeConfig }
+  | { node_type: "webhook"; config: WebhookNodeConfig }
+  | { node_type: "http_fetch"; config: HttpFetchNodeConfig }
   | { node_type: "handoff"; config: HandoffNodeConfig }
   | { node_type: "end"; config: EndNodeConfig };
 
@@ -214,10 +320,53 @@ export interface KeywordTriggerConfig {
 // the no-empty-object-type lint rule.
 export type FirstInboundTriggerConfig = Record<string, never>;
 
+/** Every non-message trigger the unified engine dispatches via
+ *  `dispatchEventToFlows` (Milestone 4, Part 6). */
+export type EventTriggerType =
+  | "tag_added"
+  | "tag_removed"
+  | "conversation_started"
+  | "conversation_closed"
+  | "template_delivered"
+  | "template_read"
+  | "broadcast_completed"
+  | "order_created"
+  | "order_paid"
+  | "order_delivered"
+  | "order_cancelled"
+  | "webhook"
+  | "api";
+
+export interface TagEventTriggerConfig {
+  /** Restrict to one tag; omit to match any tag_added/tag_removed. */
+  tag_id?: string;
+}
+
+export type ScheduleAudience = "all_contacts" | { tag_id: string };
+
+export interface ScheduleTriggerConfig {
+  run_at: string;
+  recurring: "once" | "daily" | "weekly";
+  audience: ScheduleAudience;
+  /** Set by the sweep once a one-time schedule has fired, so it isn't
+   *  re-picked up on the next cron pass. */
+  fired_at?: string;
+}
+
+export type FlowTriggerType =
+  | "keyword"
+  | "first_inbound_message"
+  | "manual"
+  | EventTriggerType
+  | "schedule";
+
 export type FlowTriggerConfig =
   | { trigger_type: "keyword"; config: KeywordTriggerConfig }
   | { trigger_type: "first_inbound_message"; config: FirstInboundTriggerConfig }
-  | { trigger_type: "manual"; config: Record<string, never> };
+  | { trigger_type: "manual"; config: Record<string, never> }
+  | { trigger_type: "tag_added" | "tag_removed"; config: TagEventTriggerConfig }
+  | { trigger_type: "schedule"; config: ScheduleTriggerConfig }
+  | { trigger_type: Exclude<EventTriggerType, "tag_added" | "tag_removed">; config: Record<string, unknown> };
 
 // ============================================================
 // DB-row shapes (read by the engine via supabaseAdmin)
@@ -234,12 +383,18 @@ export interface FlowRow {
   name: string;
   description: string | null;
   status: "draft" | "active" | "archived";
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: FlowTriggerType;
   trigger_config: KeywordTriggerConfig | FirstInboundTriggerConfig | Record<string, unknown>;
   entry_node_id: string | null;
   fallback_policy: FlowFallbackPolicy;
   execution_count: number;
   last_executed_at: string | null;
+  /** Free-text grouping for the flows list page (Part 9 categories). */
+  category: string | null;
+  /** Auth token for trigger_type = 'webhook'. Null otherwise. */
+  webhook_token: string | null;
+  schedule_config: ScheduleTriggerConfig | null;
+  current_version: number;
   created_at: string;
   updated_at: string;
 }
@@ -339,6 +494,24 @@ export interface DispatchInboundInput {
   contactId: string;
   conversationId: string;
   message: ParsedInbound;
+}
+
+/**
+ * Input for `dispatchEventToFlows` — the unified entry point every
+ * non-message trigger (tag changes, conversation lifecycle, template
+ * delivery, order events, inbound webhook/API calls) funnels through.
+ * Unlike `dispatchInboundToFlows`, there's no Meta message to key
+ * idempotency off — callers that need de-dupe pass their own
+ * `idempotencyKey` (e.g. the Meta status webhook's message id).
+ */
+export interface DispatchEventInput {
+  accountId: string;
+  contactId: string;
+  triggerType: EventTriggerType;
+  /** Extra fields the trigger's config match needs (e.g. tag_id for
+   *  tag_added/tag_removed). */
+  context?: Record<string, unknown>;
+  idempotencyKey?: string;
 }
 
 export interface DispatchInboundResult {

@@ -209,5 +209,12 @@ async function findOrCreateConversationRow(
     throw new SendMessageError('db_error', 'Failed to create conversation', 500);
   }
 
+  // Unified engine dispatch (Milestone 4, Part 6) — fire-and-forget,
+  // mirrors the webhook's inbound-created path.
+  const { dispatchEventToFlows } = await import('@/lib/flows/engine');
+  dispatchEventToFlows({ accountId, contactId, triggerType: 'conversation_started' }).catch(
+    (err) => console.error('[flows] conversation_started dispatch failed:', err),
+  );
+
   return newConv.id;
 }

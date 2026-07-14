@@ -547,3 +547,100 @@ describe("reachableFromEntry", () => {
     expect(set).toEqual(new Set(["a", "b"]));
   });
 });
+
+describe("validateFlowForActivation — Milestone 4 unified-engine node types", () => {
+  const baseFlow = {
+    name: "Order updates",
+    trigger_type: "order_paid" as const,
+    trigger_config: {},
+    entry_node_id: "n1",
+  };
+
+  it("flags a send_template node missing its template_name", () => {
+    const issues = validateFlowForActivation(baseFlow, [
+      { node_key: "n1", node_type: "send_template", config: { next_node_key: "end" } },
+      { node_key: "end", node_type: "end", config: {} },
+    ]);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "template_name")).toBe(true);
+  });
+
+  it("passes a well-formed send_template node", () => {
+    const issues = validateFlowForActivation(baseFlow, [
+      {
+        node_key: "n1",
+        node_type: "send_template",
+        config: { template_name: "order_paid", next_node_key: "end" },
+      },
+      { node_key: "end", node_type: "end", config: {} },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("flags a branch node with no cases and an unresolved default", () => {
+    const issues = validateFlowForActivation(baseFlow, [
+      {
+        node_key: "n1",
+        node_type: "branch",
+        config: { subject: "var", subject_key: "status", cases: [], default_next: "" },
+      },
+    ]);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "cases")).toBe(true);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "default_next")).toBe(true);
+  });
+
+  it("passes a well-formed branch node", () => {
+    const issues = validateFlowForActivation(baseFlow, [
+      {
+        node_key: "n1",
+        node_type: "branch",
+        config: {
+          subject: "var",
+          subject_key: "status",
+          cases: [{ value: "paid", next_node_key: "end" }],
+          default_next: "end",
+        },
+      },
+      { node_key: "end", node_type: "end", config: {} },
+    ]);
+    expect(issues).toEqual([]);
+  });
+
+  it("flags a delay node with a non-positive amount or bad unit", () => {
+    const issues = validateFlowForActivation(baseFlow, [
+      { node_key: "n1", node_type: "delay", config: { amount: 0, unit: "fortnights", next_node_key: "end" } },
+      { node_key: "end", node_type: "end", config: {} },
+    ]);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "amount")).toBe(true);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "unit")).toBe(true);
+  });
+
+  it("flags an http_fetch node missing url or method", () => {
+    const issues = validateFlowForActivation(baseFlow, [
+      { node_key: "n1", node_type: "http_fetch", config: { next_node_key: "end" } },
+      { node_key: "end", node_type: "end", config: {} },
+    ]);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "url")).toBe(true);
+    expect(issues.some((i) => i.node_key === "n1" && i.field === "method")).toBe(true);
+  });
+
+  it("requires run_at and recurring for a schedule trigger", () => {
+    const issues = validateFlowForActivation(
+      { ...baseFlow, trigger_type: "schedule", trigger_config: {} },
+      [{ node_key: "n1", node_type: "end", config: {} }],
+    );
+    expect(issues.some((i) => i.field === "trigger_config.run_at")).toBe(true);
+    expect(issues.some((i) => i.field === "trigger_config.recurring")).toBe(true);
+  });
+
+  it("accepts a well-formed schedule trigger config", () => {
+    const issues = validateFlowForActivation(
+      {
+        ...baseFlow,
+        trigger_type: "schedule",
+        trigger_config: { run_at: "2026-01-01T00:00:00Z", recurring: "once", audience: "all_contacts" },
+      },
+      [{ node_key: "n1", node_type: "end", config: {} }],
+    );
+    expect(issues.filter((i) => i.scope === "trigger")).toEqual([]);
+  });
+});

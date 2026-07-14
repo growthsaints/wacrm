@@ -5,6 +5,7 @@ import {
   isAutoAdvancing,
   isSuspending,
   isTerminal,
+  isDelaying,
   evaluateConditionPredicate,
 } from "./engine";
 
@@ -177,7 +178,7 @@ describe("node classification helpers", () => {
     expect(isTerminal("condition")).toBe(false);
   });
 
-  it("the three classifications are mutually exclusive for known node types", () => {
+  it("the four classifications are mutually exclusive for known node types", () => {
     const types = [
       "start",
       "send_message",
@@ -189,11 +190,44 @@ describe("node classification helpers", () => {
       "set_tag",
       "handoff",
       "end",
+      // Milestone 4 additions
+      "send_template",
+      "send_whatsapp_flow",
+      "branch",
+      "assign_agent",
+      "create_contact",
+      "update_contact",
+      "update_custom_field",
+      "delay",
+      "webhook",
+      "http_fetch",
     ];
     for (const t of types) {
-      const flags = [isAutoAdvancing(t), isSuspending(t), isTerminal(t)];
-      // Exactly one of the three should be true for every known node.
+      const flags = [isAutoAdvancing(t), isSuspending(t), isDelaying(t), isTerminal(t)];
+      // Exactly one of the four should be true for every known node.
       expect(flags.filter(Boolean).length).toBe(1);
+    }
+  });
+
+  it("isDelaying covers only the delay node", () => {
+    expect(isDelaying("delay")).toBe(true);
+    expect(isDelaying("send_message")).toBe(false);
+    expect(isDelaying("collect_input")).toBe(false);
+  });
+
+  it("isAutoAdvancing covers the Milestone 4 unified-engine node types", () => {
+    for (const t of [
+      "send_template",
+      "send_whatsapp_flow",
+      "branch",
+      "assign_agent",
+      "create_contact",
+      "update_contact",
+      "update_custom_field",
+      "webhook",
+      "http_fetch",
+    ]) {
+      expect(isAutoAdvancing(t)).toBe(true);
     }
   });
 });

@@ -1174,3 +1174,194 @@ export async function downloadMedia(
   const buffer = Buffer.from(await response.arrayBuffer())
   return { buffer, contentType }
 }
+
+// ============================================================
+// WhatsApp Flows — official Meta product (Milestone 4, Part 3).
+// Docs: https://developers.facebook.com/docs/whatsapp/flows
+// ============================================================
+
+export interface SendInteractiveFlowArgs {
+  phoneNumberId: string
+  accessToken: string
+  to: string
+  bodyText: string
+  metaFlowId: string
+  /** Per-send token Meta round-trips in the completion webhook
+   *  payload — lets us attribute an `nfm_reply` back to the message
+   *  that triggered it. */
+  flowToken: string
+  ctaLabel: string
+  /** First screen id from the flow's JSON, when the flow has more
+   *  than one entry point. Omit to use the flow's default. */
+  screenId?: string
+  screenData?: Record<string, unknown>
+  contextMessageId?: string
+}
+
+export async function sendInteractiveFlow(
+  args: SendInteractiveFlowArgs
+): Promise<MetaSendResult> {
+  const {
+    phoneNumberId, accessToken, to, bodyText, metaFlowId,
+    flowToken, ctaLabel, screenId, screenData, contextMessageId,
+  } = args
+  validateInteractiveBody(bodyText)
+  if (!ctaLabel) throw new Error('Flow message requires a ctaLabel.')
+  if (ctaLabel.length > INTERACTIVE_LIMITS.buttonTitleMaxLength) {
+    throw new Error(
+      `Flow ctaLabel "${ctaLabel}" exceeds ${INTERACTIVE_LIMITS.buttonTitleMaxLength} chars.`
+    )
+  }
+
+  const actionPayload: Record<string, unknown> = {}
+  if (screenId) actionPayload.screen = screenId
+  if (screenData) actionPayload.data = screenData
+
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'interactive',
+    interactive: {
+      type: 'flow',
+      body: { text: bodyText },
+      action: {
+        name: 'flow',
+        parameters: {
+          flow_message_version: '3',
+          flow_token: flowToken,
+          flow_id: metaFlowId,
+          flow_cta: ctaLabel,
+          flow_action: 'navigate',
+          ...(Object.keys(actionPayload).length > 0
+            ? { flow_action_payload: actionPayload }
+            : {}),
+        },
+      },
+    },
+  }
+  if (contextMessageId) body.context = { message_id: contextMessageId }
+
+  const url = `${META_API_BASE}/${phoneNumberId}/messages`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return { messageId: data.messages[0].id }
+}
+
+export interface MetaFlowSummary {
+  id: string
+  name: string
+  status: string
+  categories?: string[]
+  preview?: { preview_url: string; expires_at: string }
+}
+
+/**
+ * Create a new Flow under the account's WhatsApp Business Account.
+ * Returns the Meta-assigned flow id; the caller persists it onto the
+ * local `whatsapp_flows` row.
+ */
+export async function createMetaFlow(args: {
+  wabaId: string
+  accessToken: string
+  name: string
+  categories: string[]
+}): Promise<{ id: string }> {
+  const url = `${META_API_BASE}/${args.wabaId}/flows`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${args.accessToken}`,
+    },
+    body: JSON.stringify({ name: args.name, categories: args.categories }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+/** Upload/replace a Flow's JSON definition (screens + routing). */
+export async function updateMetaFlowJson(args: {
+  flowId: string
+  accessToken: string
+  flowJson: Record<string, unknown>
+}): Promise<{ success: boolean; validation_errors?: unknown[] }> {
+  const url = `${META_API_BASE}/${args.flowId}/assets`
+  const form = new FormData()
+  form.append('name', 'flow.json')
+  form.append('asset_type', 'FLOW_JSON')
+  form.append(
+    'file',
+    new Blob([JSON.stringify(args.flowJson)], { type: 'application/json' }),
+    'flow.json'
+  )
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+    body: form,
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+/** Publish a Flow — moves it from draft to published (immutable JSON
+ *  thereafter; further edits require a new Flow). */
+export async function publishMetaFlow(args: {
+  flowId: string
+  accessToken: string
+}): Promise<{ success: boolean }> {
+  const url = `${META_API_BASE}/${args.flowId}/publish`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+/** Deprecate a published Flow so it can no longer be sent. */
+export async function deprecateMetaFlow(args: {
+  flowId: string
+  accessToken: string
+}): Promise<{ success: boolean }> {
+  const url = `${META_API_BASE}/${args.flowId}/deprecate`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+/** Fetch a Flow's current status + a short-lived preview URL. */
+export async function getMetaFlow(args: {
+  flowId: string
+  accessToken: string
+}): Promise<MetaFlowSummary> {
+  const url = `${META_API_BASE}/${args.flowId}?fields=id,name,status,categories,preview.invalidate(false)`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${args.accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}

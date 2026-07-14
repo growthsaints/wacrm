@@ -431,6 +431,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
           { contact_id: args.contactId, tag_id: cfg.tag_id },
           { onConflict: 'contact_id,tag_id', ignoreDuplicates: true },
         )
+      await dispatchTagEvent(args.automation.account_id, args.contactId, 'tag_added', cfg.tag_id)
       return `tag ${cfg.tag_id} added`
     }
 
@@ -444,6 +445,7 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         .delete()
         .eq('contact_id', args.contactId)
         .eq('tag_id', cfg.tag_id)
+      await dispatchTagEvent(args.automation.account_id, args.contactId, 'tag_removed', cfg.tag_id)
       return `tag ${cfg.tag_id} removed`
     }
 
@@ -583,6 +585,16 @@ async function runStep(step: AutomationStep, args: ExecuteArgs): Promise<string>
         .update({ status: 'closed', updated_at: new Date().toISOString() })
         .eq('account_id', args.automation.account_id)
         .eq('contact_id', args.contactId)
+      try {
+        const { dispatchEventToFlows } = await import('@/lib/flows/engine')
+        await dispatchEventToFlows({
+          accountId: args.automation.account_id,
+          contactId: args.contactId,
+          triggerType: 'conversation_closed',
+        })
+      } catch (err) {
+        console.error('[automations] conversation_closed dispatch failed:', err)
+      }
       return 'conversation closed'
     }
 
@@ -694,6 +706,28 @@ async function evaluateCondition(cfg: ConditionStepConfig, args: ExecuteArgs): P
     }
     default:
       return false
+  }
+}
+
+/**
+ * Cross-engine bridge (Milestone 4, Part 1): the legacy automations
+ * engine's tag steps also fire the unified engine's tag_added/
+ * tag_removed triggers, so a `flows` automation can react to a tag
+ * change made by an `automations` rule without duplicating the tag
+ * mutation logic in two places. Best-effort — never throws into the
+ * caller's step execution.
+ */
+async function dispatchTagEvent(
+  accountId: string,
+  contactId: string,
+  triggerType: 'tag_added' | 'tag_removed',
+  tagId: string,
+): Promise<void> {
+  try {
+    const { dispatchEventToFlows } = await import('@/lib/flows/engine')
+    await dispatchEventToFlows({ accountId, contactId, triggerType, context: { tag_id: tagId } })
+  } catch (err) {
+    console.error('[automations] tag event dispatch failed:', err)
   }
 }
 

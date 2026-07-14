@@ -138,6 +138,56 @@ export function deriveCanvasEdges(nodes: BuilderNode[]): CanvasEdge[] {
         break;
       }
 
+      case "branch": {
+        const cases = Array.isArray((cfg as { cases?: unknown }).cases)
+          ? ((cfg as { cases: Array<Record<string, unknown>> }).cases)
+          : [];
+        cases.forEach((c, i) => {
+          const next = typeof c.next_node_key === "string" ? c.next_node_key : null;
+          const value = typeof c.value === "string" ? c.value : null;
+          if (!next || !knownKeys.has(next)) return;
+          edges.push({
+            id: `${node.node_key}--case:${i}--${next}`,
+            source: node.node_key,
+            target: next,
+            sourceHandle: `case:${i}`,
+            label: value ?? `case ${i + 1}`,
+          });
+        });
+        const defaultNext = (cfg as { default_next?: string }).default_next;
+        if (defaultNext && knownKeys.has(defaultNext)) {
+          edges.push({
+            id: `${node.node_key}--default--${defaultNext}`,
+            source: node.node_key,
+            target: defaultNext,
+            sourceHandle: "default",
+            label: "default",
+          });
+        }
+        break;
+      }
+
+      case "send_template":
+      case "send_whatsapp_flow":
+      case "assign_agent":
+      case "create_contact":
+      case "update_contact":
+      case "update_custom_field":
+      case "delay":
+      case "webhook":
+      case "http_fetch": {
+        const next = (cfg as { next_node_key?: string }).next_node_key;
+        if (next && knownKeys.has(next)) {
+          edges.push({
+            id: `${node.node_key}--next--${next}`,
+            source: node.node_key,
+            target: next,
+            sourceHandle: "next",
+          });
+        }
+        break;
+      }
+
       case "handoff":
       case "end":
         // Terminal nodes — no outgoing edges.
@@ -179,6 +229,15 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
     case "send_media":
     case "collect_input":
     case "set_tag":
+    case "send_template":
+    case "send_whatsapp_flow":
+    case "assign_agent":
+    case "create_contact":
+    case "update_contact":
+    case "update_custom_field":
+    case "delay":
+    case "webhook":
+    case "http_fetch":
       return [{ id: "next", label: "Next" }];
 
     case "condition":
@@ -186,6 +245,18 @@ export function outgoingSlots(node: BuilderNode): OutgoingSlot[] {
         { id: "true", label: "true" },
         { id: "false", label: "false" },
       ];
+
+    case "branch": {
+      const cases = Array.isArray((cfg as { cases?: unknown }).cases)
+        ? ((cfg as { cases: Array<Record<string, unknown>> }).cases)
+        : [];
+      const slots: OutgoingSlot[] = cases.map((c, i) => ({
+        id: `case:${i}`,
+        label: typeof c.value === "string" && c.value ? c.value : `case ${i + 1}`,
+      }));
+      slots.push({ id: "default", label: "default" });
+      return slots;
+    }
 
     case "send_buttons": {
       const buttons = Array.isArray((cfg as { buttons?: unknown }).buttons)
@@ -253,6 +324,15 @@ export function applyEdgeConnection(
     case "send_media":
     case "collect_input":
     case "set_tag":
+    case "send_template":
+    case "send_whatsapp_flow":
+    case "assign_agent":
+    case "create_contact":
+    case "update_contact":
+    case "update_custom_field":
+    case "delay":
+    case "webhook":
+    case "http_fetch":
       if (sourceHandle === "next") return { next_node_key: targetKey };
       return null;
 
@@ -260,6 +340,19 @@ export function applyEdgeConnection(
       if (sourceHandle === "true") return { true_next: targetKey };
       if (sourceHandle === "false") return { false_next: targetKey };
       return null;
+
+    case "branch": {
+      if (sourceHandle === "default") return { default_next: targetKey };
+      if (!sourceHandle.startsWith("case:")) return null;
+      const idx = Number(sourceHandle.slice("case:".length));
+      const cases = Array.isArray((node.config as { cases?: unknown }).cases)
+        ? (node.config as { cases: Array<Record<string, unknown>> }).cases
+        : [];
+      if (!Number.isInteger(idx) || idx < 0 || idx >= cases.length) return null;
+      return {
+        cases: cases.map((c, i) => (i === idx ? { ...c, next_node_key: targetKey } : c)),
+      };
+    }
 
     case "send_buttons": {
       if (!sourceHandle.startsWith("button:")) return null;
@@ -346,10 +439,38 @@ function patchedConfigWithoutKey(
     case "send_message":
     case "send_media":
     case "collect_input":
-    case "set_tag": {
+    case "set_tag":
+    case "send_template":
+    case "send_whatsapp_flow":
+    case "assign_agent":
+    case "create_contact":
+    case "update_contact":
+    case "update_custom_field":
+    case "delay":
+    case "webhook":
+    case "http_fetch": {
       const next = (cfg as { next_node_key?: string }).next_node_key;
       if (next !== deletedKey) return null;
       return { ...cfg, next_node_key: "" };
+    }
+
+    case "branch": {
+      const c = cfg as { cases?: Array<Record<string, unknown>>; default_next?: string };
+      const cases = Array.isArray(c.cases) ? c.cases : [];
+      const defaultMatch = c.default_next === deletedKey;
+      const caseMatch = cases.some((x) => x.next_node_key === deletedKey);
+      if (!defaultMatch && !caseMatch) return null;
+      return {
+        ...cfg,
+        ...(defaultMatch ? { default_next: "" } : {}),
+        ...(caseMatch
+          ? {
+              cases: cases.map((x) =>
+                x.next_node_key === deletedKey ? { ...x, next_node_key: "" } : x,
+              ),
+            }
+          : {}),
+      };
     }
 
     case "condition": {

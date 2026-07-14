@@ -24,6 +24,7 @@
  */
 
 import { INTERACTIVE_LIMITS } from "@/lib/whatsapp/meta-api";
+import type { FlowTriggerType } from "./types";
 
 export interface ValidationIssue {
   severity: "error" | "warning";
@@ -37,7 +38,7 @@ export interface ValidationIssue {
 
 interface FlowInput {
   name: string;
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: FlowTriggerType;
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
 }
@@ -173,7 +174,30 @@ function validateTrigger(
       }
     }
   }
-  // first_inbound_message / manual have no config; nothing to validate.
+  // first_inbound_message / manual / tag_added / tag_removed / webhook /
+  // api / the other event triggers have no required config — an unset
+  // tag_id on tag_added/removed just means "matches any tag", which is
+  // a valid, intentional configuration.
+
+  if (trigger_type === "schedule") {
+    const cfg = trigger_config as { run_at?: string; recurring?: string };
+    if (!cfg.run_at) {
+      issues.push({
+        severity: "error",
+        scope: "trigger",
+        field: "trigger_config.run_at",
+        message: "Schedule triggers need a start date/time.",
+      });
+    }
+    if (!cfg.recurring || !["once", "daily", "weekly"].includes(cfg.recurring)) {
+      issues.push({
+        severity: "error",
+        scope: "trigger",
+        field: "trigger_config.recurring",
+        message: "Schedule triggers need a recurrence (once, daily, or weekly).",
+      });
+    }
+  }
 
   return issues;
 }
@@ -701,6 +725,153 @@ function validateNode(
       break;
     }
 
+    case "send_template": {
+      const cfg = node.config as { template_name?: string; next_node_key?: string };
+      requireField(issues, node, "template_name", cfg.template_name?.trim(), "Send-template needs an approved template.");
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Send-template");
+      break;
+    }
+
+    case "send_whatsapp_flow": {
+      const cfg = node.config as {
+        whatsapp_flow_id?: string;
+        text?: string;
+        cta_label?: string;
+        next_node_key?: string;
+      };
+      requireField(issues, node, "whatsapp_flow_id", cfg.whatsapp_flow_id, "Pick a WhatsApp Flow to send.");
+      requireField(issues, node, "text", cfg.text?.trim(), "Send-flow needs a body text.");
+      requireField(issues, node, "cta_label", cfg.cta_label?.trim(), "Send-flow needs a button label.");
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Send-flow");
+      break;
+    }
+
+    case "branch": {
+      const cfg = node.config as {
+        subject?: string;
+        subject_key?: string;
+        cases?: Array<{ value?: string; next_node_key?: string }>;
+        default_next?: string;
+      };
+      requireField(issues, node, "subject", cfg.subject, "Branch needs a subject (var / tag / contact_field).");
+      requireField(issues, node, "subject_key", cfg.subject_key?.trim(), "Branch needs a subject_key.");
+      if (!cfg.cases || cfg.cases.length === 0) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "cases",
+          message: "Branch needs at least one case.",
+        });
+      } else {
+        cfg.cases.forEach((c, i) => {
+          requireNextNode(issues, node, c.next_node_key, knownKeys, `Branch case ${i + 1}`, `cases.${i}.next_node_key`);
+        });
+      }
+      requireField(issues, node, "default_next", cfg.default_next, "Branch needs a default (no-match) target.");
+      if (cfg.default_next && !knownKeys.has(cfg.default_next)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "default_next",
+          message: `Branch default points to non-existent node "${cfg.default_next}".`,
+        });
+      }
+      break;
+    }
+
+    case "assign_agent": {
+      const cfg = node.config as { mode?: string; agent_id?: string; next_node_key?: string };
+      if (cfg.mode === "specific" && !cfg.agent_id) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "agent_id",
+          message: "Assign-agent (specific) needs an agent selected.",
+        });
+      }
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Assign-agent");
+      break;
+    }
+
+    case "create_contact": {
+      const cfg = node.config as { phone?: string; next_node_key?: string };
+      requireField(issues, node, "phone", cfg.phone?.trim(), "Create-contact needs a phone value (a literal or {{vars.*}}).");
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Create-contact");
+      break;
+    }
+
+    case "update_contact": {
+      const cfg = node.config as { field?: string; value?: string; next_node_key?: string };
+      if (!cfg.field || !["name", "email", "company"].includes(cfg.field)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "field",
+          message: "Update-contact needs a field to write (name, email, or company).",
+        });
+      }
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Update-contact");
+      break;
+    }
+
+    case "update_custom_field": {
+      const cfg = node.config as { custom_field_id?: string; next_node_key?: string };
+      requireField(issues, node, "custom_field_id", cfg.custom_field_id, "Update-custom-field needs a field selected.");
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Update-custom-field");
+      break;
+    }
+
+    case "delay": {
+      const cfg = node.config as { amount?: number; unit?: string; next_node_key?: string };
+      if (!cfg.amount || cfg.amount <= 0) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "amount",
+          message: "Delay needs a positive amount.",
+        });
+      }
+      if (!cfg.unit || !["minutes", "hours", "days"].includes(cfg.unit)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "unit",
+          message: "Delay needs a unit (minutes, hours, or days).",
+        });
+      }
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Delay");
+      break;
+    }
+
+    case "webhook": {
+      const cfg = node.config as { url?: string; next_node_key?: string };
+      requireField(issues, node, "url", cfg.url?.trim(), "Webhook needs a URL.");
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "Webhook");
+      break;
+    }
+
+    case "http_fetch": {
+      const cfg = node.config as { method?: string; url?: string; next_node_key?: string };
+      requireField(issues, node, "url", cfg.url?.trim(), "HTTP request needs a URL.");
+      if (!cfg.method || !["GET", "POST", "PUT", "PATCH", "DELETE"].includes(cfg.method)) {
+        issues.push({
+          severity: "error",
+          scope: "node",
+          node_key: node.node_key,
+          field: "method",
+          message: "HTTP request needs a method.",
+        });
+      }
+      requireNextNode(issues, node, cfg.next_node_key, knownKeys, "HTTP request");
+      break;
+    }
+
     case "handoff":
     case "end":
       // Terminal nodes have no outgoing edges; nothing to validate
@@ -717,6 +888,52 @@ function validateNode(
   }
 
   return issues;
+}
+
+// ------------------------------------------------------------
+// Small shared helpers for the mechanical "field is required" /
+// "next_node_key must resolve" checks the new Milestone-4 node types
+// mostly consist of — keeps each case above to its type-specific
+// rules instead of repeating this boilerplate ten times.
+// ------------------------------------------------------------
+
+function requireField(
+  issues: ValidationIssue[],
+  node: NodeInput,
+  field: string,
+  value: unknown,
+  message: string,
+): void {
+  if (!value) {
+    issues.push({ severity: "error", scope: "node", node_key: node.node_key, field, message });
+  }
+}
+
+function requireNextNode(
+  issues: ValidationIssue[],
+  node: NodeInput,
+  nextKey: string | undefined,
+  knownKeys: Set<string>,
+  label: string,
+  field = "next_node_key",
+): void {
+  if (!nextKey) {
+    issues.push({
+      severity: "error",
+      scope: "node",
+      node_key: node.node_key,
+      field,
+      message: `${label} must point to a next node.`,
+    });
+  } else if (!knownKeys.has(nextKey)) {
+    issues.push({
+      severity: "error",
+      scope: "node",
+      node_key: node.node_key,
+      field,
+      message: `${label} points to non-existent node "${nextKey}".`,
+    });
+  }
 }
 
 // ============================================================
@@ -750,8 +967,17 @@ function outgoingEdges(node: NodeInput): string[] {
     case "start":
     case "send_message":
     case "send_media":
+    case "send_template":
+    case "send_whatsapp_flow":
     case "collect_input":
-    case "set_tag": {
+    case "set_tag":
+    case "assign_agent":
+    case "create_contact":
+    case "update_contact":
+    case "update_custom_field":
+    case "delay":
+    case "webhook":
+    case "http_fetch": {
       const cfg = node.config as { next_node_key?: string };
       return cfg.next_node_key ? [cfg.next_node_key] : [];
     }
@@ -763,6 +989,17 @@ function outgoingEdges(node: NodeInput): string[] {
       const out: string[] = [];
       if (cfg.true_next) out.push(cfg.true_next);
       if (cfg.false_next) out.push(cfg.false_next);
+      return out;
+    }
+    case "branch": {
+      const cfg = node.config as {
+        cases?: Array<{ next_node_key?: string }>;
+        default_next?: string;
+      };
+      const out = (cfg.cases ?? [])
+        .map((c) => c.next_node_key)
+        .filter((k): k is string => !!k);
+      if (cfg.default_next) out.push(cfg.default_next);
       return out;
     }
     case "send_buttons": {

@@ -33,7 +33,9 @@ import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
@@ -76,6 +78,7 @@ import { useFlowEditor, type BuilderState } from './flow-editor-state';
 export function FlowBuilder() {
   const t = useTranslations('Flows.builder');
   const {
+    flow,
     state,
     setState,
     issues,
@@ -157,6 +160,7 @@ export function FlowBuilder() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6 px-6 py-7">
       <TriggerPanel
+        flow={flow}
         state={state}
         setState={setState}
         triggerIssues={issues.filter((i) => i.scope === 'trigger')}
@@ -261,17 +265,87 @@ function KeywordsInput({
 // Trigger panel
 // ============================================================
 
+// Unified engine trigger vocabulary (Milestone 4, Part 6), grouped
+// for the picker. Message-shaped triggers were always here; the rest
+// funnel through `dispatchEventToFlows`.
+const TRIGGER_GROUPS: { label: string; options: { value: string; labelKey: string }[] }[] = [
+  {
+    label: 'Message',
+    options: [
+      { value: 'keyword', labelKey: 'triggerKeywordTitle' },
+      { value: 'first_inbound_message', labelKey: 'triggerFirstInboundTitle' },
+      { value: 'manual', labelKey: 'triggerManualTitle' },
+    ],
+  },
+  {
+    label: 'Contact & conversation',
+    options: [
+      { value: 'tag_added', labelKey: 'triggerTagAdded' },
+      { value: 'tag_removed', labelKey: 'triggerTagRemoved' },
+      { value: 'conversation_started', labelKey: 'triggerConversationStarted' },
+      { value: 'conversation_closed', labelKey: 'triggerConversationClosed' },
+    ],
+  },
+  {
+    label: 'Messaging events',
+    options: [
+      { value: 'template_delivered', labelKey: 'triggerTemplateDelivered' },
+      { value: 'template_read', labelKey: 'triggerTemplateRead' },
+      { value: 'broadcast_completed', labelKey: 'triggerBroadcastCompleted' },
+    ],
+  },
+  {
+    label: 'Commerce',
+    options: [
+      { value: 'order_created', labelKey: 'triggerOrderCreated' },
+      { value: 'order_paid', labelKey: 'triggerOrderPaid' },
+      { value: 'order_delivered', labelKey: 'triggerOrderDelivered' },
+      { value: 'order_cancelled', labelKey: 'triggerOrderCancelled' },
+    ],
+  },
+  {
+    label: 'Automation',
+    options: [
+      { value: 'schedule', labelKey: 'triggerSchedule' },
+      { value: 'webhook', labelKey: 'triggerWebhook' },
+      { value: 'api', labelKey: 'triggerApi' },
+    ],
+  },
+];
+
 function TriggerPanel({
+  flow,
   state,
   setState,
   triggerIssues,
   t,
 }: {
+  flow: { id: string; webhook_token: string | null };
   state: BuilderState;
   setState: React.Dispatch<React.SetStateAction<BuilderState>>;
   triggerIssues: ValidationIssue[];
   t: ReturnType<typeof useTranslations>;
 }) {
+  const [tags, setTags] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { createClient } = await import('@/lib/supabase/client');
+      const supabase = createClient();
+      const { data } = await supabase.from('tags').select('id, name').order('name');
+      if (!cancelled && data) setTags(data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const defaultConfigForTrigger = (v: string): Record<string, unknown> => {
+    if (v === 'keyword') return { keywords: [] };
+    if (v === 'schedule') return { run_at: '', recurring: 'once', audience: 'all_contacts' };
+    return {};
+  };
+
   return (
     <section className="border-border bg-card rounded-lg border p-4">
       <h2 className="text-foreground mb-3 text-sm font-semibold">{t('triggerTitle')}</h2>
@@ -283,11 +357,11 @@ function TriggerPanel({
           <Select
             value={state.trigger_type}
             onValueChange={(v) =>
+              v &&
               setState((s) => ({
                 ...s,
                 trigger_type: v as BuilderState['trigger_type'],
-                trigger_config:
-                  v === 'keyword' ? { keywords: [] } : v === 'manual' ? {} : {},
+                trigger_config: defaultConfigForTrigger(v),
               }))
             }
           >
@@ -295,15 +369,16 @@ function TriggerPanel({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="keyword">
-                {t('triggerKeywordTitle')}
-              </SelectItem>
-              <SelectItem value="first_inbound_message">
-                {t('triggerFirstInboundTitle')}
-              </SelectItem>
-              <SelectItem value="manual">
-                {t('triggerManualTitle')}
-              </SelectItem>
+              {TRIGGER_GROUPS.map((group) => (
+                <SelectGroup key={group.label}>
+                  <SelectLabel>{group.label}</SelectLabel>
+                  {group.options.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {t(opt.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -326,6 +401,121 @@ function TriggerPanel({
               }
               t={t}
             />
+          </div>
+        )}
+        {(state.trigger_type === 'tag_added' || state.trigger_type === 'tag_removed') && (
+          <div>
+            <label className="text-muted-foreground mb-1 block text-xs">{t('triggerTagLabel')}</label>
+            <Select
+              value={(state.trigger_config.tag_id as string) ?? '__any__'}
+              onValueChange={(v) =>
+                setState((s) => ({
+                  ...s,
+                  trigger_config: { ...s.trigger_config, tag_id: v === '__any__' ? undefined : v },
+                }))
+              }
+            >
+              <SelectTrigger className="bg-muted">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__any__">{t('triggerAnyTag')}</SelectItem>
+                {tags.map((tag) => (
+                  <SelectItem key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {state.trigger_type === 'schedule' && (
+          <>
+            <div>
+              <label className="text-muted-foreground mb-1 block text-xs">{t('triggerRunAtLabel')}</label>
+              <Input
+                type="datetime-local"
+                value={(state.trigger_config.run_at as string) ?? ''}
+                onChange={(e) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: { ...s.trigger_config, run_at: e.target.value },
+                  }))
+                }
+                className="bg-muted"
+              />
+            </div>
+            <div>
+              <label className="text-muted-foreground mb-1 block text-xs">{t('triggerRecurringLabel')}</label>
+              <Select
+                value={(state.trigger_config.recurring as string) ?? 'once'}
+                onValueChange={(v) =>
+                  setState((s) => ({ ...s, trigger_config: { ...s.trigger_config, recurring: v } }))
+                }
+              >
+                <SelectTrigger className="bg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="once">{t('recurringOnce')}</SelectItem>
+                  <SelectItem value="daily">{t('recurringDaily')}</SelectItem>
+                  <SelectItem value="weekly">{t('recurringWeekly')}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-muted-foreground mb-1 block text-xs">{t('triggerAudienceLabel')}</label>
+              <Select
+                value={
+                  typeof state.trigger_config.audience === 'object'
+                    ? ((state.trigger_config.audience as { tag_id: string }).tag_id)
+                    : 'all_contacts'
+                }
+                onValueChange={(v) =>
+                  setState((s) => ({
+                    ...s,
+                    trigger_config: {
+                      ...s.trigger_config,
+                      audience: v === 'all_contacts' ? 'all_contacts' : { tag_id: v },
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger className="bg-muted">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all_contacts">{t('audienceAllContacts')}</SelectItem>
+                  {tags.map((tag) => (
+                    <SelectItem key={tag.id} value={tag.id}>
+                      {t('audienceTagged', { tag: tag.name })}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </>
+        )}
+        {state.trigger_type === 'webhook' && (
+          <div className="md:col-span-2">
+            <label className="text-muted-foreground mb-1 block text-xs">{t('triggerWebhookUrlLabel')}</label>
+            <Input
+              readOnly
+              value={
+                flow.webhook_token
+                  ? `${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhooks/flows/${flow.id}?token=${flow.webhook_token}`
+                  : t('triggerWebhookSaveFirst')
+              }
+              className="bg-muted font-mono text-xs"
+              onFocus={(e) => e.target.select()}
+            />
+          </div>
+        )}
+        {state.trigger_type === 'api' && (
+          <div className="md:col-span-2">
+            <p className="text-xs text-muted-foreground">
+              {t('triggerApiHint', { flowId: flow.id })}
+            </p>
           </div>
         )}
       </div>

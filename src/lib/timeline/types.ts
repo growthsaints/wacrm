@@ -13,6 +13,7 @@ export type TimelineEventKind =
   | 'agent_assigned'
   | 'deal'
   | 'status_change'
+  | 'order'
 
 export interface TimelineEvent {
   id: string

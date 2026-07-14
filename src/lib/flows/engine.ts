@@ -34,27 +34,42 @@
 
 import { supabaseAdmin } from "./admin-client";
 import {
+  engineSendFlow,
   engineSendInteractiveButtons,
   engineSendInteractiveList,
   engineSendMedia,
+  engineSendTemplate,
   engineSendText,
 } from "./meta-send";
+import { isDeliverableUrl } from "@/lib/webhooks/ssrf";
 import { decideFallback, resolveFallbackPolicy } from "./fallback";
 import {
+  type AssignAgentNodeConfig,
+  type BranchNodeConfig,
   type CollectInputNodeConfig,
   type ConditionNodeConfig,
+  type CreateContactNodeConfig,
+  type DelayNodeConfig,
+  type DispatchEventInput,
   type DispatchInboundInput,
   type DispatchInboundResult,
+  type EventTriggerType,
   type FlowNodeRow,
   type FlowRow,
   type FlowRunRow,
+  type HttpFetchNodeConfig,
   type ParsedInbound,
   type SendButtonsNodeConfig,
   type SendListNodeConfig,
   type SendMediaNodeConfig,
   type SendMessageNodeConfig,
+  type SendTemplateNodeConfig,
+  type SendWhatsAppFlowNodeConfig,
   type SetTagNodeConfig,
   type StartNodeConfig,
+  type UpdateContactNodeConfig,
+  type UpdateCustomFieldNodeConfig,
+  type WebhookNodeConfig,
   type KeywordTriggerConfig,
 } from "./types";
 
@@ -114,9 +129,18 @@ export function isAutoAdvancing(node_type: string): boolean {
   return (
     node_type === "start" ||
     node_type === "send_message" ||
+    node_type === "send_template" ||
     node_type === "send_media" ||
+    node_type === "send_whatsapp_flow" ||
     node_type === "condition" ||
-    node_type === "set_tag"
+    node_type === "branch" ||
+    node_type === "set_tag" ||
+    node_type === "assign_agent" ||
+    node_type === "create_contact" ||
+    node_type === "update_contact" ||
+    node_type === "update_custom_field" ||
+    node_type === "webhook" ||
+    node_type === "http_fetch"
   );
 }
 
@@ -127,6 +151,11 @@ export function isSuspending(node_type: string): boolean {
     node_type === "send_list" ||
     node_type === "collect_input"
   );
+}
+
+/** Nodes that suspend the run for a duration, resumed by the job queue. */
+export function isDelaying(node_type: string): boolean {
+  return node_type === "delay";
 }
 
 /** Nodes that end the run. */
@@ -508,6 +537,56 @@ async function evaluateConditionNode(
 }
 
 /**
+ * Resolve a `branch` node's subject value — same subject sources as
+ * `evaluateConditionNode` (var / tag / contact_field), returned as a
+ * plain value for the engine's `cases[].value` string match rather
+ * than a boolean predicate.
+ */
+async function resolveBranchSubject(
+  db: AdminClient,
+  run: FlowRunRow,
+  cfg: BranchNodeConfig,
+): Promise<string | undefined> {
+  if (cfg.subject === "var") {
+    const v = run.vars[cfg.subject_key];
+    return typeof v === "string" ? v : v === undefined ? undefined : String(v);
+  }
+  if (cfg.subject === "tag") {
+    const { count } = await db
+      .from("contact_tags")
+      .select("contact_id", { count: "exact", head: true })
+      .eq("contact_id", run.contact_id!)
+      .eq("tag_id", cfg.subject_key);
+    return (count ?? 0) > 0 ? cfg.subject_key : undefined;
+  }
+  const ALLOWED = ["name", "email", "phone", "company"] as const;
+  type AllowedField = (typeof ALLOWED)[number];
+  if (!ALLOWED.includes(cfg.subject_key as AllowedField)) {
+    throw new Error(`unsupported contact_field: ${cfg.subject_key}`);
+  }
+  const { data } = await db
+    .from("contacts")
+    .select(cfg.subject_key)
+    .eq("id", run.contact_id!)
+    .maybeSingle();
+  const raw = (data as Record<string, unknown> | null)?.[cfg.subject_key];
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+/** Dot-path getter for http_fetch response capture, e.g. "data.order.status". */
+function getByPath(obj: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((acc, key) => {
+    if (acc == null || typeof acc !== "object") return undefined;
+    return (acc as Record<string, unknown>)[key];
+  }, obj);
+}
+
+function delayMs(cfg: DelayNodeConfig): number {
+  const unitMs = cfg.unit === "days" ? 86_400_000 : cfg.unit === "hours" ? 3_600_000 : 60_000;
+  return Math.max(1_000, cfg.amount * unitMs);
+}
+
+/**
  * Tiny `{{vars.foo}}` interpolation. Used by send_message + collect_input
  * prompt text so a captured `name` can show up in the next prompt
  * ("Thanks {{vars.name}}, what's your email?"). Missing vars render as
@@ -731,6 +810,297 @@ async function advanceFromNodeKey(
       }
       currentKey = cfg.next_node_key;
       continue;
+    }
+    if (node.node_type === "branch") {
+      const cfg = node.config as unknown as BranchNodeConfig;
+      let subjectValue: string | undefined;
+      try {
+        subjectValue = await resolveBranchSubject(db, run, cfg);
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "branch_evaluation_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "branch_evaluation_failed");
+        return { outcome: "completed" };
+      }
+      const match = cfg.cases.find((c) => c.value === subjectValue);
+      currentKey = match ? match.next_node_key : cfg.default_next;
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        subject_value: subjectValue ?? null,
+        advancing_to: currentKey,
+      });
+      continue;
+    }
+    if (node.node_type === "send_template") {
+      const cfg = node.config as unknown as SendTemplateNodeConfig;
+      try {
+        const { whatsapp_message_id } = await engineSendTemplate({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          templateName: cfg.template_name,
+          language: cfg.language,
+          params: (cfg.variables ?? []).map((v) => interpolateVars(v, run.vars)),
+        });
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_template",
+          whatsapp_message_id,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_template_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_template_failed");
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "send_whatsapp_flow") {
+      const cfg = node.config as unknown as SendWhatsAppFlowNodeConfig;
+      try {
+        const { data: waFlow } = await db
+          .from("whatsapp_flows")
+          .select("id, meta_flow_id")
+          .eq("id", cfg.whatsapp_flow_id)
+          .eq("account_id", run.account_id)
+          .maybeSingle();
+        if (!waFlow?.meta_flow_id) {
+          throw new Error("WhatsApp Flow not found or not yet published");
+        }
+        const { whatsapp_message_id } = await engineSendFlow({
+          accountId: run.account_id,
+          userId: run.user_id,
+          conversationId: run.conversation_id!,
+          contactId: run.contact_id!,
+          metaFlowId: waFlow.meta_flow_id as string,
+          bodyText: interpolateVars(cfg.text, run.vars),
+          ctaLabel: cfg.cta_label,
+          screenData: cfg.screen_data,
+          whatsappFlowId: cfg.whatsapp_flow_id,
+        });
+        await logEvent(db, run.id, "message_sent", node.node_key, {
+          node_type: "send_whatsapp_flow",
+          whatsapp_message_id,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "send_whatsapp_flow_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        await endRun(db, run.id, "failed", "send_whatsapp_flow_failed");
+        return { outcome: "completed" };
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "assign_agent") {
+      const cfg = node.config as unknown as AssignAgentNodeConfig;
+      try {
+        let agentId = cfg.agent_id;
+        if (cfg.mode === "round_robin") {
+          const { data: profiles } = await db
+            .from("profiles")
+            .select("user_id")
+            .eq("account_id", run.account_id)
+            .limit(1);
+          agentId = (profiles?.[0] as { user_id: string } | undefined)?.user_id;
+        }
+        if (agentId && run.conversation_id) {
+          await db
+            .from("conversations")
+            .update({ assigned_agent_id: agentId })
+            .eq("id", run.conversation_id)
+            .eq("account_id", run.account_id);
+        }
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          assigned_to: agentId ?? null,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "assign_agent_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "create_contact") {
+      const cfg = node.config as unknown as CreateContactNodeConfig;
+      try {
+        const phone = interpolateVars(cfg.phone, run.vars).trim();
+        if (phone) {
+          await db.from("contacts").insert({
+            account_id: run.account_id,
+            user_id: run.user_id,
+            phone,
+            name: cfg.name ? interpolateVars(cfg.name, run.vars) : phone,
+            email: cfg.email ? interpolateVars(cfg.email, run.vars) : null,
+            company: cfg.company ? interpolateVars(cfg.company, run.vars) : null,
+            source: "manual",
+          });
+        }
+      } catch (err) {
+        // Non-fatal (e.g. duplicate phone) — log + advance.
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "create_contact_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "update_contact") {
+      const cfg = node.config as unknown as UpdateContactNodeConfig;
+      try {
+        await db
+          .from("contacts")
+          .update({
+            [cfg.field]: interpolateVars(cfg.value, run.vars),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", run.contact_id!)
+          .eq("account_id", run.account_id);
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "update_contact_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "update_custom_field") {
+      const cfg = node.config as unknown as UpdateCustomFieldNodeConfig;
+      try {
+        const { data: field } = await db
+          .from("custom_fields")
+          .select("id")
+          .eq("id", cfg.custom_field_id)
+          .eq("account_id", run.account_id)
+          .maybeSingle();
+        if (field) {
+          await db.from("contact_custom_values").upsert(
+            {
+              contact_id: run.contact_id!,
+              custom_field_id: cfg.custom_field_id,
+              value: interpolateVars(cfg.value, run.vars),
+            },
+            { onConflict: "contact_id,custom_field_id" },
+          );
+        }
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "update_custom_field_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "webhook") {
+      const cfg = node.config as unknown as WebhookNodeConfig;
+      try {
+        if (!(await isDeliverableUrl(cfg.url))) {
+          throw new Error("destination not allowed");
+        }
+        const bodyText = cfg.body_template
+          ? interpolateVars(cfg.body_template, run.vars)
+          : JSON.stringify(run.vars);
+        const res = await fetch(cfg.url, {
+          method: "POST",
+          headers: { "content-type": "application/json", ...(cfg.headers ?? {}) },
+          body: bodyText,
+          redirect: "manual",
+          signal: AbortSignal.timeout(10_000),
+        });
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          node_type: "webhook",
+          status: res.status,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "webhook_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "http_fetch") {
+      const cfg = node.config as unknown as HttpFetchNodeConfig;
+      try {
+        if (!(await isDeliverableUrl(cfg.url))) {
+          throw new Error("destination not allowed");
+        }
+        const res = await fetch(cfg.url, {
+          method: cfg.method,
+          headers: { "content-type": "application/json", ...(cfg.headers ?? {}) },
+          body:
+            cfg.method === "GET" || cfg.method === "DELETE"
+              ? undefined
+              : cfg.body_template
+                ? interpolateVars(cfg.body_template, run.vars)
+                : JSON.stringify(run.vars),
+          redirect: "manual",
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (cfg.capture_as) {
+          const json = await res.json().catch(() => null);
+          const captured = cfg.response_path
+            ? getByPath(json, cfg.response_path)
+            : json;
+          const newVars = { ...run.vars, [cfg.capture_as]: captured };
+          await db.from("flow_runs").update({ vars: newVars }).eq("id", run.id);
+          run.vars = newVars;
+        }
+        await logEvent(db, run.id, "node_entered", node.node_key, {
+          node_type: "http_fetch",
+          status: res.status,
+        });
+      } catch (err) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "http_fetch_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        });
+      }
+      currentKey = cfg.next_node_key;
+      continue;
+    }
+    if (node.node_type === "delay") {
+      const cfg = node.config as unknown as DelayNodeConfig;
+      const ms = delayMs(cfg);
+      await db.from("automation_jobs").insert({
+        account_id: run.account_id,
+        job_type: "flow_resume",
+        payload: {
+          flow_run_id: run.id,
+          next_node_key: cfg.next_node_key,
+        },
+        run_at: new Date(Date.now() + ms).toISOString(),
+      });
+      await logEvent(db, run.id, "node_entered", node.node_key, {
+        node_type: "delay",
+        resumes_at: new Date(Date.now() + ms).toISOString(),
+      });
+      // Mirror the send_buttons/send_list suspend pattern: persist the
+      // pointer so a resumed run picks up from the delay node's
+      // next_node_key rather than replaying the delay itself.
+      const advanced = await advanceCurrentNodeKey(
+        db,
+        run.id,
+        run.current_node_key,
+        node.node_key,
+      );
+      if (!advanced) {
+        await logEvent(db, run.id, "error", node.node_key, {
+          reason: "lost_race_during_advance",
+        });
+      }
+      return { outcome: "advanced" };
     }
     if (node.node_type === "send_buttons") {
       await sendButtonsAndSuspend(db, run, node);
@@ -1054,6 +1424,25 @@ async function startNewRun(
   input: DispatchInboundInput,
   nodes: Map<string, FlowNodeRow>,
 ): Promise<DispatchInboundResult> {
+  return startNewRunFor(db, flow, {
+    contactId: input.contactId,
+    conversationId: input.conversationId,
+    metaMessageId: input.message.meta_message_id,
+  }, nodes);
+}
+
+/**
+ * Shared run-creation core for BOTH the message-triggered path
+ * (`startNewRun`, above) and the event-triggered path
+ * (`dispatchEventToFlows`, below) — one INSERT + idempotency + counter
+ * + advance-loop implementation regardless of what started the run.
+ */
+async function startNewRunFor(
+  db: AdminClient,
+  flow: FlowRow,
+  input: { contactId: string; conversationId: string | null; metaMessageId?: string },
+  nodes: Map<string, FlowNodeRow>,
+): Promise<DispatchInboundResult> {
   // INSERT — partial unique index `idx_one_active_run_per_contact`
   // catches concurrent inserts with 23505. We catch and return as
   // consumed:true (the parallel webhook handles it).
@@ -1089,7 +1478,7 @@ async function startNewRun(
   await logEvent(db, run.id, "started", flow.entry_node_id, {
     flow_id: flow.id,
     trigger_type: flow.trigger_type,
-    meta_message_id: input.message.meta_message_id,
+    meta_message_id: input.metaMessageId ?? null,
   });
   // Bump the flow's execution counter — used by the builder UI to
   // surface "X runs since activation" on the flow card.
@@ -1114,4 +1503,149 @@ async function startNewRun(
     flow_run_id: run.id,
     outcome: outcome.outcome === "advanced" ? "started" : outcome.outcome,
   };
+}
+
+// ============================================================
+// Unified engine — non-message trigger dispatch (Milestone 4, Part 6).
+//
+// Every event that isn't itself an inbound WhatsApp message (tag
+// changes, conversation lifecycle, template delivery/read, order
+// events, inbound webhook/API calls) funnels through this one
+// function. It deliberately does NOT try to advance an already-active
+// run — event triggers only ever START new flows, mirroring how the
+// automations engine's non-`wait` triggers behave. If the contact is
+// already mid-conversation with a flow, the event is a no-op rather
+// than fighting the active run for the same `current_node_key`.
+// ============================================================
+
+export async function dispatchEventToFlows(
+  input: DispatchEventInput,
+): Promise<DispatchInboundResult> {
+  const db = supabaseAdmin();
+  try {
+    const activeRun = await loadActiveRunForContact(db, input.accountId, input.contactId);
+    if (activeRun) {
+      return { consumed: false, flow_run_id: activeRun.id, outcome: "no_match" };
+    }
+
+    const flow = await findEntryFlowForEvent(db, input.accountId, input.triggerType, input.context);
+    if (!flow || !flow.entry_node_id) {
+      return { consumed: false, outcome: "no_match" };
+    }
+
+    // Resolve (don't create) a conversation for this contact — event
+    // triggers fire on contacts that, by construction, already have
+    // one (tag/conversation/order events all imply an existing
+    // relationship). A flow entry node that needs to send a message
+    // without one simply fails that send with a clear error.
+    const { data: conv } = await db
+      .from("conversations")
+      .select("id")
+      .eq("account_id", input.accountId)
+      .eq("contact_id", input.contactId)
+      .maybeSingle();
+
+    const nodes = await loadAllNodes(db, flow.id);
+    return startNewRunFor(
+      db,
+      flow,
+      { contactId: input.contactId, conversationId: (conv as { id: string } | null)?.id ?? null },
+      nodes,
+    );
+  } catch (err) {
+    console.error(
+      "[flows] dispatchEventToFlows threw:",
+      err instanceof Error ? err.message : err,
+    );
+    return { consumed: false, outcome: "no_match" };
+  }
+}
+
+async function findEntryFlowForEvent(
+  db: AdminClient,
+  accountId: string,
+  triggerType: EventTriggerType,
+  context: Record<string, unknown> | undefined,
+): Promise<FlowRow | null> {
+  const { data: flows, error } = await db
+    .from("flows")
+    .select("*")
+    .eq("account_id", accountId)
+    .eq("status", "active")
+    .eq("trigger_type", triggerType)
+    .order("created_at", { ascending: true });
+  if (error || !flows) return null;
+
+  const typed = flows as FlowRow[];
+  if (triggerType === "tag_added" || triggerType === "tag_removed") {
+    const tagId = context?.tag_id as string | undefined;
+    for (const flow of typed) {
+      const cfg = flow.trigger_config as { tag_id?: string };
+      // No tag_id configured → matches any tag event. Otherwise exact match.
+      if (!cfg?.tag_id || cfg.tag_id === tagId) return flow;
+    }
+    return null;
+  }
+  return typed[0] ?? null;
+}
+
+/**
+ * Resume a run that was suspended at a `delay` node — called by the
+ * automation_jobs queue processor once the job's `run_at` is due.
+ */
+export async function resumeDelayedFlowRun(job: {
+  flow_run_id: string;
+  next_node_key: string;
+}): Promise<void> {
+  const db = supabaseAdmin();
+  const { data: run, error } = await db
+    .from("flow_runs")
+    .select("*")
+    .eq("id", job.flow_run_id)
+    .eq("status", "active")
+    .maybeSingle();
+  if (error || !run) return; // run ended/deleted since the delay was scheduled — nothing to resume.
+
+  const typedRun = run as FlowRunRow;
+  const nodes = await loadAllNodes(db, typedRun.flow_id);
+  await advanceFromNodeKey(db, typedRun, job.next_node_key, nodes);
+}
+
+/**
+ * Start a specific flow for a specific contact — used by the
+ * `schedule` trigger sweep (`src/lib/flows/schedule.ts`), which
+ * already knows exactly which flow to run rather than needing
+ * `dispatchEventToFlows`'s "find the matching active flow" lookup.
+ * Still respects the one-active-run-per-contact invariant.
+ */
+export async function startFlowRunForContact(
+  flowId: string,
+  contactId: string,
+): Promise<DispatchInboundResult> {
+  const db = supabaseAdmin();
+
+  const flow = await loadFlow(db, flowId);
+  if (!flow || flow.status !== "active" || !flow.entry_node_id) {
+    return { consumed: false, outcome: "no_match" };
+  }
+
+  const existingActive = await loadActiveRunForContact(db, flow.account_id, contactId);
+  if (existingActive) {
+    return { consumed: false, flow_run_id: existingActive.id, outcome: "no_match" };
+  }
+
+  const { data: conv } = await db
+    .from("conversations")
+    .select("id")
+    .eq("account_id", flow.account_id)
+    .eq("contact_id", contactId)
+    .maybeSingle();
+
+  const nodes = await loadAllNodes(db, flow.id);
+  return startNewRunFor(
+    db,
+    flow,
+    { contactId, conversationId: (conv as { id: string } | null)?.id ?? null },
+    nodes,
+  );
 }

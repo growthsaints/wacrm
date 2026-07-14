@@ -46,6 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
 import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import { slugify, type BuilderNode } from "../shared";
 import { NextNodeRow, NodeKeySelect, TextRow } from "./fields";
@@ -210,6 +211,145 @@ export function NodeConfigForm({
         <p className="text-xs text-muted-foreground">
           {t("endNodeHelp")}
         </p>
+      );
+
+    case "send_template":
+      return (
+        <SendTemplateForm
+          cfg={cfg as SendTemplateCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "send_whatsapp_flow":
+      return (
+        <SendWhatsAppFlowForm
+          cfg={cfg as SendWhatsAppFlowCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "branch":
+      return (
+        <BranchForm
+          cfg={cfg as BranchCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "assign_agent":
+      return (
+        <AssignAgentForm
+          cfg={cfg as AssignAgentCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "create_contact":
+      return (
+        <>
+          <TextRow
+            label={t("phoneLabel")}
+            value={(cfg as CreateContactCfg).phone ?? ""}
+            onChange={(v) => onUpdateConfig({ phone: v })}
+          />
+          <TextRow
+            label={t("nameLabel")}
+            value={(cfg as CreateContactCfg).name ?? ""}
+            onChange={(v) => onUpdateConfig({ name: v })}
+          />
+          <TextRow
+            label={t("emailLabel")}
+            value={(cfg as CreateContactCfg).email ?? ""}
+            onChange={(v) => onUpdateConfig({ email: v })}
+          />
+          <TextRow
+            label={t("companyLabel")}
+            value={(cfg as CreateContactCfg).company ?? ""}
+            onChange={(v) => onUpdateConfig({ company: v })}
+          />
+          <NextNodeRow
+            value={(cfg as CreateContactCfg).next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label={t("advancesTo")}
+          />
+        </>
+      );
+
+    case "update_contact":
+      return (
+        <UpdateContactForm
+          cfg={cfg as UpdateContactCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "update_custom_field":
+      return (
+        <UpdateCustomFieldForm
+          cfg={cfg as UpdateCustomFieldCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "delay":
+      return (
+        <DelayForm
+          cfg={cfg as DelayCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
+      );
+
+    case "webhook":
+      return (
+        <>
+          <TextRow
+            label={t("webhookUrlLabel")}
+            value={(cfg as WebhookCfg).url ?? ""}
+            onChange={(v) => onUpdateConfig({ url: v })}
+          />
+          <NextNodeRow
+            value={(cfg as WebhookCfg).next_node_key ?? ""}
+            allNodes={allNodes}
+            currentKey={node.node_key}
+            onChange={(v) => onUpdateConfig({ next_node_key: v })}
+            label={t("advancesTo")}
+          />
+        </>
+      );
+
+    case "http_fetch":
+      return (
+        <HttpFetchForm
+          cfg={cfg as HttpFetchCfg}
+          allNodes={allNodes}
+          currentKey={node.node_key}
+          onUpdateConfig={onUpdateConfig}
+          t={t}
+        />
       );
   }
 }
@@ -1058,6 +1198,637 @@ function SendMediaForm({
         currentKey={currentKey}
         onChange={(v) => onUpdateConfig({ next_node_key: v })}
         label={t("advanceAfterSending")}
+      />
+    </>
+  );
+}
+
+// ============================================================
+// Milestone 4 — unified-engine node forms.
+// ============================================================
+
+interface SendTemplateCfg {
+  template_name?: string;
+  language?: string;
+  variables?: string[];
+  next_node_key?: string;
+}
+
+function SendTemplateForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: SendTemplateCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const variablesText = (cfg.variables ?? []).join("\n");
+  return (
+    <>
+      <TextRow
+        label={t("templateNameLabel")}
+        value={cfg.template_name ?? ""}
+        onChange={(v) => onUpdateConfig({ template_name: v })}
+      />
+      <TextRow
+        label={t("templateLanguageLabel")}
+        value={cfg.language ?? "en_US"}
+        onChange={(v) => onUpdateConfig({ language: v })}
+      />
+      <TextRow
+        label={t("templateVariablesLabel")}
+        value={variablesText}
+        onChange={(v) =>
+          onUpdateConfig({ variables: v.split("\n").map((s) => s.trim()) })
+        }
+        rows={3}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
+}
+
+interface WhatsAppFlowOption {
+  id: string;
+  name: string;
+}
+
+/** Published WhatsApp Flows for this account — the only ones a
+ *  customer can actually be sent (drafts aren't sendable via Meta). */
+function usePublishedWhatsAppFlows(): WhatsAppFlowOption[] {
+  const [flows, setFlows] = useState<WhatsAppFlowOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("whatsapp_flows")
+        .select("id, name")
+        .eq("status", "published")
+        .order("name");
+      if (!cancelled && data) setFlows(data as WhatsAppFlowOption[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return flows;
+}
+
+interface SendWhatsAppFlowCfg {
+  whatsapp_flow_id?: string;
+  text?: string;
+  cta_label?: string;
+  next_node_key?: string;
+}
+
+function SendWhatsAppFlowForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: SendWhatsAppFlowCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const flows = usePublishedWhatsAppFlows();
+  return (
+    <>
+      <TextRow
+        label={t("bodyText")}
+        value={cfg.text ?? ""}
+        onChange={(v) => onUpdateConfig({ text: v })}
+        rows={2}
+      />
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">
+          {t("whatsappFlowLabel")}
+        </label>
+        {flows.length > 0 ? (
+          <Select
+            value={cfg.whatsapp_flow_id ?? ""}
+            onValueChange={(v) => onUpdateConfig({ whatsapp_flow_id: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue placeholder={t("pickWhatsAppFlow")} />
+            </SelectTrigger>
+            <SelectContent>
+              {flows.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  {f.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("noPublishedFlows")}</p>
+        )}
+      </div>
+      <TextRow
+        label={t("ctaLabelLabel")}
+        value={cfg.cta_label ?? ""}
+        onChange={(v) => onUpdateConfig({ cta_label: v })}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
+}
+
+interface BranchCfg {
+  subject?: "var" | "tag" | "contact_field";
+  subject_key?: string;
+  cases?: Array<{ value?: string; next_node_key?: string }>;
+  default_next?: string;
+}
+
+function BranchForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: BranchCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const cases = cfg.cases ?? [];
+  const updateCase = (idx: number, patch: Partial<NonNullable<BranchCfg["cases"]>[number]>) => {
+    onUpdateConfig({ cases: cases.map((c, i) => (i === idx ? { ...c, ...patch } : c)) });
+  };
+  const addCase = () =>
+    onUpdateConfig({ cases: [...cases, { value: "", next_node_key: "" }] });
+  const removeCase = (idx: number) =>
+    onUpdateConfig({ cases: cases.filter((_, i) => i !== idx) });
+
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("branchSubjectLabel")}</label>
+          <Select
+            value={cfg.subject ?? "var"}
+            onValueChange={(v) => onUpdateConfig({ subject: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="var">{t("capturedVariable")}</SelectItem>
+              <SelectItem value="tag">{t("contactHasTag")}</SelectItem>
+              <SelectItem value="contact_field">{t("contactField")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Input
+          value={cfg.subject_key ?? ""}
+          onChange={(e) => onUpdateConfig({ subject_key: e.target.value })}
+          placeholder={t("varName")}
+          className="mt-5 bg-muted"
+        />
+      </div>
+      <div>
+        <label className="mb-2 block text-xs text-muted-foreground">{t("branchCasesHelp")}</label>
+        <div className="flex flex-col gap-2">
+          {cases.map((c, i) => (
+            <div key={i} className="grid grid-cols-[2fr_2fr_auto] gap-2 rounded-md border border-border bg-muted/40 p-2">
+              <Input
+                value={c.value ?? ""}
+                onChange={(e) => updateCase(i, { value: e.target.value })}
+                placeholder={t("caseValuePlaceholder")}
+                className="bg-muted"
+              />
+              <NodeKeySelect
+                value={c.next_node_key || null}
+                nodes={allNodes}
+                excludeKey={currentKey}
+                onChange={(v) => updateCase(i, { next_node_key: v ?? "" })}
+                placeholder={t("nextNodePlaceholder")}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => removeCase(i)}
+                className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+        <Button variant="ghost" size="sm" onClick={addCase} className="mt-2">
+          <Plus className="h-3.5 w-3.5" />
+          {t("addCase")}
+        </Button>
+      </div>
+      <NextNodeRow
+        value={cfg.default_next ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ default_next: v })}
+        label={t("defaultAdvanceTo")}
+      />
+    </>
+  );
+}
+
+interface AgentOption {
+  user_id: string;
+  full_name: string;
+}
+
+function useAccountAgents(): AgentOption[] {
+  const [agents, setAgents] = useState<AgentOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase.from("profiles").select("user_id, full_name");
+      if (!cancelled && data) setAgents(data as AgentOption[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return agents;
+}
+
+interface AssignAgentCfg {
+  mode?: "specific" | "round_robin";
+  agent_id?: string;
+  next_node_key?: string;
+}
+
+function AssignAgentForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: AssignAgentCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const agents = useAccountAgents();
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">{t("assignModeLabel")}</label>
+        <Select
+          value={cfg.mode ?? "specific"}
+          onValueChange={(v) => onUpdateConfig({ mode: v })}
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="specific">{t("assignSpecific")}</SelectItem>
+            <SelectItem value="round_robin">{t("assignRoundRobin")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {cfg.mode !== "round_robin" && (
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("agentLabel")}</label>
+          <Select
+            value={cfg.agent_id ?? ""}
+            onValueChange={(v) => onUpdateConfig({ agent_id: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue placeholder={t("pickAgent")} />
+            </SelectTrigger>
+            <SelectContent>
+              {agents.map((a) => (
+                <SelectItem key={a.user_id} value={a.user_id}>
+                  {a.full_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
+}
+
+interface CreateContactCfg {
+  phone?: string;
+  name?: string;
+  email?: string;
+  company?: string;
+  next_node_key?: string;
+}
+
+interface UpdateContactCfg {
+  field?: "name" | "email" | "company";
+  value?: string;
+  next_node_key?: string;
+}
+
+function UpdateContactForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: UpdateContactCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">{t("contactFieldLabel")}</label>
+        <Select
+          value={cfg.field ?? "name"}
+          onValueChange={(v) => onUpdateConfig({ field: v })}
+        >
+          <SelectTrigger className="bg-muted">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">{t("nameLabel")}</SelectItem>
+            <SelectItem value="email">{t("emailLabel")}</SelectItem>
+            <SelectItem value="company">{t("companyLabel")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <TextRow
+        label={t("valueLabel")}
+        value={cfg.value ?? ""}
+        onChange={(v) => onUpdateConfig({ value: v })}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
+}
+
+interface CustomFieldOption {
+  id: string;
+  field_name: string;
+}
+
+function useAccountCustomFields(): CustomFieldOption[] {
+  const [fields, setFields] = useState<CustomFieldOption[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("custom_fields")
+        .select("id, field_name")
+        .order("field_name");
+      if (!cancelled && data) setFields(data as CustomFieldOption[]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return fields;
+}
+
+interface UpdateCustomFieldCfg {
+  custom_field_id?: string;
+  value?: string;
+  next_node_key?: string;
+}
+
+function UpdateCustomFieldForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: UpdateCustomFieldCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  const fields = useAccountCustomFields();
+  return (
+    <>
+      <div>
+        <label className="mb-1 block text-xs text-muted-foreground">{t("customFieldLabel")}</label>
+        {fields.length > 0 ? (
+          <Select
+            value={cfg.custom_field_id ?? ""}
+            onValueChange={(v) => onUpdateConfig({ custom_field_id: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue placeholder={t("pickCustomField")} />
+            </SelectTrigger>
+            <SelectContent>
+              {fields.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  {f.field_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("noCustomFields")}</p>
+        )}
+      </div>
+      <TextRow
+        label={t("valueLabel")}
+        value={cfg.value ?? ""}
+        onChange={(v) => onUpdateConfig({ value: v })}
+      />
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
+}
+
+interface DelayCfg {
+  amount?: number;
+  unit?: "minutes" | "hours" | "days";
+  next_node_key?: string;
+}
+
+function DelayForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: DelayCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("amountLabel")}</label>
+          <Input
+            type="number"
+            min={1}
+            value={cfg.amount ?? 1}
+            onChange={(e) => onUpdateConfig({ amount: Number(e.target.value) || 1 })}
+            className="bg-muted"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("unitLabel")}</label>
+          <Select
+            value={cfg.unit ?? "hours"}
+            onValueChange={(v) => onUpdateConfig({ unit: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="minutes">{t("unitMinutes")}</SelectItem>
+              <SelectItem value="hours">{t("unitHours")}</SelectItem>
+              <SelectItem value="days">{t("unitDays")}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
+      />
+    </>
+  );
+}
+
+interface WebhookCfg {
+  url?: string;
+  next_node_key?: string;
+}
+
+interface HttpFetchCfg {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  url?: string;
+  body_template?: string;
+  response_path?: string;
+  capture_as?: string;
+  next_node_key?: string;
+}
+
+function HttpFetchForm({
+  cfg,
+  allNodes,
+  currentKey,
+  onUpdateConfig,
+  t,
+}: {
+  cfg: HttpFetchCfg;
+  allNodes: BuilderNode[];
+  currentKey: string;
+  onUpdateConfig: (patch: Record<string, unknown>) => void;
+  t: ReturnType<typeof useTranslations>;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-[1fr_3fr] gap-2">
+        <div>
+          <label className="mb-1 block text-xs text-muted-foreground">{t("httpMethodLabel")}</label>
+          <Select
+            value={cfg.method ?? "GET"}
+            onValueChange={(v) => onUpdateConfig({ method: v })}
+          >
+            <SelectTrigger className="bg-muted">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(["GET", "POST", "PUT", "PATCH", "DELETE"] as const).map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <TextRow
+          label={t("httpUrlLabel")}
+          value={cfg.url ?? ""}
+          onChange={(v) => onUpdateConfig({ url: v })}
+        />
+      </div>
+      {cfg.method !== "GET" && cfg.method !== "DELETE" && (
+        <TextRow
+          label={t("httpBodyLabel")}
+          value={cfg.body_template ?? ""}
+          onChange={(v) => onUpdateConfig({ body_template: v })}
+          rows={3}
+        />
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <TextRow
+          label={t("httpResponsePathLabel")}
+          value={cfg.response_path ?? ""}
+          onChange={(v) => onUpdateConfig({ response_path: v })}
+        />
+        <TextRow
+          label={t("httpCaptureAsLabel")}
+          value={cfg.capture_as ?? ""}
+          onChange={(v) => onUpdateConfig({ capture_as: v })}
+        />
+      </div>
+      <NextNodeRow
+        value={cfg.next_node_key ?? ""}
+        allNodes={allNodes}
+        currentKey={currentKey}
+        onChange={(v) => onUpdateConfig({ next_node_key: v })}
+        label={t("advancesTo")}
       />
     </>
   );

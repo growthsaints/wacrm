@@ -81,8 +81,9 @@ export async function POST(request: Request) {
     | {
         name?: string
         description?: string | null
-        trigger_type?: 'keyword' | 'first_inbound_message' | 'manual'
+        trigger_type?: string
         trigger_config?: Record<string, unknown>
+        category?: string | null
         /**
          * If set, clone the matching template's name + trigger +
          * entry_node_id + nodes[] into a fresh draft for this user.
@@ -155,6 +156,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'name is required' }, { status: 400 })
   }
   const trigger_type = body.trigger_type ?? 'keyword'
+  // Inbound-webhook-triggered flows need a per-flow secret token up
+  // front — generated here rather than left to the PUT route so the
+  // URL is available the moment the flow is created.
+  const webhook_token = trigger_type === 'webhook' ? crypto.randomUUID() : null
 
   const { data, error } = await admin
     .from('flows')
@@ -166,6 +171,8 @@ export async function POST(request: Request) {
       status: 'draft',
       trigger_type,
       trigger_config: body.trigger_config ?? {},
+      category: body.category ?? null,
+      webhook_token,
     })
     .select()
     .single()

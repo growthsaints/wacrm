@@ -74,10 +74,11 @@ export async function GET(
 interface PutBody {
   name?: string
   description?: string | null
-  trigger_type?: 'keyword' | 'first_inbound_message' | 'manual'
+  trigger_type?: string
   trigger_config?: Record<string, unknown>
   entry_node_id?: string | null
   fallback_policy?: Record<string, unknown>
+  category?: string | null
   nodes?: Array<{
     node_key: string
     node_type: string
@@ -134,6 +135,21 @@ export async function PUT(
     flowPatch.entry_node_id = body.entry_node_id
   if (body.fallback_policy !== undefined)
     flowPatch.fallback_policy = body.fallback_policy
+  if (body.category !== undefined) flowPatch.category = body.category
+
+  // A flow switched to trigger_type='webhook' needs a token to be
+  // reachable — generate one if it doesn't have one yet, regardless
+  // of whether this save also activates it.
+  if (body.trigger_type === 'webhook') {
+    const { data: existingFlow } = await admin
+      .from('flows')
+      .select('webhook_token')
+      .eq('id', id)
+      .maybeSingle()
+    if (!existingFlow?.webhook_token) {
+      flowPatch.webhook_token = crypto.randomUUID()
+    }
+  }
 
   const { error: updErr } = await admin
     .from('flows')

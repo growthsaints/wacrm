@@ -90,3 +90,30 @@ export interface ContactGrowthPoint {
   day: string // YYYY-MM-DD local
   count: number
 }
+
+/**
+ * Combined automation + flow analytics (Milestone 4, Part 8) — merges
+ * the legacy automations engine's `automation_logs` with the unified
+ * flows engine's `flow_runs`/`flow_run_events` into one comparable
+ * shape, since both are real production automation surfaces users
+ * need visibility into side by side.
+ */
+export interface AutomationAnalyticsItem {
+  id: string
+  name: string
+  engine: 'automation' | 'flow'
+  executionCount: number
+  successCount: number
+  failureCount: number
+  successRate: number // 0-100
+  /** Null when no timed samples exist yet. */
+  avgExecutionMinutes: number | null
+}
+
+export interface AutomationAnalyticsSummary {
+  totalExecutions: number
+  totalSuccesses: number
+  totalFailures: number
+  successRate: number // 0-100
+  topPerforming: AutomationAnalyticsItem[]
+}

@@ -146,6 +146,119 @@ describe("deriveCanvasEdges — condition (true/false branches)", () => {
   });
 });
 
+describe("deriveCanvasEdges — branch (multi-way switch)", () => {
+  it("produces one labeled edge per case plus a default edge", () => {
+    const edges = deriveCanvasEdges(
+      nodes(
+        {
+          node_key: "b",
+          node_type: "branch",
+          config: {
+            subject: "var",
+            subject_key: "status",
+            cases: [
+              { value: "paid", next_node_key: "paid_screen" },
+              { value: "shipped", next_node_key: "shipped_screen" },
+            ],
+            default_next: "fallback_screen",
+          },
+        },
+        { node_key: "paid_screen", node_type: "end", config: {} },
+        { node_key: "shipped_screen", node_type: "end", config: {} },
+        { node_key: "fallback_screen", node_type: "end", config: {} },
+      ),
+    );
+    expect(edges).toHaveLength(3);
+    expect(edges.find((e) => e.sourceHandle === "case:0")).toMatchObject({
+      target: "paid_screen",
+      label: "paid",
+    });
+    expect(edges.find((e) => e.sourceHandle === "case:1")).toMatchObject({
+      target: "shipped_screen",
+      label: "shipped",
+    });
+    expect(edges.find((e) => e.sourceHandle === "default")).toMatchObject({
+      target: "fallback_screen",
+      label: "default",
+    });
+  });
+
+  it("skips cases pointing at a non-existent node", () => {
+    const edges = deriveCanvasEdges(
+      nodes(
+        {
+          node_key: "b",
+          node_type: "branch",
+          config: {
+            subject: "var",
+            subject_key: "status",
+            cases: [{ value: "paid", next_node_key: "missing" }],
+            default_next: "",
+          },
+        },
+      ),
+    );
+    expect(edges).toHaveLength(0);
+  });
+});
+
+describe("outgoingSlots / applyEdgeConnection / unlinkNodeReferences — branch", () => {
+  const branchNode: BuilderNode = {
+    node_key: "b",
+    node_type: "branch",
+    config: {
+      subject: "var",
+      subject_key: "status",
+      cases: [
+        { value: "paid", next_node_key: "paid_screen" },
+        { value: "shipped", next_node_key: "" },
+      ],
+      default_next: "fallback_screen",
+    },
+  };
+
+  it("outgoingSlots returns one slot per case plus a default slot", () => {
+    const slots = outgoingSlots(branchNode);
+    expect(slots).toEqual([
+      { id: "case:0", label: "paid" },
+      { id: "case:1", label: "shipped" },
+      { id: "default", label: "default" },
+    ]);
+  });
+
+  it("applyEdgeConnection patches the matching case by index", () => {
+    const patch = applyEdgeConnection(branchNode, "case:1", "shipped_screen");
+    expect(patch).toEqual({
+      cases: [
+        { value: "paid", next_node_key: "paid_screen" },
+        { value: "shipped", next_node_key: "shipped_screen" },
+      ],
+    });
+  });
+
+  it("applyEdgeConnection patches default_next", () => {
+    const patch = applyEdgeConnection(branchNode, "default", "new_fallback");
+    expect(patch).toEqual({ default_next: "new_fallback" });
+  });
+
+  it("applyEdgeConnection returns null for an out-of-range case index", () => {
+    expect(applyEdgeConnection(branchNode, "case:99", "x")).toBeNull();
+  });
+
+  it("unlinkNodeReferences clears a case and/or the default when they point at the deleted node", () => {
+    const [patched] = unlinkNodeReferences([branchNode], "paid_screen");
+    expect(patched.config).toMatchObject({
+      cases: [
+        { value: "paid", next_node_key: "" },
+        { value: "shipped", next_node_key: "" },
+      ],
+    });
+
+    const [patchedDefault] = unlinkNodeReferences([branchNode], "fallback_screen");
+    expect(patchedDefault.config).toMatchObject({ default_next: "" });
+  });
+});
+
 describe("deriveCanvasEdges — send_buttons (per-button)", () => {
   it("emits one edge per button, labeled with the button title", () => {
     const edges = deriveCanvasEdges(

@@ -433,13 +433,13 @@ async function handleStatusUpdate(status: {
   //    the owning account for delivery.
   const { data: msgRow } = await supabaseAdmin()
     .from('messages')
-    .select('conversation_id, conversations(account_id)')
+    .select('conversation_id, content_type, conversations(account_id, contact_id)')
     .eq('message_id', status.id)
     .limit(1)
     .maybeSingle()
 
   if (msgRow) {
-    const conv = msgRow.conversations as { account_id: string } | null
+    const conv = msgRow.conversations as { account_id: string; contact_id: string } | null
     const accountId = conv?.account_id
     if (accountId) {
       await dispatchWebhookEvent(
@@ -452,6 +452,26 @@ async function handleStatusUpdate(status: {
           status: status.status,
         }
       )
+
+      // Unified engine dispatch for template_delivered / template_read
+      // (Milestone 4, Part 6) — only meaningful for template sends,
+      // and only on the forward-only transitions the ladder above
+      // already validated.
+      if (msgRow.content_type === 'template' && conv?.contact_id) {
+        const triggerType = status.status === 'delivered'
+          ? 'template_delivered'
+          : status.status === 'read'
+            ? 'template_read'
+            : null
+        if (triggerType) {
+          const { dispatchEventToFlows } = await import('@/lib/flows/engine')
+          await dispatchEventToFlows({
+            accountId,
+            contactId: conv.contact_id,
+            triggerType,
+          }).catch((err) => console.error('[flows] template status dispatch failed:', err))
+        }
+      }
     }
   }
 }
@@ -620,6 +640,16 @@ async function processMessage(
       conversation_id: conversation.id,
       contact_id: contactRecord.id,
     })
+    // Unified engine dispatch (Milestone 4, Part 6). Fired before the
+    // flow/automation dispatch further down so a conversation_started
+    // flow (e.g. a welcome menu) claims the one-active-run slot first
+    // and this same inbound message can advance it.
+    const { dispatchEventToFlows } = await import('@/lib/flows/engine')
+    await dispatchEventToFlows({
+      accountId,
+      contactId: contactRecord.id,
+      triggerType: 'conversation_started',
+    }).catch((err) => console.error('[flows] conversation_started dispatch failed:', err))
   }
 
   // Reactions short-circuit here — they aren't messages. We never insert

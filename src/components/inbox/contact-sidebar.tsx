@@ -47,6 +47,15 @@ interface ContactSidebarProps {
 
 type MediaFilter = "all" | "image" | "video" | "document" | "audio";
 
+interface CommerceOrderSummary {
+  id: string;
+  order_number: string | null;
+  status: string;
+  total: number;
+  currency: string;
+  placed_at: string | null;
+}
+
 export function ContactSidebar({ contact, conversation = null }: ContactSidebarProps) {
   const tSidebar = useTranslations("Inbox.sidebar");
   const tThread = useTranslations("Inbox.messageThread");
@@ -64,6 +73,7 @@ export function ContactSidebar({ contact, conversation = null }: ContactSidebarP
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [mediaMessages, setMediaMessages] = useState<Message[]>([]);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
+  const [orders, setOrders] = useState<CommerceOrderSummary[]>([]);
 
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
@@ -73,7 +83,7 @@ export function ContactSidebar({ contact, conversation = null }: ContactSidebarP
 
     const supabase = createClient();
 
-    const [dealsRes, notesRes, tagsRes, campaignRes, timelineEvents] = await Promise.all([
+    const [dealsRes, notesRes, tagsRes, campaignRes, timelineEvents, ordersRes] = await Promise.all([
       supabase
         .from("deals")
         .select("*, stage:pipeline_stages(*)")
@@ -90,6 +100,12 @@ export function ContactSidebar({ contact, conversation = null }: ContactSidebarP
         .eq("contact_id", contact.id),
       getContactCampaignSource(supabase, contact.id),
       buildContactTimeline(supabase, contact.id),
+      supabase
+        .from("commerce_orders")
+        .select("id, order_number, status, total, currency, placed_at")
+        .eq("contact_id", contact.id)
+        .order("placed_at", { ascending: false })
+        .limit(10),
     ]);
 
     if (dealsRes.data) setDeals(dealsRes.data);
@@ -105,6 +121,7 @@ export function ContactSidebar({ contact, conversation = null }: ContactSidebarP
     }
     setCampaignSource(campaignRes);
     setTimeline(timelineEvents);
+    if (ordersRes.data) setOrders(ordersRes.data as CommerceOrderSummary[]);
   }, [contact]);
 
   // Load on contact change. setContactData/setTags run inside async
@@ -464,17 +481,35 @@ export function ContactSidebar({ contact, conversation = null }: ContactSidebarP
           {/* Divider */}
           <div className="my-4 border-t border-border" />
 
-          {/* Order Information — no e-commerce/orders integration
-              exists yet in this codebase, so this is an honest empty
-              state rather than fabricated data. */}
+          {/* Order Information — real data once a WooCommerce/Shopify
+              connection is synced (Milestone 4). Honest empty state
+              when no orders exist for this contact yet. */}
           <div>
             <div className="flex items-center gap-2 px-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
               <Package className="h-3 w-3" />
               {tSidebar("orderInformation")}
             </div>
-            <p className="mt-2 px-1 text-xs text-muted-foreground">
-              {tSidebar("orderInfoEmpty")}
-            </p>
+            {orders.length === 0 ? (
+              <p className="mt-2 px-1 text-xs text-muted-foreground">
+                {tSidebar("orderInfoEmpty")}
+              </p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {orders.map((o) => (
+                  <div key={o.id} className="rounded-lg bg-muted px-3 py-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-foreground">
+                        {o.order_number ?? o.id.slice(0, 8)}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {o.currency} {o.total.toFixed(2)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[10px] capitalize text-muted-foreground">{o.status}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Divider */}

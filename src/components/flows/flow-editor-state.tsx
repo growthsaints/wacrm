@@ -51,7 +51,7 @@ import {
 } from "@/lib/flows/validate";
 import { useTranslations } from "next-intl";
 import { unlinkNodeReferences } from "@/lib/flows/edges";
-import type { FlowNodeRow, FlowRow } from "@/lib/flows/types";
+import type { FlowNodeRow, FlowRow, FlowTriggerType } from "@/lib/flows/types";
 import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
 
 // ============================================================
@@ -61,7 +61,7 @@ import { NODE_META, slugify, type BuilderNode, type NodeType } from "./shared";
 export interface BuilderState {
   name: string;
   description: string;
-  trigger_type: "keyword" | "first_inbound_message" | "manual";
+  trigger_type: FlowTriggerType;
   trigger_config: Record<string, unknown>;
   entry_node_id: string | null;
   status: FlowRow["status"];
@@ -187,6 +187,31 @@ export function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { note: "" };
     case "end":
       return {};
+    case "send_template":
+      return { template_name: "", language: "en_US", variables: [], next_node_key: "" };
+    case "send_whatsapp_flow":
+      return { whatsapp_flow_id: "", text: "", cta_label: "Open", next_node_key: "" };
+    case "branch":
+      return {
+        subject: "var",
+        subject_key: "",
+        cases: [{ value: "", next_node_key: "" }],
+        default_next: "",
+      };
+    case "assign_agent":
+      return { mode: "specific", agent_id: "", next_node_key: "" };
+    case "create_contact":
+      return { phone: "", name: "", email: "", company: "", next_node_key: "" };
+    case "update_contact":
+      return { field: "name", value: "", next_node_key: "" };
+    case "update_custom_field":
+      return { custom_field_id: "", value: "", next_node_key: "" };
+    case "delay":
+      return { amount: 1, unit: "hours", next_node_key: "" };
+    case "webhook":
+      return { url: "", next_node_key: "" };
+    case "http_fetch":
+      return { method: "GET", url: "", next_node_key: "" };
   }
 }
 
