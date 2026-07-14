@@ -11,8 +11,11 @@ import { NextResponse } from "next/server";
 
 import { toErrorResponse } from "@/lib/auth/account";
 import { requirePlatformAdmin } from "@/lib/auth/platform";
+import { platformAdminClient } from "@/lib/platform/admin-client";
 
 const PAGE_SIZE = 25;
+const MANAGED_PLAN_TERM_MONTHS = 3;
+const MANAGED_PLAN_RENEWALS_MAX = 4;
 
 export async function GET(request: Request) {
   try {
@@ -77,6 +80,90 @@ export async function GET(request: Request) {
       pageSize: PAGE_SIZE,
       total: count ?? organizations.length,
     });
+  } catch (err) {
+    return toErrorResponse(err);
+  }
+}
+
+interface CreateManagedOrgBody {
+  email?: string;
+  password?: string;
+  businessName?: string;
+}
+
+/**
+ * POST /api/platform/organizations — creates a "Managed" plan account
+ * directly (Super Admin provisions credentials on the client's
+ * behalf; the ₹4500/3-month fee is collected outside the system —
+ * bank transfer/UPI — so there's no Razorpay checkout here, just the
+ * account setup). Reuses the same on_auth_user_created trigger that
+ * public signup relies on (migration 017) to bootstrap the
+ * profile/account row, then marks that account as an active managed
+ * plan with a 3-month term and a 4-renewal allowance.
+ */
+export async function POST(request: Request) {
+  try {
+    await requirePlatformAdmin();
+
+    const body = (await request.json().catch(() => null)) as CreateManagedOrgBody | null;
+    const email = body?.email?.trim();
+    const password = body?.password;
+    const businessName = body?.businessName?.trim();
+
+    if (!email || !password || password.length < 6) {
+      return NextResponse.json(
+        { error: "email and a password (min 6 chars) are required" },
+        { status: 400 },
+      );
+    }
+
+    const admin = platformAdminClient();
+
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: businessName ? { full_name: businessName } : undefined,
+    });
+    if (createErr || !created.user) {
+      return NextResponse.json(
+        { error: createErr?.message ?? "Failed to create user" },
+        { status: 400 },
+      );
+    }
+
+    const { data: profile, error: profileErr } = await admin
+      .from("profiles")
+      .select("account_id")
+      .eq("user_id", created.user.id)
+      .maybeSingle();
+    if (profileErr || !profile?.account_id) {
+      return NextResponse.json(
+        { error: "User created, but account bootstrap did not complete — check logs" },
+        { status: 500 },
+      );
+    }
+
+    const expiresAt = new Date();
+    expiresAt.setMonth(expiresAt.getMonth() + MANAGED_PLAN_TERM_MONTHS);
+
+    const { data: account, error: updateErr } = await admin
+      .from("accounts")
+      .update({
+        plan_type: "managed",
+        plan_status: "active",
+        plan_expires_at: expiresAt.toISOString(),
+        managed_renewals_used: 0,
+        managed_renewals_max: MANAGED_PLAN_RENEWALS_MAX,
+      })
+      .eq("id", profile.account_id)
+      .select("id, name, plan_type, plan_status, plan_expires_at, managed_renewals_max")
+      .single();
+    if (updateErr) {
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ organization: account, credentials: { email, password } });
   } catch (err) {
     return toErrorResponse(err);
   }

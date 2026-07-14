@@ -261,6 +261,15 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         }
       }
 
+      // Any other account-level field (account_review_update,
+      // account_alerts, phone_number_quality_update,
+      // business_capability_update, messaging_limit_tier, etc.) — log
+      // it rather than silently dropping it. See logAccountLevelEvent
+      // for why this doesn't try to parse a specific "banned" shape.
+      if (!value.messages && !value.statuses) {
+        await logAccountLevelEvent(change.field, value, entry.id)
+      }
+
       // Handle incoming messages
       if (!value.messages || !value.contacts) continue
 
@@ -323,6 +332,64 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         )
       }
     }
+  }
+}
+
+const CONCERNING_KEYWORDS = ['ban', 'restrict', 'reject', 'disable', 'flag', 'violat']
+
+/**
+ * Logs any account-level webhook field we don't otherwise act on
+ * (account_review_update, account_alerts, phone_number_quality_update,
+ * business_capability_update, messaging_limit_tier, etc.) into
+ * whatsapp_account_events. We deliberately don't try to parse a
+ * specific "WABA banned" shape out of these — Meta's exact payload for
+ * that isn't something we've verified with confidence — so every
+ * account-level event is captured, `flagged` is a best-effort keyword
+ * heuristic over the raw JSON, and a platform admin reviews flagged
+ * rows (Platform → managed accounts needing re-provisioning) to decide
+ * whether one actually needs action.
+ */
+async function logAccountLevelEvent(
+  field: string,
+  value: unknown,
+  wabaId: string
+): Promise<void> {
+  try {
+    const admin = supabaseAdmin()
+    const metadata = (value as { metadata?: { phone_number_id?: string } })?.metadata
+    let accountId: string | null = null
+
+    if (metadata?.phone_number_id) {
+      const { data } = await admin
+        .from('whatsapp_config')
+        .select('account_id')
+        .eq('phone_number_id', metadata.phone_number_id)
+        .maybeSingle()
+      accountId = data?.account_id ?? null
+    }
+    if (!accountId && wabaId) {
+      const { data } = await admin
+        .from('whatsapp_config')
+        .select('account_id')
+        .eq('waba_id', wabaId)
+        .maybeSingle()
+      accountId = data?.account_id ?? null
+    }
+
+    const raw = JSON.stringify(value).toLowerCase()
+    const flagged = CONCERNING_KEYWORDS.some((kw) => raw.includes(kw))
+
+    const { error } = await admin.from('whatsapp_account_events').insert({
+      account_id: accountId,
+      field,
+      raw_value: value,
+      flagged,
+    })
+    if (error) {
+      console.error('[webhook] failed to log account-level event:', error.message)
+    }
+  } catch (err) {
+    console.error('[webhook] logAccountLevelEvent threw:', err instanceof Error ? err.message : err)
   }
 }
 

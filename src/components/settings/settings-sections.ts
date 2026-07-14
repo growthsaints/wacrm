@@ -51,6 +51,7 @@ export interface SectionMeta {
   label: string;
   icon: LucideIcon;
   group: 'top' | 'account' | 'workspace';
+  adminOnly?: boolean;
 }
 
 export const SECTION_META: Record<SettingsSection, SectionMeta> = {
@@ -65,7 +66,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   commerce: { id: 'commerce', label: 'Commerce', icon: ShoppingBag, group: 'workspace' },
   fields: { id: 'fields', label: 'Fields & tags', icon: Tags, group: 'workspace' },
   deals: { id: 'deals', label: 'Deals & currency', icon: Coins, group: 'workspace' },
-  billing: { id: 'billing', label: 'Billing', icon: Wallet, group: 'workspace' },
+  billing: { id: 'billing', label: 'Billing', icon: Wallet, group: 'workspace', adminOnly: true },
   members: { id: 'members', label: 'Team members', icon: UsersRound, group: 'workspace' },
   api: { id: 'api', label: 'API keys', icon: KeyRound, group: 'workspace' },
 };

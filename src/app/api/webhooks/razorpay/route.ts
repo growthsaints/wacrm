@@ -32,42 +32,74 @@ export async function POST(request: Request) {
 
   const payload = JSON.parse(rawBody || '{}') as {
     event?: string
-    payload?: { payment?: { entity?: Record<string, unknown> } }
-  }
-
-  if (payload.event !== 'payment.captured') {
-    // Not an event we act on — acknowledge so Razorpay stops retrying.
-    return NextResponse.json({ received: true })
-  }
-
-  const payment = payload.payload?.payment?.entity
-  if (!payment) {
-    return NextResponse.json({ error: 'Malformed payload' }, { status: 400 })
-  }
-
-  const notes = (payment.notes as Record<string, string> | undefined) ?? {}
-  const accountId = notes.account_id
-  const paymentId = payment.id as string
-  const orderId = payment.order_id as string
-  const amountPaise = payment.amount as number
-
-  if (!accountId || notes.purpose !== 'wallet_recharge') {
-    // Not one of our wallet-recharge orders — ignore.
-    return NextResponse.json({ received: true })
+    payload?: {
+      payment?: { entity?: Record<string, unknown> }
+      subscription?: { entity?: Record<string, unknown> }
+    }
   }
 
   const admin = supabaseAdmin()
-  const { error } = await admin.rpc('credit_wallet', {
-    p_account_id: accountId,
-    p_amount: amountPaise / 100,
-    p_razorpay_payment_id: paymentId,
-    p_razorpay_order_id: orderId,
-  })
 
-  if (error && error.code !== '23505') {
-    console.error('[razorpay-webhook] credit_wallet failed:', error.message)
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (payload.event === 'payment.captured') {
+    const payment = payload.payload?.payment?.entity
+    if (!payment) {
+      return NextResponse.json({ error: 'Malformed payload' }, { status: 400 })
+    }
+    const notes = (payment.notes as Record<string, string> | undefined) ?? {}
+    if (notes.purpose === 'wallet_recharge' && notes.account_id) {
+      const { error } = await admin.rpc('credit_wallet', {
+        p_account_id: notes.account_id,
+        p_amount: (payment.amount as number) / 100,
+        p_razorpay_payment_id: payment.id as string,
+        p_razorpay_order_id: payment.order_id as string,
+      })
+      if (error && error.code !== '23505') {
+        console.error('[razorpay-webhook] credit_wallet failed:', error.message)
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+    }
+    return NextResponse.json({ received: true })
   }
 
+  // Self-serve subscription lifecycle — see createRazorpaySubscription
+  // (notes.account_id is stashed there the same way order notes are).
+  if (
+    payload.event === 'subscription.activated' ||
+    payload.event === 'subscription.charged' ||
+    payload.event === 'subscription.cancelled' ||
+    payload.event === 'subscription.completed' ||
+    payload.event === 'subscription.halted'
+  ) {
+    const subscription = payload.payload?.subscription?.entity
+    if (!subscription) {
+      return NextResponse.json({ error: 'Malformed payload' }, { status: 400 })
+    }
+    const notes = (subscription.notes as Record<string, string> | undefined) ?? {}
+    const accountId = notes.account_id
+    if (!accountId) {
+      return NextResponse.json({ received: true })
+    }
+
+    const nextStatus =
+      payload.event === 'subscription.activated' || payload.event === 'subscription.charged'
+        ? 'active'
+        : 'cancelled'
+
+    const { error } = await admin
+      .from('accounts')
+      .update({
+        plan_status: nextStatus,
+        razorpay_subscription_id: subscription.id as string,
+        razorpay_plan_id: subscription.plan_id as string,
+      })
+      .eq('id', accountId)
+    if (error) {
+      console.error('[razorpay-webhook] subscription status update failed:', error.message)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+    return NextResponse.json({ received: true })
+  }
+
+  // Not an event we act on — acknowledge so Razorpay stops retrying.
   return NextResponse.json({ received: true })
 }

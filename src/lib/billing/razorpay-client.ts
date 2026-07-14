@@ -68,6 +68,42 @@ export async function createRazorpayOrder(args: {
   return { id: data.id, amount: data.amount, currency: data.currency };
 }
 
+export interface RazorpaySubscription {
+  id: string;
+  status: string;
+}
+
+/** Creates a recurring Razorpay Subscription against a pre-created
+ *  Plan (monthly ₹1200 or quarterly ₹3000 — see docs/production-
+ *  deployment-checklist.md for the Plan IDs). No `total_count` means
+ *  it renews indefinitely until the customer or account cancels it. */
+export async function createRazorpaySubscription(args: {
+  keyId: string;
+  keySecret: string;
+  planId: string;
+  accountId: string;
+}): Promise<RazorpaySubscription> {
+  const response = await fetch(`${RAZORPAY_API_BASE}/subscriptions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: basicAuthHeader(args.keyId, args.keySecret),
+    },
+    body: JSON.stringify({
+      plan_id: args.planId,
+      customer_notify: 1,
+      total_count: 120, // Razorpay requires a cap; 120 cycles is effectively indefinite (10yr monthly / 30yr quarterly).
+      notes: { account_id: args.accountId },
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Razorpay subscription creation failed: ${response.status} ${text}`);
+  }
+  const data = await response.json();
+  return { id: data.id, status: data.status };
+}
+
 /** Verifies the signature Razorpay Checkout returns on successful
  *  payment (razorpay_order_id, razorpay_payment_id, razorpay_signature).
  *  This is the client-facing confirmation path — the webhook below is
