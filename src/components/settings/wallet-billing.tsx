@@ -54,6 +54,17 @@ interface WalletData {
   transactions: WalletTransaction[];
 }
 
+type PlanType = 'none' | 'managed' | 'self_serve_monthly' | 'self_serve_quarterly';
+type PlanStatus = 'inactive' | 'active' | 'cancelled';
+
+interface PlanData {
+  planType: PlanType;
+  planStatus: PlanStatus;
+  planExpiresAt: string | null;
+  managedRenewalsUsed: number;
+  managedRenewalsMax: number;
+}
+
 const CATEGORY_LABEL: Record<string, string> = {
   marketing: 'Marketing',
   utility: 'Utility',
@@ -61,8 +72,18 @@ const CATEGORY_LABEL: Record<string, string> = {
   service: 'Service',
 };
 
+const PLAN_STATUS_BADGE: Record<PlanStatus, { label: string; variant: 'default' | 'outline' | 'destructive' }> = {
+  active: { label: 'Active', variant: 'default' },
+  inactive: { label: 'Payment pending', variant: 'outline' },
+  cancelled: { label: 'Cancelled', variant: 'destructive' },
+};
+
 function formatInr(amount: number): string {
   return `₹${amount.toFixed(2)}`;
+}
+
+function formatDate(iso: string | null): string {
+  return iso ? new Date(iso).toLocaleDateString() : '—';
 }
 
 export function WalletBilling() {
@@ -73,6 +94,10 @@ export function WalletBilling() {
   const [amount, setAmount] = useState('1500');
   const [paying, setPaying] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
+
+  const [plan, setPlan] = useState<PlanData | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+  const [subscribing, setSubscribing] = useState<'monthly' | 'quarterly' | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -85,9 +110,63 @@ export function WalletBilling() {
     }
   }, []);
 
+  const loadPlan = useCallback(async () => {
+    try {
+      const res = await fetch('/api/billing/plan', { cache: 'no-store' });
+      const json = await res.json();
+      if (res.ok) setPlan(json);
+    } finally {
+      setPlanLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
-  }, [load]);
+    void loadPlan();
+  }, [load, loadPlan]);
+
+  const handleSubscribe = useCallback(
+    async (selected: 'monthly' | 'quarterly') => {
+      if (!sdkReady || !window.Razorpay) {
+        toast.error('Payment SDK is still loading — try again in a moment');
+        return;
+      }
+      setSubscribing(selected);
+      try {
+        const res = await fetch('/api/billing/subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan: selected }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          toast.error(json.error || 'Failed to start subscription');
+          setSubscribing(null);
+          return;
+        }
+
+        const razorpay = new window.Razorpay({
+          key: json.keyId,
+          subscription_id: json.subscriptionId,
+          name: 'Growth Saints CRM',
+          description: selected === 'monthly' ? 'Self-serve Monthly plan' : 'Self-serve Quarterly plan',
+          handler: () => {
+            toast.success('Subscription started — it will show as Active once payment is confirmed.');
+            void loadPlan();
+            setSubscribing(null);
+          },
+          modal: {
+            ondismiss: () => setSubscribing(null),
+          },
+        });
+        razorpay.open();
+      } catch {
+        toast.error('Failed to start subscription');
+        setSubscribing(null);
+      }
+    },
+    [sdkReady, loadPlan],
+  );
 
   const handleRecharge = useCallback(async () => {
     const rupees = Number(amount);
@@ -171,6 +250,97 @@ export function WalletBilling() {
         title="Billing"
         description="Recharge your wallet to send WhatsApp messages — charged per conversation category."
       />
+
+      {!planLoading && plan && (
+        <Card className="border-border bg-card">
+          <CardContent className="space-y-4 py-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-medium text-foreground">Your plan</h3>
+                <p className="text-xs text-muted-foreground">
+                  {plan.planType === 'managed' && 'Managed — provisioned by Growth Saints'}
+                  {plan.planType === 'self_serve_monthly' && 'Self-serve Monthly — ₹1200/month'}
+                  {plan.planType === 'self_serve_quarterly' && 'Self-serve Quarterly — ₹3000/quarter (₹999/mo)'}
+                  {plan.planType === 'none' && 'No plan yet — choose one below'}
+                </p>
+              </div>
+              {plan.planType !== 'none' && (
+                <Badge variant={PLAN_STATUS_BADGE[plan.planStatus].variant}>
+                  {PLAN_STATUS_BADGE[plan.planStatus].label}
+                </Badge>
+              )}
+            </div>
+
+            {plan.planType === 'managed' && (
+              <div className="grid grid-cols-2 gap-4 border-t border-border pt-4 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground">Term ends</p>
+                  <p className="font-medium text-foreground">{formatDate(plan.planExpiresAt)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Re-provisioning attempts used</p>
+                  <p className="font-medium text-foreground">
+                    {plan.managedRenewalsUsed} of {plan.managedRenewalsMax}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {(plan.planType === 'self_serve_monthly' || plan.planType === 'self_serve_quarterly') && (
+              <div className="border-t border-border pt-4 text-sm">
+                <p className="text-xs text-muted-foreground">
+                  {plan.planStatus === 'active' ? 'Renews on' : 'Expected renewal'}
+                </p>
+                <p className="font-medium text-foreground">{formatDate(plan.planExpiresAt)}</p>
+                {plan.planStatus !== 'active' && (
+                  <Button
+                    className="mt-3"
+                    size="sm"
+                    disabled={subscribing !== null || !sdkReady}
+                    onClick={() =>
+                      handleSubscribe(plan.planType === 'self_serve_monthly' ? 'monthly' : 'quarterly')
+                    }
+                  >
+                    {subscribing ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Complete payment
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {plan.planType === 'none' && (
+              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
+                <div className="rounded-lg border border-border p-4">
+                  <p className="text-sm font-semibold text-foreground">Monthly</p>
+                  <p className="text-lg font-semibold text-foreground">₹1200<span className="text-xs font-normal text-muted-foreground">/month</span></p>
+                  <Button
+                    className="mt-3 w-full"
+                    size="sm"
+                    disabled={subscribing !== null || !sdkReady}
+                    onClick={() => handleSubscribe('monthly')}
+                  >
+                    {subscribing === 'monthly' ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Subscribe
+                  </Button>
+                </div>
+                <div className="rounded-lg border border-border p-4">
+                  <p className="text-sm font-semibold text-foreground">Quarterly</p>
+                  <p className="text-lg font-semibold text-foreground">₹3000<span className="text-xs font-normal text-muted-foreground">/quarter (₹999/mo)</span></p>
+                  <Button
+                    className="mt-3 w-full"
+                    size="sm"
+                    disabled={subscribing !== null || !sdkReady}
+                    onClick={() => handleSubscribe('quarterly')}
+                  >
+                    {subscribing === 'quarterly' ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Subscribe
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="border-border bg-card">
         <CardContent className="space-y-4 py-6">

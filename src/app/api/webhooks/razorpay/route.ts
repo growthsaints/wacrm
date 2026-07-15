@@ -61,8 +61,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ received: true })
   }
 
-  // Self-serve subscription lifecycle — see createRazorpaySubscription
-  // (notes.account_id is stashed there the same way order notes are).
+  // Self-serve/Managed subscription lifecycle — see
+  // createRazorpaySubscription (notes.account_id is stashed there the
+  // same way order notes are).
   if (
     payload.event === 'subscription.activated' ||
     payload.event === 'subscription.charged' ||
@@ -80,19 +81,40 @@ export async function POST(request: Request) {
       return NextResponse.json({ received: true })
     }
 
-    const nextStatus =
-      payload.event === 'subscription.activated' || payload.event === 'subscription.charged'
-        ? 'active'
-        : 'cancelled'
+    // `completed` fires once a subscription exhausts its total_count —
+    // for the Managed plan's single-cycle (total_count: 1) subscription
+    // that happens right after its one successful charge, meaning "term
+    // fulfilled", not "cancelled". Only an explicit cancel/halt from
+    // Razorpay should flip status to cancelled.
+    const isCancelled =
+      payload.event === 'subscription.cancelled' || payload.event === 'subscription.halted'
+    const nextStatus = isCancelled ? 'cancelled' : 'active'
 
-    const { error } = await admin
-      .from('accounts')
-      .update({
-        plan_status: nextStatus,
-        razorpay_subscription_id: subscription.id as string,
-        razorpay_plan_id: subscription.plan_id as string,
-      })
-      .eq('id', accountId)
+    const update: Record<string, unknown> = {
+      plan_status: nextStatus,
+      razorpay_subscription_id: subscription.id as string,
+      razorpay_plan_id: subscription.plan_id as string,
+    }
+
+    // Recurring self-serve plans: push the expiry out another billing
+    // cycle on each successful renewal charge. The Managed plan's
+    // one-off 3-month term keeps the fixed expiry set at creation.
+    if (payload.event === 'subscription.charged') {
+      const { data: account } = await admin
+        .from('accounts')
+        .select('plan_type, plan_expires_at')
+        .eq('id', accountId)
+        .single()
+      if (account?.plan_type === 'self_serve_monthly' || account?.plan_type === 'self_serve_quarterly') {
+        const months = account.plan_type === 'self_serve_monthly' ? 1 : 3
+        const base = account.plan_expires_at ? new Date(account.plan_expires_at) : new Date()
+        const next = base > new Date() ? base : new Date()
+        next.setMonth(next.getMonth() + months)
+        update.plan_expires_at = next.toISOString()
+      }
+    }
+
+    const { error } = await admin.from('accounts').update(update).eq('id', accountId)
     if (error) {
       console.error('[razorpay-webhook] subscription status update failed:', error.message)
       return NextResponse.json({ error: error.message }, { status: 500 })
