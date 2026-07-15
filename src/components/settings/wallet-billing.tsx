@@ -98,6 +98,7 @@ export function WalletBilling() {
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [planLoading, setPlanLoading] = useState(true);
   const [subscribing, setSubscribing] = useState<'monthly' | 'quarterly' | null>(null);
+  const [choosingPlan, setChoosingPlan] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -154,6 +155,7 @@ export function WalletBilling() {
             toast.success('Subscription started — it will show as Active once payment is confirmed.');
             void loadPlan();
             setSubscribing(null);
+            setChoosingPlan(false);
           },
           modal: {
             ondismiss: () => setSubscribing(null),
@@ -292,49 +294,68 @@ export function WalletBilling() {
                   {plan.planStatus === 'active' ? 'Renews on' : 'Expected renewal'}
                 </p>
                 <p className="font-medium text-foreground">{formatDate(plan.planExpiresAt)}</p>
-                {plan.planStatus !== 'active' && (
-                  <Button
-                    className="mt-3"
-                    size="sm"
-                    disabled={subscribing !== null || !sdkReady}
-                    onClick={() =>
-                      handleSubscribe(plan.planType === 'self_serve_monthly' ? 'monthly' : 'quarterly')
-                    }
-                  >
-                    {subscribing ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Complete payment
-                  </Button>
+                {plan.planStatus !== 'active' && !choosingPlan && (
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <Button
+                      size="sm"
+                      disabled={subscribing !== null || !sdkReady}
+                      onClick={() =>
+                        handleSubscribe(plan.planType === 'self_serve_monthly' ? 'monthly' : 'quarterly')
+                      }
+                    >
+                      {subscribing ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Complete payment
+                    </Button>
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-primary hover:underline"
+                      onClick={() => setChoosingPlan(true)}
+                    >
+                      Choose a different plan
+                    </button>
+                  </div>
                 )}
               </div>
             )}
 
-            {plan.planType === 'none' && (
-              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2">
-                <div className="rounded-lg border border-border p-4">
-                  <p className="text-sm font-semibold text-foreground">Monthly</p>
-                  <p className="text-lg font-semibold text-foreground">₹1200<span className="text-xs font-normal text-muted-foreground">/month</span></p>
-                  <Button
-                    className="mt-3 w-full"
-                    size="sm"
-                    disabled={subscribing !== null || !sdkReady}
-                    onClick={() => handleSubscribe('monthly')}
+            {(plan.planType === 'none' || choosingPlan) && (
+              <div className="border-t border-border pt-4">
+                {choosingPlan && (
+                  <button
+                    type="button"
+                    className="mb-3 text-xs font-medium text-muted-foreground hover:underline"
+                    onClick={() => setChoosingPlan(false)}
                   >
-                    {subscribing === 'monthly' ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Subscribe
-                  </Button>
-                </div>
-                <div className="rounded-lg border border-border p-4">
-                  <p className="text-sm font-semibold text-foreground">Quarterly</p>
-                  <p className="text-lg font-semibold text-foreground">₹3000<span className="text-xs font-normal text-muted-foreground">/quarter (₹999/mo)</span></p>
-                  <Button
-                    className="mt-3 w-full"
-                    size="sm"
-                    disabled={subscribing !== null || !sdkReady}
-                    onClick={() => handleSubscribe('quarterly')}
-                  >
-                    {subscribing === 'quarterly' ? <Loader2 className="size-4 animate-spin" /> : null}
-                    Subscribe
-                  </Button>
+                    ← Back
+                  </button>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm font-semibold text-foreground">Monthly</p>
+                    <p className="text-lg font-semibold text-foreground">₹1200<span className="text-xs font-normal text-muted-foreground">/month</span></p>
+                    <Button
+                      className="mt-3 w-full"
+                      size="sm"
+                      disabled={subscribing !== null || !sdkReady}
+                      onClick={() => handleSubscribe('monthly')}
+                    >
+                      {subscribing === 'monthly' ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Subscribe
+                    </Button>
+                  </div>
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm font-semibold text-foreground">Quarterly</p>
+                    <p className="text-lg font-semibold text-foreground">₹3000<span className="text-xs font-normal text-muted-foreground">/quarter (₹999/mo)</span></p>
+                    <Button
+                      className="mt-3 w-full"
+                      size="sm"
+                      disabled={subscribing !== null || !sdkReady}
+                      onClick={() => handleSubscribe('quarterly')}
+                    >
+                      {subscribing === 'quarterly' ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Subscribe
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
