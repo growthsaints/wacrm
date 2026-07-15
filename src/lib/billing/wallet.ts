@@ -65,7 +65,7 @@ export async function ensureWalletBalance(
   if (balance < rate) {
     throw new WalletError(
       'insufficient_balance',
-      `Insufficient wallet balance: this ${category} message costs ₹${rate.toFixed(2)}, current balance is ₹${balance.toFixed(2)}. Please recharge in Settings → Billing.`
+      `Insufficient wallet balance: current balance is ₹${balance.toFixed(2)}. Please recharge in Settings → Billing.`
     );
   }
 }

@@ -14,8 +14,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Send, Loader2, Users, Save } from 'lucide-react';
+import { ArrowLeft, Send, Loader2, Users, Save, Wallet } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { categoryFromTemplate, rateForCategory } from '@/lib/billing/rates';
 
 interface AudienceConfig {
   type: string;
@@ -50,6 +51,24 @@ export function Step4ScheduleSend({
   const [showConfirm, setShowConfirm] = useState(false);
   const [estimatedReach, setEstimatedReach] = useState<number>(0);
   const [loadingReach, setLoadingReach] = useState(true);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+
+  // Best-effort — the endpoint is admin+, so an agent with a broadcast
+  // access grant simply won't see the balance line; the cost estimate
+  // itself doesn't depend on it.
+  useEffect(() => {
+    async function loadBalance() {
+      try {
+        const res = await fetch('/api/billing/wallet');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (typeof data?.balance === 'number') setWalletBalance(data.balance);
+      } catch {
+        // Silently omit the balance line — see comment above.
+      }
+    }
+    loadBalance();
+  }, []);
 
   useEffect(() => {
     async function calculateReach() {
@@ -82,6 +101,9 @@ export function Step4ScheduleSend({
 
     calculateReach();
   }, [audience]);
+
+  const estimatedCost =
+    estimatedReach * rateForCategory(categoryFromTemplate(template.category));
 
   const audienceLabel =
     audience.type === 'all'
@@ -141,6 +163,32 @@ export function Step4ScheduleSend({
             <p className="text-xs text-muted-foreground">Language</p>
             <p className="text-foreground">{template.language ?? 'en_US'}</p>
           </div>
+        </div>
+      </div>
+
+      {/* Estimated Campaign Cost — total only, never a per-message rate */}
+      <div className="rounded-xl border border-border bg-card/50 p-4">
+        <p className="mb-3 text-sm font-medium text-foreground">Estimated Campaign Cost</p>
+        <div className="grid grid-cols-2 gap-3 text-sm">
+          <div>
+            <p className="text-xs text-muted-foreground">Estimated Cost</p>
+            <div className="flex items-center gap-1.5">
+              {loadingReach ? (
+                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              ) : (
+                <p className="font-medium text-foreground">₹{estimatedCost.toFixed(2)}</p>
+              )}
+            </div>
+          </div>
+          {walletBalance !== null && (
+            <div>
+              <p className="text-xs text-muted-foreground">Available Balance</p>
+              <div className="flex items-center gap-1.5">
+                <Wallet className="h-3.5 w-3.5 text-primary" />
+                <p className="font-medium text-foreground">₹{walletBalance.toFixed(2)}</p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
