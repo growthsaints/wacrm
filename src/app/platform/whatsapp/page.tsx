@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, Signal, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, Signal, Wifi, WifiOff } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -68,6 +69,107 @@ function HealthBadge({ health }: { health: WhatsAppNumber["health"] }) {
   );
 }
 
+interface ReconcileResult {
+  configured: boolean;
+  metaTotal?: number;
+  dbTotal?: number;
+  missingFromMeta?: {
+    accountId: string;
+    organizationName: string;
+    wabaId: string;
+    businessName: string | null;
+    displayPhoneNumber: string | null;
+  }[];
+  missingFromDb?: { wabaId: string; name: string | null }[];
+}
+
+function ReconcileWithMeta() {
+  const [result, setResult] = useState<ReconcileResult | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  async function runCheck() {
+    setChecking(true);
+    try {
+      const res = await fetch("/api/platform/whatsapp/reconcile", { cache: "no-store" });
+      const data: ReconcileResult = await res.json();
+      setResult(data);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-base">Reconcile with Meta</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Compares our database against what Meta&apos;s Business Manager currently shows —
+            catches drift from a manual DB edit or access revoked on Meta&apos;s side.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={runCheck} disabled={checking}>
+          {checking ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+          Check now
+        </Button>
+      </CardHeader>
+      {result && (
+        <CardContent className="space-y-3 pt-0">
+          {!result.configured ? (
+            <p className="text-sm text-muted-foreground">
+              Not configured — set <code>META_BUSINESS_ID</code> and{" "}
+              <code>META_SYSTEM_USER_TOKEN</code> to enable this check.
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Meta reports {result.metaTotal} WABA(s); our database has {result.dbTotal}.
+              </p>
+              {(result.missingFromMeta?.length ?? 0) === 0 &&
+              (result.missingFromDb?.length ?? 0) === 0 ? (
+                <p className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-300">
+                  <CheckCircle2 className="size-4" /> No drift found.
+                </p>
+              ) : (
+                <>
+                  {result.missingFromMeta && result.missingFromMeta.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-300">
+                        <AlertTriangle className="size-4" /> In our database, but Meta no longer
+                        lists it (access likely revoked or disconnected on Meta&apos;s side):
+                      </p>
+                      <ul className="list-inside list-disc text-sm text-muted-foreground">
+                        {result.missingFromMeta.map((m) => (
+                          <li key={m.wabaId}>
+                            {m.organizationName} — {m.businessName || m.displayPhoneNumber || m.wabaId}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {result.missingFromDb && result.missingFromDb.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-300">
+                        <AlertTriangle className="size-4" /> Meta shows access to these, but we
+                        have no matching row (an incomplete signup or a manual DB deletion):
+                      </p>
+                      <ul className="list-inside list-disc text-sm text-muted-foreground">
+                        {result.missingFromDb.map((m) => (
+                          <li key={m.wabaId}>{m.name || m.wabaId}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
 export default function PlatformWhatsAppPage() {
   const [numbers, setNumbers] = useState<WhatsAppNumber[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +197,8 @@ export default function PlatformWhatsAppPage() {
           Every connected WhatsApp Business number across every organization — {numbers.length} total.
         </p>
       </div>
+
+      <ReconcileWithMeta />
 
       <Card>
         <CardContent className="p-0">

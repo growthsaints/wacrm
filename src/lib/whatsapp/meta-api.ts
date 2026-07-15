@@ -204,6 +204,60 @@ export async function getBusinessDetails(
 }
 
 // ============================================================
+// Business-wide WABA reconciliation (Super Admin only)
+// ============================================================
+//
+// A cross-check against Meta's own records, using this deployment's
+// Tech Provider System User token — separate from every tenant's own
+// Embedded Signup access token. Answers "does what's in our DB still
+// match what Meta thinks we have access to?", which our own DB can
+// never answer on its own (e.g. a row edited/deleted directly in
+// Supabase, or access revoked on Meta's side, would silently drift).
+
+export interface MetaBusinessWabaSummary {
+  id: string
+  name?: string
+  currency?: string
+}
+
+export interface FetchBusinessWabaAccountsArgs {
+  businessId: string
+  systemUserToken: string
+}
+
+async function fetchWabaEdge(
+  businessId: string,
+  systemUserToken: string,
+  edge: 'owned_whatsapp_business_accounts' | 'client_whatsapp_business_accounts',
+): Promise<MetaBusinessWabaSummary[]> {
+  const url = `${META_API_BASE}/${businessId}/${edge}?fields=id,name,currency`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${systemUserToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta ${edge} fetch failed: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: MetaBusinessWabaSummary[] }
+  return data.data ?? []
+}
+
+/**
+ * Every WABA Meta currently shows as owned by, or shared with, this
+ * deployment's own Business Manager — the ground truth to reconcile
+ * our `whatsapp_config` rows against.
+ */
+export async function fetchBusinessWabaAccounts(
+  args: FetchBusinessWabaAccountsArgs,
+): Promise<{ owned: MetaBusinessWabaSummary[]; client: MetaBusinessWabaSummary[] }> {
+  const { businessId, systemUserToken } = args
+  const [owned, client] = await Promise.all([
+    fetchWabaEdge(businessId, systemUserToken, 'owned_whatsapp_business_accounts'),
+    fetchWabaEdge(businessId, systemUserToken, 'client_whatsapp_business_accounts'),
+  ])
+  return { owned, client }
+}
+
+// ============================================================
 // Cloud API registration (subscription for inbound webhooks)
 // ============================================================
 //
