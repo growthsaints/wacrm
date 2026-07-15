@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bot, Loader2, Send, Sparkles, X } from "lucide-react";
+import { Bot, ChevronRight, LifeBuoy, Loader2, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { SUPPORT_WHATSAPP_URL } from "@/lib/support";
 
 interface ChatTurn {
   role: "user" | "assistant";
@@ -50,7 +51,7 @@ export function SupportChatWidget() {
       if (!res.ok) {
         setError(
           data?.code === "not_configured"
-            ? "Support chat isn't set up yet — please use Contact Support in the sidebar instead."
+            ? "Support chat isn't set up yet — use \"Talk to Support\" below instead."
             : data?.error || "Something went wrong. Please try again.",
         );
         return;
@@ -126,6 +127,22 @@ export function SupportChatWidget() {
               )}
             </div>
           </ScrollArea>
+
+          <a
+            href={SUPPORT_WHATSAPP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mx-3 mb-3 flex items-center gap-3 rounded-xl border border-border bg-card-2 px-3 py-2.5 text-sm transition-colors hover:bg-muted"
+          >
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <LifeBuoy className="h-4 w-4" />
+            </div>
+            <div className="flex-1">
+              <p className="font-medium leading-tight">Talk to Support</p>
+              <p className="text-xs leading-tight text-muted-foreground">Chat with our team on WhatsApp</p>
+            </div>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          </a>
 
           <div className="flex items-end gap-2 border-t border-border p-3">
             <Textarea

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { SUPPORT_WHATSAPP_URL } from "@/lib/support";
 import { useAuth } from "@/hooks/use-auth";
 import { usePlatformAdmin } from "@/hooks/use-platform-admin";
 import { useTotalUnread } from "@/hooks/use-total-unread";
@@ -107,10 +108,6 @@ const navItems: NavItem[] = [
   { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
 ];
-
-// wa.me deep link — 91 (India country code) + the support number,
-// digits only, per WhatsApp's click-to-chat URL format.
-const SUPPORT_WHATSAPP_URL = "https://wa.me/919119750835";
 
 const bottomNavItems = [
   { href: "/settings", labelKey: "settings", icon: Settings },
