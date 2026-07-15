@@ -239,7 +239,11 @@ export function ConnectWhatsAppButton({
         config_id: configId,
         response_type: 'code',
         override_default_response_type: true,
-        extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
+        // 'v4' is Meta's current-recommended-for-production Embedded Signup
+        // version (confirmed against the Embedded Signup Builder wizard and
+        // Meta's own reference Tech Provider sample app) — omitting it falls
+        // back to an older ES version with a different flow/screens.
+        extras: { sessionInfoVersion: '3', version: 'v4' },
       },
     );
 
