@@ -252,6 +252,18 @@ function SignupPageInner() {
               Sign in
             </Link>
           </p>
+
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            By continuing, you agree to our{" "}
+            <Link href="/terms" className="text-primary hover:text-primary/80">
+              Terms of Service
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" className="text-primary hover:text-primary/80">
+              Privacy Policy
+            </Link>
+            .
+          </p>
         </CardContent>
       </Card>
     </div>
