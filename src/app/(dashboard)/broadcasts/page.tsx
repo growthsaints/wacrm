@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Radio, Plus, Loader2, Search, Filter, ChevronDown } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
+import { useAuth } from '@/hooks/use-auth';
 import { GatedButton } from '@/components/ui/gated-button';
 import { getBroadcastStatus } from '@/lib/broadcast-status';
 import { useTranslations } from 'next-intl';
@@ -77,6 +78,7 @@ export default function BroadcastsPage() {
   const t = useTranslations('Broadcasts.page');
   const tStatus = useTranslations('Broadcasts.status');
   const canCreate = useCan('send-messages');
+  const { canAccessBroadcasts, profileLoading } = useAuth();
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +87,15 @@ export default function BroadcastsPage() {
 
   // Used to kick off polling only while something is actively sending.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Broadcasts is admin+ by default — an 'agent' without the
+  // 'broadcasts' grant gets bounced back to the dashboard rather than
+  // seeing an empty/broken page (the sidebar already hides the link).
+  useEffect(() => {
+    if (!profileLoading && !canAccessBroadcasts) {
+      router.replace('/dashboard');
+    }
+  }, [profileLoading, canAccessBroadcasts, router]);
 
   async function fetchBroadcasts() {
     try {
@@ -164,12 +175,18 @@ export default function BroadcastsPage() {
     };
   }, [anySending]);
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     );
+  }
+
+  if (!canAccessBroadcasts) {
+    // The redirect effect above is already in flight — render nothing
+    // rather than flashing the page's content first.
+    return null;
   }
 
   if (error) {

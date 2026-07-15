@@ -17,6 +17,7 @@ import {
   canEditSettings as canEditSettingsFor,
   canManageMembers as canManageMembersFor,
   canSendMessages as canSendMessagesFor,
+  hasMinRole,
   isAccountRole,
   type AccountRole,
 } from "@/lib/auth/roles";
@@ -102,6 +103,12 @@ interface AuthContextValue {
   canEditSettings: boolean;
   /** True if the caller can send messages and edit operational data (agent+). */
   canSendMessages: boolean;
+  /** Admin+ always; an 'agent' only if explicitly granted (see agent_feature_grants). */
+  canAccessBroadcasts: boolean;
+  /** Admin+ always; an 'agent' only if explicitly granted (see agent_feature_grants). */
+  canAccessAutomations: boolean;
+  /** Admin+ always; an 'agent' only if explicitly granted (see agent_feature_grants). */
+  canAccessTemplates: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -115,6 +122,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  // Only ever populated for an 'agent' role — owner/admin/viewer don't
+  // consult this (see the derived canAccessX booleans below).
+  const [grantedFeatures, setGrantedFeatures] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   // Tracked separately from `loading`. The session settles fast (one
   // local cookie read); the profile fetch crosses the network and
@@ -214,6 +224,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           account_role: accountRole,
         });
         setAccount(accountRow);
+
+        // Only an 'agent' can have a restricted feature set — save the
+        // round trip for every other role.
+        if (accountRole === "agent" && data.account_id) {
+          const { data: grants } = await supabase
+            .from("agent_feature_grants")
+            .select("feature")
+            .eq("account_id", data.account_id)
+            .eq("user_id", userId);
+          setGrantedFeatures((grants ?? []).map((g) => g.feature as string));
+        } else {
+          setGrantedFeatures([]);
+        }
       } else {
         lastFetchedUserIdRef.current = null;
       }
@@ -287,6 +310,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lastFetchedUserIdRef.current = null;
         setProfile(null);
         setAccount(null);
+        setGrantedFeatures([]);
         setProfileLoading(false);
       }
 
@@ -306,6 +330,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setAccount(null);
+    setGrantedFeatures([]);
     window.location.href = "/login";
   }, []);
 
@@ -320,6 +345,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // dependencies downstream.
   const derived = useMemo(() => {
     const role = profile?.account_role ?? null;
+    // Admin+ always has every gated feature; an agent needs the
+    // matching grant; viewer never qualifies regardless of grants.
+    const hasFeature = (feature: string) =>
+      role ? hasMinRole(role, "admin") || (role === "agent" && grantedFeatures.includes(feature)) : false;
     return {
       accountRole: role,
       accountId: profile?.account_id ?? null,
@@ -330,8 +359,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canManageMembers: role ? canManageMembersFor(role) : false,
       canEditSettings: role ? canEditSettingsFor(role) : false,
       canSendMessages: role ? canSendMessagesFor(role) : false,
+      canAccessBroadcasts: hasFeature("broadcasts"),
+      canAccessAutomations: hasFeature("automations"),
+      canAccessTemplates: hasFeature("templates"),
     };
-  }, [profile?.account_role, profile?.account_id]);
+  }, [profile?.account_role, profile?.account_id, grantedFeatures]);
 
   return (
     <AuthContext.Provider
@@ -383,6 +415,9 @@ export function useAuth(): AuthContextValue {
       canManageMembers: false,
       canEditSettings: false,
       canSendMessages: false,
+      canAccessBroadcasts: false,
+      canAccessAutomations: false,
+      canAccessTemplates: false,
     };
   }
   return ctx;

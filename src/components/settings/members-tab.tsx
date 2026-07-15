@@ -29,6 +29,7 @@ import {
   Mail,
   MailX,
   Plus,
+  ShieldCheck,
   Trash2,
   UsersRound,
 } from 'lucide-react';
@@ -76,6 +77,7 @@ import {
   PresenceDot,
 } from '@/components/presence/presence-dot';
 import { InviteMemberDialog } from './invite-member-dialog';
+import { FeatureAccessDialog } from './feature-access-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
 
@@ -143,6 +145,7 @@ export function MembersTab() {
   const [pendingMemberAction, setPendingMemberAction] = useState<string | null>(
     null,
   );
+  const [managingAccessFor, setManagingAccessFor] = useState<Member | null>(null);
 
   const loadEverything = useCallback(async () => {
     try {
@@ -496,6 +499,23 @@ export function MembersTab() {
                       </span>
                     )}
 
+                    {/* Manage access — admin+ only, agent rows only.
+                        Broadcasts/Automations/Templates are hidden
+                        from agents by default; this opens per-feature
+                        grants (see agent_feature_grants, migration
+                        043) so an admin can hand back exactly the
+                        ones a specific agent needs. */}
+                    {canManageMembers && member.role === 'agent' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setManagingAccessFor(member)}
+                        disabled={isBusy}
+                      >
+                        <ShieldCheck className="size-4" />
+                      </Button>
+                    )}
+
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -614,6 +634,17 @@ export function MembersTab() {
         onOpenChange={setInviteOpen}
         onCreated={loadEverything}
       />
+
+      {managingAccessFor && (
+        <FeatureAccessDialog
+          userId={managingAccessFor.user_id}
+          memberName={managingAccessFor.full_name || t('unnamed')}
+          open={managingAccessFor !== null}
+          onOpenChange={(open) => {
+            if (!open) setManagingAccessFor(null);
+          }}
+        />
+      )}
 
       <Dialog
         open={removingMember !== null}

@@ -66,9 +66,8 @@ vi.mock("@/lib/supabase/server", () => ({
   createClient: () => createClient(),
 }));
 
-const { getCurrentAccount, UnauthorizedError, ForbiddenError } = await import(
-  "./account"
-);
+const { getCurrentAccount, requireFeature, UnauthorizedError, ForbiddenError } =
+  await import("./account");
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -191,6 +190,103 @@ describe("getCurrentAccount", () => {
     createClient.mockReturnValue(client);
     await expect(getCurrentAccount()).rejects.toThrow(
       "Profile is not linked to an account",
+    );
+  });
+});
+
+describe("requireFeature", () => {
+  it("lets an owner through without consulting agent_feature_grants", async () => {
+    const { client, calls } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: {
+          data: { account_id: "acct-1", account_role: "owner" },
+          error: null,
+        },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    const ctx = await requireFeature("broadcasts");
+    expect(ctx.role).toBe("owner");
+    expect(calls.map((c) => c.table)).not.toContain("agent_feature_grants");
+  });
+
+  it("lets an admin through without consulting agent_feature_grants", async () => {
+    const { client, calls } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: {
+          data: { account_id: "acct-1", account_role: "admin" },
+          error: null,
+        },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    const ctx = await requireFeature("automations");
+    expect(ctx.role).toBe("admin");
+    expect(calls.map((c) => c.table)).not.toContain("agent_feature_grants");
+  });
+
+  it("lets an agent through when a matching grant row exists", async () => {
+    const { client } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: {
+          data: { account_id: "acct-1", account_role: "agent" },
+          error: null,
+        },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+        agent_feature_grants: { data: { id: "grant-1" }, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    const ctx = await requireFeature("templates");
+    expect(ctx.role).toBe("agent");
+  });
+
+  it("rejects an agent with no matching grant row", async () => {
+    const { client } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: {
+          data: { account_id: "acct-1", account_role: "agent" },
+          error: null,
+        },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+        agent_feature_grants: { data: null, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    await expect(requireFeature("templates")).rejects.toBeInstanceOf(
+      ForbiddenError,
+    );
+  });
+
+  it("rejects a viewer regardless of any grant row", async () => {
+    const { client } = makeClient({
+      user: { id: "user-1" },
+      byTable: {
+        profiles: {
+          data: { account_id: "acct-1", account_role: "viewer" },
+          error: null,
+        },
+        accounts: { data: { id: "acct-1", name: "Acme" }, error: null },
+        // Even a present row must not matter for viewer — the
+        // requireFeature implementation only checks the grants table
+        // when role === 'agent'.
+        agent_feature_grants: { data: { id: "grant-1" }, error: null },
+      },
+    });
+    createClient.mockReturnValue(client);
+
+    await expect(requireFeature("broadcasts")).rejects.toBeInstanceOf(
+      ForbiddenError,
     );
   });
 });

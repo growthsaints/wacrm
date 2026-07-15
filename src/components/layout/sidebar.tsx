@@ -88,6 +88,11 @@ interface NavItem {
    * Purely informational — doesn't affect routing or access.
    */
   beta?: boolean;
+  /**
+   * Admin+ always sees this item; an 'agent' only sees it with the
+   * matching agent_feature_grants row (see useAuth's canAccessX).
+   */
+  requiredFeature?: "broadcasts" | "automations";
 }
 
 const navItems: NavItem[] = [
@@ -96,8 +101,8 @@ const navItems: NavItem[] = [
   { href: "/notifications", labelKey: "notifications", icon: Bell },
   { href: "/contacts", labelKey: "contacts", icon: Users },
   { href: "/pipelines", labelKey: "pipelines", icon: GitBranch },
-  { href: "/broadcasts", labelKey: "broadcasts", icon: Radio },
-  { href: "/automations", labelKey: "automations", icon: Zap },
+  { href: "/broadcasts", labelKey: "broadcasts", icon: Radio, requiredFeature: "broadcasts" },
+  { href: "/automations", labelKey: "automations", icon: Zap, requiredFeature: "automations" },
   { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
 ];
@@ -117,7 +122,20 @@ import { useTranslations } from "next-intl";
 export function Sidebar({ open = false, onClose }: SidebarProps) {
   const t = useTranslations("Sidebar");
   const pathname = usePathname();
-  const { profile, profileLoading, account, accountRole, signOut } = useAuth();
+  const {
+    profile,
+    profileLoading,
+    account,
+    accountRole,
+    signOut,
+    canAccessBroadcasts,
+    canAccessAutomations,
+  } = useAuth();
+  const visibleNavItems = navItems.filter((item) => {
+    if (item.requiredFeature === "broadcasts") return canAccessBroadcasts;
+    if (item.requiredFeature === "automations") return canAccessAutomations;
+    return true;
+  });
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   const isPlatformAdmin = usePlatformAdmin();
@@ -212,7 +230,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Main navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 lg:px-2">
           <ul className="flex flex-col gap-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));

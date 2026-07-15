@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { createClient } from '@/lib/supabase/server'
+import { requireFeature, toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import { syncTemplatesFromMeta } from '@/lib/whatsapp/template-sync'
 
@@ -13,33 +13,15 @@ import { syncTemplatesFromMeta } from '@/lib/whatsapp/template-sync'
  * (embedded-signup/complete/route.ts) share one implementation.
  */
 export async function POST() {
+  let ctx: Awaited<ReturnType<typeof requireFeature>>
   try {
-    const supabase = await createClient()
+    ctx = await requireFeature('templates')
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+  const { supabase, accountId, userId } = ctx
 
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    // Resolve the caller's account_id — both whatsapp_config and
-    // the message_templates we sync into are account-scoped.
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('account_id')
-      .eq('user_id', user.id)
-      .maybeSingle()
-    const accountId = profile?.account_id as string | undefined
-    if (!accountId) {
-      return NextResponse.json(
-        { error: 'Your profile is not linked to an account.' },
-        { status: 403 },
-      )
-    }
-
+  try {
     const { data: config, error: configError } = await supabase
       .from('whatsapp_config')
       .select('*')
@@ -71,7 +53,7 @@ export async function POST() {
     const result = await syncTemplatesFromMeta({
       supabase,
       accountId,
-      userId: user.id,
+      userId,
       wabaId: config.waba_id,
       accessToken,
     })

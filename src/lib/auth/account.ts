@@ -195,3 +195,40 @@ export async function requireRole(min: AccountRole): Promise<AccountContext> {
   }
   return ctx;
 }
+
+/** Broadcasts / Automations / Templates — admin+ by default, opened
+ *  up for a specific 'agent' member only via an explicit row in
+ *  `agent_feature_grants` (see migration 043). Viewer never qualifies
+ *  regardless of grants. */
+export type GatedFeature = "broadcasts" | "automations" | "templates";
+
+/**
+ * Resolve the caller's account context and enforce access to a
+ * gated feature: owner/admin always pass; an 'agent' passes only if
+ * explicitly granted that feature; viewer never passes.
+ *
+ * Throws the same errors as `requireRole`, plus `ForbiddenError`
+ * with a feature-specific message when an ungranted agent (or a
+ * viewer) is denied.
+ */
+export async function requireFeature(
+  feature: GatedFeature,
+): Promise<AccountContext> {
+  const ctx = await getCurrentAccount();
+  if (hasMinRole(ctx.role, "admin")) return ctx;
+
+  if (ctx.role === "agent") {
+    const { data } = await ctx.supabase
+      .from("agent_feature_grants")
+      .select("id")
+      .eq("account_id", ctx.accountId)
+      .eq("user_id", ctx.userId)
+      .eq("feature", feature)
+      .maybeSingle();
+    if (data) return ctx;
+  }
+
+  throw new ForbiddenError(
+    `Access to '${feature}' hasn't been granted to your account — ask an owner or admin.`,
+  );
+}

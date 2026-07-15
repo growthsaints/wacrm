@@ -30,7 +30,7 @@ import {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency, canEditSettings } = useAuth();
+  const { defaultCurrency, canEditSettings, canAccessTemplates } = useAuth();
   const { mode } = useTheme();
   const t = useTranslations('Settings');
 
@@ -38,11 +38,14 @@ export default function SettingsPage() {
   // section — deep-linkable, and it keeps the existing links in the
   // app sidebar/header working. Legacy tab values (tags, custom-fields)
   // resolve onto their new home; unknown/empty → the Overview landing.
-  // A non-admin deep-linking straight to an adminOnly section (Billing)
-  // falls back to Overview rather than rendering it.
+  // A non-admin deep-linking straight to an adminOnly section (Billing),
+  // or an ungranted agent deep-linking to Templates, falls back to
+  // Overview rather than rendering it.
   const rawSection = resolveSection(searchParams.get('tab'));
-  const section =
-    SECTION_META[rawSection].adminOnly && !canEditSettings ? 'overview' : rawSection;
+  const blocked =
+    (SECTION_META[rawSection].adminOnly && !canEditSettings) ||
+    (rawSection === 'templates' && !canAccessTemplates);
+  const section = blocked ? 'overview' : rawSection;
 
   const go = (next: SettingsSection) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -90,7 +93,13 @@ export default function SettingsPage() {
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[236px_minmax(0,1fr)] lg:items-start">
-        <SettingsRail active={section} onSelect={go} hints={hints} isAdmin={canEditSettings} />
+        <SettingsRail
+          active={section}
+          onSelect={go}
+          hints={hints}
+          isAdmin={canEditSettings}
+          canAccessTemplates={canAccessTemplates}
+        />
         <div className="min-w-0">{panel[section]}</div>
       </div>
     </div>

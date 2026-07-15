@@ -20,6 +20,7 @@ import {
 
 import { createClient } from "@/lib/supabase/client"
 import { useCan } from "@/hooks/use-can"
+import { useAuth } from "@/hooks/use-auth"
 import { useTranslations } from "next-intl"
 import type { Automation } from "@/types"
 import { Button } from "@/components/ui/button"
@@ -61,11 +62,21 @@ const TEMPLATE_ICON: Record<TemplateSlug, typeof Zap> = {
 export default function AutomationsPage() {
   const router = useRouter()
   const canCreate = useCan("send-messages")
+  const { canAccessAutomations, profileLoading } = useAuth()
   const t = useTranslations("Automations.list")
   const [automations, setAutomations] = useState<Automation[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<Automation | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Automations is admin+ by default — an 'agent' without the
+  // 'automations' grant gets bounced back to the dashboard rather than
+  // seeing an empty/broken page (the sidebar already hides the link).
+  useEffect(() => {
+    if (!profileLoading && !canAccessAutomations) {
+      router.replace("/dashboard")
+    }
+  }, [profileLoading, canAccessAutomations, router])
 
   async function load() {
     try {
@@ -148,12 +159,18 @@ export default function AutomationsPage() {
     )
   }
 
-  if (automations === null) {
+  if (automations === null || profileLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
       </div>
     )
+  }
+
+  if (!canAccessAutomations) {
+    // The redirect effect above is already in flight — render nothing
+    // rather than flashing the page's content first.
+    return null
   }
 
   const showTemplates = automations.length < 3
