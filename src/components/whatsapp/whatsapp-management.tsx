@@ -27,6 +27,23 @@ import { computeHealthStatus, type WhatsAppHealthStatus } from '@/lib/whatsapp/e
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 import { ConnectWhatsAppButton } from './connect-whatsapp-button';
 
+// Meta's tier values (TIER_250, TIER_2K, TIER_10K, TIER_100K,
+// TIER_UNLIMITED) — see Meta's Messaging Limits doc. Only TIER_250 is
+// below the first scaling path, so that's the only one that gets the
+// "increase your limit" hint.
+const MESSAGING_LIMIT_LABEL: Record<string, string> = {
+  TIER_250: '250 / day',
+  TIER_2K: '2,000 / day',
+  TIER_10K: '10,000 / day',
+  TIER_100K: '100,000 / day',
+  TIER_UNLIMITED: 'Unlimited',
+};
+
+function formatMessagingLimit(tier: string | null | undefined): string {
+  if (!tier) return '—';
+  return MESSAGING_LIMIT_LABEL[tier] ?? tier;
+}
+
 function fmtDateTime(iso: string | null | undefined): string | null {
   if (!iso) return null;
   return new Date(iso).toLocaleString(undefined, {
@@ -211,10 +228,23 @@ export function WhatsAppManagement({
           label={t('qualityRating')}
           value={t(`quality.${qualityKey}` as string)}
         />
-        <InfoRow label={t('messagingLimit')} value={config.messaging_limit_tier ?? '—'} />
+        <InfoRow label={t('messagingLimit')} value={formatMessagingLimit(config.messaging_limit_tier)} />
         <InfoRow label={t('verifiedStatus')} value={config.code_verification_status ?? '—'} />
         <InfoRow label={t('lastSync')} value={fmtDateTime(config.last_synced_at) ?? t('never')} />
       </div>
+
+      {(!config.messaging_limit_tier || config.messaging_limit_tier === 'TIER_250') && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <p className="font-medium">Only 250 messages/day right now</p>
+          <p className="mt-1 text-amber-700/90 dark:text-amber-300/90">
+            Verify your business in Meta Business Suite (Business Settings → Security Center → Start
+            Verification) to unlock 2,000/day — or send 2,000 delivered messages to unique customers
+            outside a customer-service window within 30 days using high-quality templates. After 2,000,
+            Meta scales your limit up automatically (10,000 → 100,000 → Unlimited) based on quality and
+            usage.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>

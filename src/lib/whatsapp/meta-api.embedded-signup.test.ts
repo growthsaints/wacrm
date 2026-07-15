@@ -129,15 +129,15 @@ describe('verifyPhoneNumber — widened fields', () => {
         verified_name: 'Acme Support',
         quality_rating: 'GREEN',
         code_verification_status: 'VERIFIED',
-        messaging_limit_tier: 'TIER_1K',
+        whatsapp_business_manager_messaging_limit: 'TIER_1K',
       }),
     );
     const result = await verifyPhoneNumber({ phoneNumberId: 'PNID_1', accessToken: 'tok' });
     expect(result.quality_rating).toBe('GREEN');
     expect(result.code_verification_status).toBe('VERIFIED');
-    expect(result.messaging_limit_tier).toBe('TIER_1K');
+    expect(result.whatsapp_business_manager_messaging_limit).toBe('TIER_1K');
     const [url] = fetchMock.mock.calls[0];
     expect(url).toContain('code_verification_status');
-    expect(url).toContain('messaging_limit_tier');
+    expect(url).toContain('whatsapp_business_manager_messaging_limit');
   });
 });

@@ -23,8 +23,14 @@ export interface MetaPhoneInfo {
   quality_rating?: string
   /** Meta's phone-verification state — VERIFIED / NOT_VERIFIED / EXPIRED etc. */
   code_verification_status?: string
-  /** WhatsApp Business Platform per-24h messaging tier, e.g. TIER_1K. */
-  messaging_limit_tier?: string
+  /**
+   * Business portfolio's messaging limit tier (e.g. TIER_250, TIER_2K,
+   * TIER_10K, TIER_100K, TIER_UNLIMITED) — shared across every phone
+   * number in the portfolio. This is `whatsapp_business_manager_messaging_limit`;
+   * Meta's older `messaging_limit_tier` field name for the same
+   * concept is deprecated (see Meta's Messaging Limits doc).
+   */
+  whatsapp_business_manager_messaging_limit?: string
 }
 
 interface MetaErrorResponse {
@@ -59,7 +65,7 @@ export async function verifyPhoneNumber(
   args: VerifyPhoneNumberArgs
 ): Promise<MetaPhoneInfo> {
   const { phoneNumberId, accessToken } = args
-  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,code_verification_status,messaging_limit_tier`
+  const url = `${META_API_BASE}/${phoneNumberId}?fields=id,display_phone_number,verified_name,quality_rating,code_verification_status,whatsapp_business_manager_messaging_limit`
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })

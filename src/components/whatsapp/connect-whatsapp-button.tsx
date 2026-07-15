@@ -5,8 +5,18 @@ import Script from 'next/script';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 import { Loader2 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 
 import { Button } from '@/components/ui/button';
+
+// AiSensy-style celebration burst for a newly-live WABA — purely
+// cosmetic, fires once right after the success toast.
+function celebrateWabaLive() {
+  const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ec4899'];
+  confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors });
+  confetti({ particleCount: 60, angle: 60, spread: 55, origin: { x: 0, y: 0.7 }, colors });
+  confetti({ particleCount: 60, angle: 120, spread: 55, origin: { x: 1, y: 0.7 }, colors });
+}
 
 // Minimal ambient shape for the Facebook JS SDK — we only use the two
 // calls Embedded Signup needs, not the full SDK surface.
@@ -105,6 +115,7 @@ export function ConnectWhatsAppButton({
 
         if (payload.success) {
           toast.success(t('connectedSuccess', { name: payload.business_name || payload.phone_info?.display_phone_number || 'WhatsApp' }));
+          celebrateWabaLive();
         } else {
           toast.error(t('connectedPartial', { reason: payload.registration_error || 'Unknown error' }), {
             duration: 12000,

@@ -222,7 +222,7 @@ export async function POST(request: Request) {
       display_phone_number: phoneInfo.display_phone_number ?? null,
       display_name: phoneInfo.verified_name ?? null,
       quality_rating: phoneInfo.quality_rating ?? null,
-      messaging_limit_tier: phoneInfo.messaging_limit_tier ?? null,
+      messaging_limit_tier: phoneInfo.whatsapp_business_manager_messaging_limit ?? null,
       code_verification_status: phoneInfo.code_verification_status ?? null,
       business_name: businessName,
       onboarding_method: 'embedded_signup',
