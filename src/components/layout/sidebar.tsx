@@ -14,6 +14,7 @@ import {
   Crown,
   GitBranch,
   LayoutDashboard,
+  LifeBuoy,
   LogOut,
   MessageSquare,
   Radio,
@@ -107,8 +108,18 @@ const navItems: NavItem[] = [
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
 ];
 
+// wa.me deep link — 91 (India country code) + the support number,
+// digits only, per WhatsApp's click-to-chat URL format.
+const SUPPORT_WHATSAPP_URL = "https://wa.me/919119750835";
+
 const bottomNavItems = [
   { href: "/settings", labelKey: "settings", icon: Settings },
+  {
+    href: SUPPORT_WHATSAPP_URL,
+    labelKey: "contactSupport",
+    icon: LifeBuoy,
+    external: true,
+  },
 ];
 
 interface SidebarProps {
@@ -311,12 +322,15 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
           <ul className="flex flex-col gap-1">
             {bottomNavItems.map((item) => {
-              const isActive = pathname.startsWith(item.href);
+              const isActive = !item.external && pathname.startsWith(item.href);
               return (
                 <li key={item.href}>
                   <Link
                     href={item.href}
                     title={t(item.labelKey as string)}
+                    {...(item.external
+                      ? { target: "_blank", rel: "noopener noreferrer" }
+                      : {})}
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",

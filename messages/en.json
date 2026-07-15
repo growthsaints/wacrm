@@ -28,6 +28,7 @@
     "flows": "Flows",
     "aiAgents": "AI Agents",
     "settings": "Settings",
+    "contactSupport": "Contact Support",
     "superAdmin": "Super Admin",
     "beta": "Beta",
     "unreadConversations": "{count} unread {count, plural, =1 {conversation} other {conversations}}",

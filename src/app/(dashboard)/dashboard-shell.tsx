@@ -7,6 +7,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { ImpersonationBanner } from "@/components/platform/impersonation-banner";
+import { SupportChatWidget } from "@/components/support/support-chat-widget";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -62,6 +63,7 @@ function DashboardShellInner({
           <main className="flex-1 overflow-y-auto p-4 sm:p-6">{children}</main>
         </div>
       </div>
+      <SupportChatWidget />
     </div>
   );
 }
