@@ -1425,3 +1425,95 @@ export async function getMetaFlow(args: {
   }
   return response.json()
 }
+
+// ============================================================
+// WhatsApp Business Profile — the customer-facing "About"/description/
+// address/photo shown on the business's WhatsApp number, distinct from
+// the WABA/Business Manager entities above.
+// ============================================================
+
+export type BusinessProfileVertical =
+  | 'UNDEFINED'
+  | 'OTHER'
+  | 'AUTO'
+  | 'BEAUTY'
+  | 'APPAREL'
+  | 'EDU'
+  | 'ENTERTAIN'
+  | 'EVENT_PLAN'
+  | 'FINANCE'
+  | 'GROCERY'
+  | 'GOVT'
+  | 'HOTEL'
+  | 'HEALTH'
+  | 'NONPROFIT'
+  | 'PROF_SERVICES'
+  | 'RETAIL'
+  | 'TRAVEL'
+  | 'RESTAURANT'
+  | 'NOT_A_BIZ'
+
+export interface MetaBusinessProfile {
+  about?: string
+  address?: string
+  description?: string
+  email?: string
+  profile_picture_url?: string
+  websites?: string[]
+  vertical?: BusinessProfileVertical
+}
+
+/** GET the customer-facing WhatsApp Business Profile for a phone number. */
+export async function getBusinessProfile(args: {
+  phoneNumberId: string
+  accessToken: string
+}): Promise<MetaBusinessProfile> {
+  const { phoneNumberId, accessToken } = args
+  const url = `${META_API_BASE}/${phoneNumberId}/whatsapp_business_profile?fields=about,address,description,email,profile_picture_url,websites,vertical`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: MetaBusinessProfile[] }
+  return data.data?.[0] ?? {}
+}
+
+export interface UpdateBusinessProfileArgs {
+  phoneNumberId: string
+  accessToken: string
+  about?: string
+  address?: string
+  description?: string
+  email?: string
+  websites?: string[]
+  vertical?: BusinessProfileVertical
+  /** From `uploadResumableMedia` — set to change the profile photo. */
+  profilePictureHandle?: string
+}
+
+/** Update the customer-facing WhatsApp Business Profile for a phone number. */
+export async function updateBusinessProfile(
+  args: UpdateBusinessProfileArgs,
+): Promise<{ success: boolean }> {
+  const { phoneNumberId, accessToken, profilePictureHandle, ...fields } = args
+  const body: Record<string, unknown> = {
+    messaging_product: 'whatsapp',
+    ...fields,
+  }
+  if (profilePictureHandle) body.profile_picture_handle = profilePictureHandle
+
+  const response = await fetch(`${META_API_BASE}/${phoneNumberId}/whatsapp_business_profile`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}

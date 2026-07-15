@@ -46,6 +46,9 @@ import { TopCampaignsTable } from '@/components/dashboard/top-campaigns-table'
 import { ContactGrowthChart } from '@/components/dashboard/contact-growth-chart'
 import { AutomationAnalyticsTable } from '@/components/dashboard/automation-analytics-table'
 import { WalletBalanceCard } from '@/components/dashboard/wallet-balance-card'
+import { WhatsAppStatusCard } from '@/components/dashboard/whatsapp-status-card'
+import { WhatsAppOnboardingChecklist } from '@/components/dashboard/whatsapp-onboarding-checklist'
+import { DashboardGuideCarousel } from '@/components/dashboard/dashboard-guide-carousel'
 
 import { useTranslations } from 'next-intl'
 
@@ -195,7 +198,16 @@ export default function DashboardPage() {
             {t('description')}
           </p>
         </div>
-        <WalletBalanceCard />
+        <div className="flex flex-col items-end gap-3">
+          <WalletBalanceCard />
+          <WhatsAppStatusCard />
+        </div>
+      </div>
+
+      {/* Getting started: guide carousel + WhatsApp setup checklist */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <DashboardGuideCarousel />
+        <WhatsAppOnboardingChecklist />
       </div>
 
       {/* Metric cards */}
