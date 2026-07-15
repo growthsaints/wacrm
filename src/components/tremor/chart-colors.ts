@@ -14,6 +14,23 @@
 export type ColorUtility = "bg" | "stroke" | "fill" | "text"
 
 export const chartColors = {
+  // Follows the active accent theme's --chart-1/--chart-2 tokens
+  // (see src/app/globals.css) instead of a fixed Tailwind color, so
+  // brand-accent charts stay correct across every theme + the
+  // built-in theme picker, not just whichever accent was default when
+  // the chart was built.
+  theme1: {
+    bg: "bg-[var(--chart-1)]",
+    stroke: "stroke-[var(--chart-1)]",
+    fill: "fill-[var(--chart-1)]",
+    text: "text-[var(--chart-1)]",
+  },
+  theme2: {
+    bg: "bg-[var(--chart-2)]",
+    stroke: "stroke-[var(--chart-2)]",
+    fill: "fill-[var(--chart-2)]",
+    text: "text-[var(--chart-2)]",
+  },
   blue: {
     bg: "bg-blue-500",
     stroke: "stroke-blue-500",
