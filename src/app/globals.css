@@ -307,20 +307,29 @@ html[data-theme="ember"] {
   --sidebar-ring: #ff6b2c;
 }
 
-/* Ember's own layered background — extremely soft radial washes plus
- * a scattered, near-invisible icon pattern (painted by the
- * <BackgroundPattern> component in the root layout, gated to this
- * theme via the same [data-theme="ember"] attribute selector so
- * every other accent renders exactly as before). */
-html[data-theme="ember"] body {
+/* Ember's own layered background — soft radial washes over a
+ * seamless, repeating scattered-icon pattern tile (public/bg-pattern-
+ * tile.svg — chat/phone/star/heart/calendar/lightbulb/chart/users/
+ * dollar/trophy/smile/globe/mail/gift/target/percent/cart/rocket,
+ * baked in at low opacity). Gated to this theme via the
+ * [data-theme="ember"] attribute selector so every other accent
+ * renders exactly as before. */
+/* Targets .app-shell-surface (a marker class on the handful of
+ * full-screen root wrappers — the dashboard shell, each auth page)
+ * rather than <body>, because those wrappers paint their own opaque
+ * `bg-background` on top of <body> and would otherwise hide anything
+ * painted there. Deliberately NOT applied to plain `.bg-background`
+ * (used all over — buttons, inputs, badges) since that would tile
+ * this page-sized pattern into tiny elements too. */
+html[data-theme="ember"] body,
+html[data-theme="ember"] .app-shell-surface {
   background-image:
     radial-gradient(1200px circle at 100% 0%, rgba(255, 107, 44, 0.08), transparent 55%),
-    radial-gradient(1000px circle at 0% 100%, rgba(255, 166, 77, 0.05), transparent 55%);
-  background-attachment: fixed;
-}
-
-html[data-theme="ember"] .bg-pattern-layer {
-  opacity: 1;
+    radial-gradient(1000px circle at 0% 100%, rgba(255, 166, 77, 0.05), transparent 55%),
+    url("/bg-pattern-tile.svg");
+  background-repeat: no-repeat, no-repeat, repeat;
+  background-size: auto, auto, 680px 220px;
+  background-attachment: fixed, fixed, fixed;
 }
 
 @layer base {
@@ -355,13 +364,5 @@ html[data-theme="ember"] .bg-pattern-layer {
     .card-hover:hover {
       transform: none;
     }
-  }
-
-  /* Background icon-pattern layer — invisible everywhere except the
-   * Ember theme (see the [data-theme="ember"] rule above). Painted by
-   * <BackgroundPattern> in the root layout. */
-  .bg-pattern-layer {
-    opacity: 0;
-    transition: opacity 300ms ease;
   }
 }

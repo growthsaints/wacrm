@@ -6,7 +6,6 @@ import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ThemedToaster } from "@/components/themed-toaster";
-import { BackgroundPattern } from "@/components/layout/background-pattern";
 import {
   DEFAULT_MODE,
   DEFAULT_THEME,
@@ -108,7 +107,6 @@ export default async function RootLayout({
       <body className="min-h-full bg-background text-foreground font-sans">
         <NextIntlClientProvider messages={messages} locale={locale}>
           <ThemeProvider>
-            <BackgroundPattern />
             {children}
             <ThemedToaster />
           </ThemeProvider>
