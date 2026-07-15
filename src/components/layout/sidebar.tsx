@@ -257,10 +257,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       // fingers can hit them reliably (≥44px). Desktop
                       // (lg): icon stacked over a small label — the
                       // AiSensy-style narrow icon rail.
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
                       isActive
-                        ? "bg-primary/10 text-primary"
+                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >
@@ -318,10 +318,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     href={item.href}
                     title={t(item.labelKey as string)}
                     className={cn(
-                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
                       isActive
-                        ? "bg-primary/10 text-primary"
+                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
                     )}
                   >

@@ -48,6 +48,9 @@
   --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
   --color-primary-soft-2: var(--primary-soft-2);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -83,6 +86,25 @@
  * Token shapes come straight from the design handoff at
  * project/Color Themes.html — change one, change the other.
  * ============================================================ */
+
+/* ---- Universal status colors — same across every accent/mode, since
+ * "delivered" green or "pending" amber shouldn't shift when someone
+ * changes their accent theme. ---- */
+:root {
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --info: #3b82f6;
+
+  /* Soft layered shadow scale — reused by Card/Button/Dialog hover
+   * states so every surface lifts with the same premium feel. */
+  --shadow-color: 220 20% 10%;
+  --shadow-soft:
+    0 1px 2px hsl(var(--shadow-color) / 0.04),
+    0 2px 6px hsl(var(--shadow-color) / 0.05);
+  --shadow-soft-lg:
+    0 2px 4px hsl(var(--shadow-color) / 0.04),
+    0 12px 24px -8px hsl(var(--shadow-color) / 0.12);
+}
 
 /* ---- MODE: neutral surfaces ---- */
 
@@ -236,6 +258,71 @@ html[data-theme="rose"] {
   --sidebar-ring: oklch(0.645 0.22 16);
 }
 
+/* Ember — the premium warm cream + burnt-orange enterprise look.
+ * Unlike the other accents (which only set the primary/chart/sidebar-
+ * primary tokens and inherit neutral surfaces from MODE), Ember
+ * also overrides background/card/border/sidebar so it renders as a
+ * single self-contained look with a permanently-dark sidebar,
+ * regardless of the light/dark mode toggle — this is intentional:
+ * it's declared after the MODE blocks above, so same-specificity
+ * cascade order lets it win for the surface tokens it re-declares. */
+html[data-theme="ember"] {
+  --background: #fff8f2;
+  --foreground: #1f2937;
+  --card: #ffffff;
+  --card-2: #fff1e8;
+  --card-foreground: #1f2937;
+  --popover: #ffffff;
+  --popover-foreground: #1f2937;
+  --secondary: #fff1e8;
+  --secondary-foreground: #1f2937;
+  --muted: #fff1e8;
+  --muted-foreground: #6b7280;
+  --accent: #fff1e8;
+  --accent-foreground: #1f2937;
+  --destructive: #ef4444;
+  --border: #eee6da;
+  --input: #eee6da;
+  --radius: 1rem;
+
+  --primary: #ff6b2c;
+  --primary-foreground: #ffffff;
+  --primary-hover: #f25c1f;
+  --primary-soft: rgba(255, 107, 44, 0.12);
+  --primary-soft-2: rgba(255, 107, 44, 0.22);
+  --ring: #ff6b2c;
+  --chart-1: #ff6b2c;
+  --chart-2: #22c55e;
+  --chart-3: #3b82f6;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+
+  --sidebar: #111827;
+  --sidebar-foreground: #f9fafb;
+  --sidebar-accent: #1f2937;
+  --sidebar-accent-foreground: #f9fafb;
+  --sidebar-border: #1f2937;
+  --sidebar-primary: #ff6b2c;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #ff6b2c;
+}
+
+/* Ember's own layered background — extremely soft radial washes plus
+ * a scattered, near-invisible icon pattern (painted by the
+ * <BackgroundPattern> component in the root layout, gated to this
+ * theme via the same [data-theme="ember"] attribute selector so
+ * every other accent renders exactly as before). */
+html[data-theme="ember"] body {
+  background-image:
+    radial-gradient(1200px circle at 100% 0%, rgba(255, 107, 44, 0.08), transparent 55%),
+    radial-gradient(1000px circle at 0% 100%, rgba(255, 166, 77, 0.05), transparent 55%);
+  background-attachment: fixed;
+}
+
+html[data-theme="ember"] .bg-pattern-layer {
+  opacity: 1;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
@@ -245,5 +332,36 @@ html[data-theme="rose"] {
   }
   html {
     @apply font-sans;
+  }
+}
+
+@layer utilities {
+  /* Reusable "premium panel" hover — lift + scale + deepen shadow +
+   * border tints toward primary. Used by Card and anywhere else a
+   * surface should feel alive on hover. Respects reduced-motion by
+   * dropping the transform (shadow/border still transition). */
+  .card-hover {
+    transition:
+      transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      border-color 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .card-hover:hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: var(--shadow-soft-lg);
+    border-color: var(--primary);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .card-hover:hover {
+      transform: none;
+    }
+  }
+
+  /* Background icon-pattern layer — invisible everywhere except the
+   * Ember theme (see the [data-theme="ember"] rule above). Painted by
+   * <BackgroundPattern> in the root layout. */
+  .bg-pattern-layer {
+    opacity: 0;
+    transition: opacity 300ms ease;
   }
 }
