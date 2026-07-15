@@ -16,7 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { MessageSquare, CheckCircle, UsersRound } from "lucide-react";
+import { CheckCircle, UsersRound } from "lucide-react";
 
 // `useSearchParams` opts the component out of static prerendering
 // unless wrapped in Suspense — same pattern as /login.
@@ -133,11 +133,15 @@ function SignupPageInner() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-md border-border bg-card">
         <CardHeader className="items-center text-center">
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl">
             {inviteToken ? (
               <UsersRound className="h-6 w-6 text-primary" />
             ) : (
-              <MessageSquare className="h-6 w-6 text-primary" />
+              <img
+                src="/logo-mark.png"
+                alt="Growth Saints"
+                className="h-12 w-12 rounded-xl object-cover"
+              />
             )}
           </div>
           <CardTitle className="text-xl text-foreground">
