@@ -14,6 +14,7 @@
  */
 
 export const THEME_IDS = [
+  "teal",
   "violet",
   "emerald",
   "cobalt",
@@ -23,7 +24,7 @@ export const THEME_IDS = [
 
 export type ThemeId = (typeof THEME_IDS)[number];
 
-export const DEFAULT_THEME: ThemeId = "violet";
+export const DEFAULT_THEME: ThemeId = "teal";
 
 export const STORAGE_KEY = "wacrm.theme";
 
@@ -32,18 +33,21 @@ export const STORAGE_KEY = "wacrm.theme";
  *
  * The CSS variables live in `src/app/globals.css` under
  * `html[data-mode="..."]` blocks (neutral surfaces only). Applied
- * at runtime via `document.documentElement.dataset.mode`. Dark is
- * the historical default and stays the app's identity; light is the
- * opt-in eye-strain-friendly alternative.
+ * at runtime via `document.documentElement.dataset.mode`. Light is
+ * now the default — matches the light-first look of the AiSensy-style
+ * reference this theme is modeled on; dark stays a fully-supported
+ * opt-in alternative for anyone who prefers it.
  *
  * Persisted under its own localStorage key so it composes freely
  * with the accent choice (you can run Violet-light or Violet-dark).
+ * Only affects sessions with no saved preference yet — anyone who
+ * already picked a mode keeps it.
  */
 export const MODES = ["light", "dark"] as const;
 
 export type Mode = (typeof MODES)[number];
 
-export const DEFAULT_MODE: Mode = "dark";
+export const DEFAULT_MODE: Mode = "light";
 
 export const MODE_STORAGE_KEY = "wacrm.mode";
 
@@ -67,6 +71,12 @@ export interface ThemeMeta {
 }
 
 export const THEMES: ReadonlyArray<ThemeMeta> = [
+  {
+    id: "teal",
+    name: "Teal",
+    tagline: "Deep teal + WhatsApp-adjacent green — warm, message-first feel.",
+    swatch: "oklch(0.32 0.05 195)",
+  },
   {
     id: "violet",
     name: "Violet",

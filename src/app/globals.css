@@ -147,7 +147,26 @@ html[data-mode="light"] {
 
 /* ---- ACCENT: primary color ---- */
 
+/* Deep teal primary (buttons, active nav, focus rings) paired with a
+ * vivid WhatsApp-adjacent green for chart-2 — modeled on the
+ * dark-teal-header / bright-green-accent look of WhatsApp-first CRMs
+ * (AiSensy et al.), reference screenshots supplied by the customer.
+ * Now the app default — see DEFAULT_THEME in src/lib/themes.ts. */
 :root,
+html[data-theme="teal"] {
+  --primary: oklch(0.32 0.05 195);
+  --primary-foreground: oklch(0.985 0 0);
+  --primary-hover: oklch(0.38 0.055 195);
+  --primary-soft: oklch(0.32 0.05 195 / 0.12);
+  --primary-soft-2: oklch(0.32 0.05 195 / 0.22);
+  --ring: oklch(0.32 0.05 195);
+  --chart-1: oklch(0.32 0.05 195);
+  --chart-2: oklch(0.72 0.19 152);
+  --sidebar-primary: oklch(0.32 0.05 195);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-ring: oklch(0.32 0.05 195);
+}
+
 html[data-theme="violet"] {
   --primary: oklch(0.526 0.247 293);
   --primary-foreground: oklch(0.985 0 0);
