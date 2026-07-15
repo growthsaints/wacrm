@@ -66,7 +66,7 @@ interface PendingSignupInfo {
   businessId?: string;
 }
 
-const META_JS_SDK_VERSION = 'v21.0';
+const META_JS_SDK_VERSION = 'v25.0';
 
 export function ConnectWhatsAppButton({
   onConnected,
@@ -218,7 +218,7 @@ export function ConnectWhatsAppButton({
         strategy="afterInteractive"
         onLoad={() => {
           window.fbAsyncInit = () => {
-            window.FB?.init({ appId: appId!, autoLogAppEvents: true, xfbml: false, version: META_JS_SDK_VERSION });
+            window.FB?.init({ appId: appId!, autoLogAppEvents: true, xfbml: true, version: META_JS_SDK_VERSION });
             setSdkReady(true);
           };
           // The SDK calls fbAsyncInit itself once loaded from the
