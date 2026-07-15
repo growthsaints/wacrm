@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
+import { GoogleSignInButton } from "@/components/auth/google-signin-button";
 import {
   Card,
   CardContent,
@@ -142,6 +143,17 @@ function LoginPageInner() {
               {loading ? t('signingIn') : t('signIn')}
             </Button>
           </form>
+
+          <div className="my-4 flex items-center gap-3">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">{t('orContinueWith')}</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+
+          <GoogleSignInButton
+            next={inviteToken ? `/join/${encodeURIComponent(inviteToken)}` : "/dashboard"}
+            label={t('continueWithGoogle')}
+          />
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
             {t('noAccount')}{" "}

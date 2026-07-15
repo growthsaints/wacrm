@@ -12,7 +12,9 @@
     "signingIn": "Signing in...",
     "signIn": "Sign in",
     "noAccount": "Don't have an account?",
-    "createAccount": "Create account"
+    "createAccount": "Create account",
+    "orContinueWith": "or continue with",
+    "continueWithGoogle": "Continue with Google"
   },
   "Sidebar": {
     "title": "Growth Saints CRM",
