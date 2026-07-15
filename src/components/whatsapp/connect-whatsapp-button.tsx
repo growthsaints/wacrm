@@ -90,6 +90,23 @@ export function ConnectWhatsAppButton({
   const pendingInfoRef = useRef<PendingSignupInfo | null>(null);
   const completingRef = useRef(false);
 
+  // Belt-and-suspenders for a popup the user closes by hand. FB.login's
+  // own callback normally fires even then, but Meta's own reference
+  // Tech Provider sample app defends against the rare case where it
+  // doesn't (browser popup-blocker quirks, etc.) by tracking the popup
+  // window itself and polling for `.closed` — otherwise `connecting`
+  // can get stuck true forever with no path back to an idle button.
+  const popupWindowRef = useRef<Window | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    popupWindowRef.current = null;
+  }, []);
+
   const complete = useCallback(
     async (code: string, info: PendingSignupInfo) => {
       if (completingRef.current) return;
@@ -129,9 +146,10 @@ export function ConnectWhatsAppButton({
         completingRef.current = false;
         pendingCodeRef.current = null;
         pendingInfoRef.current = null;
+        stopPolling();
       }
     },
-    [onConnected, t],
+    [onConnected, t, stopPolling],
   );
 
   useEffect(() => {
@@ -156,6 +174,7 @@ export function ConnectWhatsAppButton({
         setConnecting(false);
         pendingCodeRef.current = null;
         pendingInfoRef.current = null;
+        stopPolling();
         return;
       }
 
@@ -164,6 +183,7 @@ export function ConnectWhatsAppButton({
         setConnecting(false);
         pendingCodeRef.current = null;
         pendingInfoRef.current = null;
+        stopPolling();
         return;
       }
 
@@ -178,14 +198,31 @@ export function ConnectWhatsAppButton({
     }
 
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [complete, t]);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      stopPolling();
+    };
+  }, [complete, t, stopPolling]);
 
   function handleConnect() {
     if (!window.FB || !appId || !configId) return;
     setConnecting(true);
+    stopPolling();
+
+    // Capture the popup FB.login opens so we can detect a manual close.
+    // FB.login opens it synchronously before invoking its callback, so
+    // briefly patching window.open catches the reference.
+    const originalWindowOpen = window.open;
+    window.open = (...args: Parameters<typeof window.open>) => {
+      const popup = originalWindowOpen.apply(window, args);
+      popupWindowRef.current = popup;
+      window.open = originalWindowOpen; // restore immediately
+      return popup;
+    };
+
     window.FB.login(
       (response) => {
+        stopPolling();
         const code = response.authResponse?.code;
         if (!code) {
           // No code and no CANCEL postMessage yet (e.g. the user closed
@@ -205,6 +242,22 @@ export function ConnectWhatsAppButton({
         extras: { setup: {}, featureType: '', sessionInfoVersion: '3' },
       },
     );
+
+    // Fallback for the rare case FB.login's own callback never fires
+    // after the user manually closes the popup. Guarded on
+    // completingRef so it never fires once a real FINISH is already
+    // being processed — Facebook closes the popup itself on finish,
+    // and that's expected, not a cancellation.
+    pollTimerRef.current = setInterval(() => {
+      if (completingRef.current) {
+        stopPolling();
+        return;
+      }
+      if (popupWindowRef.current?.closed) {
+        stopPolling();
+        setConnecting(false);
+      }
+    }, 500);
   }
 
   if (!configured) {
