@@ -14,13 +14,16 @@ import {
  * gate itself. Returns `{ enabled: false }` (not a 403) when there's
  * no license or the caller's role doesn't qualify — each Business
  * Workspace API route re-checks independently server-side.
+ *
+ * accessType/expiryDate ride along for the tenant-facing Settings
+ * page — read-only there; only a Super Admin can change them.
  */
 export async function GET() {
   try {
     const { supabase, accountId, role } = await getCurrentAccount()
 
     if (!canAccessBusinessWorkspace(role)) {
-      return NextResponse.json({ enabled: false, features: {} })
+      return NextResponse.json({ enabled: false, features: {}, accessType: null, expiryDate: null })
     }
 
     const license = await getBusinessWorkspaceLicense(supabase, accountId)
@@ -29,6 +32,8 @@ export async function GET() {
     return NextResponse.json({
       enabled: active,
       features: active ? license?.features ?? {} : ({} as Record<BusinessWorkspaceFeature, boolean>),
+      accessType: license?.accessType ?? null,
+      expiryDate: license?.expiryDate ?? null,
     })
   } catch (err) {
     return toErrorResponse(err)
