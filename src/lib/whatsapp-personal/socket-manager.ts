@@ -5,6 +5,7 @@ import {
   DisconnectReason,
   fetchLatestBaileysVersion,
   isJidUser,
+  isLidUser,
   makeWASocket,
   // Aliased away from its original name — it's a plain Node.js
   // helper, not a React Hook, but eslint-plugin-react-hooks flags any
@@ -202,29 +203,44 @@ function phoneFromJid(jid: string): string {
 }
 
 /**
+ * Resolves a message to the real E.164 phone number of the 1:1 contact
+ * it belongs to, or null if it isn't a genuine 1:1 contact message.
+ *
+ * WhatsApp's newer privacy addressing means a legitimate person's chat
+ * can arrive with `remoteJid` on `@lid` (not just `@s.whatsapp.net`) —
+ * this isn't limited to Channels/newsletters, it now applies to regular
+ * contacts too. Baileys still hands us that contact's real number
+ * separately on `msg.key.senderPn` whenever the JID is a resolvable
+ * person, so `@lid` messages are only accepted when that field is
+ * present. A Channel/newsletter post's chatId ends in `@newsletter`
+ * (a distinct JID type in Baileys' own decoder, never `@lid`), and other
+ * non-contact types (groups, broadcasts) carry no `senderPn` either — so
+ * this stays a strict allowlist, it just also covers the LID case.
+ */
+function resolveContactPhoneNumber(msg: WAMessage): string | null {
+  const remoteJid = msg.key.remoteJid
+  if (!remoteJid) return null
+  if (isJidUser(remoteJid)) return phoneFromJid(remoteJid)
+  if (isLidUser(remoteJid) && msg.key.senderPn) return phoneFromJid(msg.key.senderPn)
+  return null
+}
+
+/**
  * Persists inbound AND outbound (echoed back from our own sends, or
  * sent from the linked phone itself) text messages into the isolated
- * workspace_whatsapp_personal_* tables. This is strictly a 1:1
- * text-capture tool, so it ALLOWLISTS regular `@s.whatsapp.net` user
- * JIDs via isJidUser rather than denylisting known non-contact types
- * one by one — groups, WhatsApp Channels (@newsletter), broadcast
- * lists (@broadcast/status@broadcast), and privacy-preserving `@lid`
- * JIDs (which a followed Channel's posts can arrive as, and which
- * don't decode to a real phone number) are all excluded by construction
- * this way, along with any other non-contact JID type WhatsApp adds
- * later. Non-text messages are skipped too.
+ * workspace_whatsapp_personal_* tables. Non-text messages are skipped.
+ * See resolveContactPhoneNumber() for the 1:1-contact allowlist logic.
  */
 async function captureIncomingMessages(accountId: string, messages: WAMessage[]): Promise<void> {
   const admin = platformAdminClient()
 
   for (const msg of messages) {
-    const remoteJid = msg.key.remoteJid
-    if (!remoteJid || !isJidUser(remoteJid)) continue
+    const phoneNumber = resolveContactPhoneNumber(msg)
+    if (!phoneNumber) continue
 
     const text = extractText(msg)
     if (!text) continue
 
-    const phoneNumber = phoneFromJid(remoteJid)
     const direction: 'inbound' | 'outbound' = msg.key.fromMe ? 'outbound' : 'inbound'
     const createdAt = msg.messageTimestamp
       ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
