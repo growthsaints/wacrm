@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ArrowLeftRight, LayoutDashboard, Settings, Sprout, UsersRound, Wifi, Building2 } from "lucide-react";
+import { ArrowLeftRight, Briefcase, LayoutDashboard, Settings, Sprout, UsersRound, Wifi, Building2 } from "lucide-react";
 
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { href: "/platform/organizations", label: "Organizations", icon: UsersRound },
   { href: "/platform/whatsapp", label: "WhatsApp Numbers", icon: Wifi },
   { href: "/platform/enterprise", label: "Enterprise Features", icon: Building2 },
+  { href: "/platform/business-workspace", label: "Business Workspace", icon: Briefcase },
   { href: "/platform/settings", label: "Settings", icon: Settings },
 ];
 

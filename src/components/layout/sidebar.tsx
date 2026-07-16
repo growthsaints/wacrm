@@ -9,10 +9,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { usePlatformAdmin } from "@/hooks/use-platform-admin";
 import { useTotalUnread } from "@/hooks/use-total-unread";
 import { useEnterpriseFeatures } from "@/hooks/use-enterprise-features";
+import { useBusinessWorkspaceFeatures } from "@/hooks/use-business-workspace-features";
 import { useUnreadNotifications } from "@/hooks/use-unread-notifications";
 import {
   Bell,
   Bot,
+  Briefcase,
   Building2,
   Crown,
   GitBranch,
@@ -151,6 +153,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const isPlatformAdmin = usePlatformAdmin();
   const { enabled: enterpriseLicensed, features: enterpriseFeatures } = useEnterpriseFeatures();
   const enterpriseEnabled = enterpriseLicensed && Boolean(enterpriseFeatures.campaign_intelligence);
+  const { enabled: businessWorkspaceEnabled } = useBusinessWorkspaceFeatures();
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
@@ -341,6 +344,35 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     <Building2 className="h-4 w-4 shrink-0" />
                     <span className="truncate lg:w-full lg:overflow-visible lg:whitespace-normal lg:text-clip">
                       Campaign Intelligence
+                    </span>
+                  </Link>
+                </li>
+              </ul>
+            </>
+          )}
+
+          {businessWorkspaceEnabled && (
+            <>
+              <div className="my-4 border-t border-border" />
+              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase lg:hidden">
+                Business Workspace
+              </p>
+              <ul className="flex flex-col gap-1">
+                <li>
+                  <Link
+                    href="/business-workspace"
+                    title="Business Workspace"
+                    className={cn(
+                      "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
+                      pathname.startsWith("/business-workspace")
+                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
+                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                    )}
+                  >
+                    <Briefcase className="h-4 w-4 shrink-0" />
+                    <span className="truncate lg:w-full lg:overflow-visible lg:whitespace-normal lg:text-clip">
+                      Business Workspace
                     </span>
                   </Link>
                 </li>
