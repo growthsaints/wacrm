@@ -127,6 +127,11 @@ export default function SharedInboxPage() {
                     <span className="inline-flex items-center gap-1.5">
                       {r.isPinned && <Pin className="size-3 text-primary" />}
                       {r.contactName || r.contactPhone}
+                      {r.channel === "personal_whatsapp" && (
+                        <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                          Personal WhatsApp
+                        </Badge>
+                      )}
                     </span>
                   </TableCell>
                   <TableCell>
@@ -148,7 +153,11 @@ export default function SharedInboxPage() {
                   </TableCell>
                   <TableCell>
                     <Link
-                      href={`/inbox?c=${r.id}`}
+                      href={
+                        r.channel === "personal_whatsapp"
+                          ? `/business-workspace/personal-inbox?conversation=${r.id}`
+                          : `/inbox?c=${r.id}`
+                      }
                       className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
                     >
                       Open <ExternalLink className="size-3" />

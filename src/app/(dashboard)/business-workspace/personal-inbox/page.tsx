@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -25,8 +26,9 @@ interface MessageRow {
 }
 
 export default function PersonalInboxPage() {
+  const searchParams = useSearchParams();
   const [conversations, setConversations] = useState<ConversationRow[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get("conversation"));
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);

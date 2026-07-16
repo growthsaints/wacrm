@@ -833,6 +833,10 @@ export interface SharedInboxRow {
   lastMessageText: string | null
   lastMessageAt: string | null
   unreadCount: number
+  /** 'personal_whatsapp' rows come from the QR-linked connection —
+   *  read-only here, reply happens in Personal Inbox, never through
+   *  the Cloud API send path this page's "Open" link normally uses. */
+  channel: 'cloud_api' | 'personal_whatsapp'
 }
 
 export interface SharedInboxResult {
@@ -894,24 +898,87 @@ export async function getSharedInbox(
       : { data: [] as Array<{ user_id: string; full_name: string }> }
   const agentNameByUserId = new Map((agents ?? []).map((a) => [a.user_id, a.full_name]))
 
+  const cloudApiRows: SharedInboxRow[] = rows.map((r) => {
+    const contact = Array.isArray(r.contacts) ? r.contacts[0] : r.contacts
+    return {
+      id: r.id,
+      contactId: r.contact_id,
+      contactName: contact?.name ?? null,
+      contactPhone: contact?.phone ?? '',
+      status: r.status,
+      isPinned: r.is_pinned,
+      assignedAgentId: r.assigned_agent_id,
+      assignedAgentName: r.assigned_agent_id ? agentNameByUserId.get(r.assigned_agent_id) ?? null : null,
+      lastMessageText: r.last_message_text,
+      lastMessageAt: r.last_message_at,
+      unreadCount: r.unread_count,
+      channel: 'cloud_api',
+    }
+  })
+
+  // Personal WhatsApp conversations have no status/pinned/assigned-
+  // agent concept, so they only appear on the unfiltered first page
+  // (or when just searching by name/phone) — filtering by any of
+  // those Cloud-API-specific attributes naturally excludes them.
+  let personalRows: SharedInboxRow[] = []
+  let personalTotalCount = 0
+  if (page === 0 && !filters.status && !filters.assignedAgentId && !filters.pinnedOnly) {
+    const { data: personalConvs, count: pCount } = await db
+      .from('workspace_whatsapp_personal_conversations')
+      .select('id, last_message_text, last_message_at, unread_count, workspace_whatsapp_personal_contacts(phone_number, display_name)', {
+        count: 'exact',
+      })
+      .eq('account_id', accountId)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(pageSize)
+
+    personalTotalCount = pCount ?? 0
+    personalRows = ((personalConvs ?? []) as unknown as Array<{
+      id: string
+      last_message_text: string | null
+      last_message_at: string | null
+      unread_count: number
+      workspace_whatsapp_personal_contacts:
+        | { phone_number: string; display_name: string | null }[]
+        | { phone_number: string; display_name: string | null }
+        | null
+    }>)
+      .map((c) => {
+        const contact = Array.isArray(c.workspace_whatsapp_personal_contacts)
+          ? c.workspace_whatsapp_personal_contacts[0]
+          : c.workspace_whatsapp_personal_contacts
+        return {
+          id: c.id,
+          contactId: c.id,
+          contactName: contact?.display_name ?? null,
+          contactPhone: contact?.phone_number ?? '',
+          status: 'open',
+          isPinned: false,
+          assignedAgentId: null,
+          assignedAgentName: null,
+          lastMessageText: c.last_message_text,
+          lastMessageAt: c.last_message_at,
+          unreadCount: c.unread_count,
+          channel: 'personal_whatsapp' as const,
+        }
+      })
+      .filter((r) => {
+        if (!filters.search) return true
+        const term = filters.search.toLowerCase()
+        return (r.contactName ?? '').toLowerCase().includes(term) || r.contactPhone.includes(term)
+      })
+  }
+
+  const merged = [...cloudApiRows, ...personalRows].sort((a, b) => {
+    if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1
+    const aAt = a.lastMessageAt ?? ''
+    const bAt = b.lastMessageAt ?? ''
+    return aAt > bAt ? -1 : aAt < bAt ? 1 : 0
+  })
+
   return {
-    rows: rows.map((r) => {
-      const contact = Array.isArray(r.contacts) ? r.contacts[0] : r.contacts
-      return {
-        id: r.id,
-        contactId: r.contact_id,
-        contactName: contact?.name ?? null,
-        contactPhone: contact?.phone ?? '',
-        status: r.status,
-        isPinned: r.is_pinned,
-        assignedAgentId: r.assigned_agent_id,
-        assignedAgentName: r.assigned_agent_id ? agentNameByUserId.get(r.assigned_agent_id) ?? null : null,
-        lastMessageText: r.last_message_text,
-        lastMessageAt: r.last_message_at,
-        unreadCount: r.unread_count,
-      }
-    }),
-    totalCount: count ?? 0,
+    rows: merged.slice(0, pageSize),
+    totalCount: (count ?? 0) + personalTotalCount,
     notTrackedYet: ['Internal Notes (use the Notes page against the contact today)', 'Mentions'],
   }
 }
