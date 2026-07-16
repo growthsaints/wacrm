@@ -708,12 +708,12 @@ export async function getDealsList(
 }
 
 // ---------------------------------------------------------------
-// Team Workspace — Phase 2. Roster + live presence (reuses
-// member_presence, migration 024) + a simple, real weekly performance
-// count. Departments/Teams-as-structured-entities, Internal Chat, and
-// Announcements aren't in this phase — this app's data model only has
-// flat account membership with a role, not sub-teams/departments, and
-// internal chat is a distinct realtime feature scoped for later.
+// Team Workspace — Roster + live presence (reuses member_presence,
+// migration 024) + a simple, real weekly performance count.
+// Departments and Internal Chat live further down this file
+// (migration 051). Announcements still aren't built — a genuinely
+// separate feature (broadcast-style posts, not 1:1/group chat) left
+// for a later phase.
 // ---------------------------------------------------------------
 
 export interface TeamMemberRow {
@@ -804,11 +804,7 @@ export async function getTeamWorkspace(db: SupabaseClient, accountId: string): P
 
   return {
     members,
-    notTrackedYet: [
-      'Departments & Teams (no sub-team structure yet — flat account roster only)',
-      'Internal Chat',
-      'Announcements',
-    ],
+    notTrackedYet: ['Announcements'],
   }
 }
 
@@ -1508,4 +1504,152 @@ export async function getWorkspaceReport(db: SupabaseClient, accountId: string, 
     topAgent,
     notTrackedYet: ['AI Reports (no per-call usage log yet)'],
   }
+}
+
+// ---------------------------------------------------------------
+// Departments — simple named grouping of account members. No nested
+// hierarchy, no per-department roles (RBAC stays flat at the account
+// level); this is organizational grouping only, feeding Team
+// Workspace's roster and Internal Chat's channel list.
+// ---------------------------------------------------------------
+
+export interface DepartmentRow {
+  id: string
+  name: string
+  memberIds: string[]
+  createdAt: string
+}
+
+export async function getDepartments(db: SupabaseClient, accountId: string): Promise<DepartmentRow[]> {
+  const { data: departments, error } = await db
+    .from('workspace_departments')
+    .select('id, name, created_at')
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: true })
+  if (error) throw new Error(error.message)
+
+  const deptRows = (departments ?? []) as Array<{ id: string; name: string; created_at: string }>
+  if (deptRows.length === 0) return []
+
+  const { data: members } = await db
+    .from('workspace_department_members')
+    .select('department_id, user_id')
+    .in(
+      'department_id',
+      deptRows.map((d) => d.id),
+    )
+  const memberIdsByDept = new Map<string, string[]>()
+  for (const m of (members ?? []) as Array<{ department_id: string; user_id: string }>) {
+    const list = memberIdsByDept.get(m.department_id) ?? []
+    list.push(m.user_id)
+    memberIdsByDept.set(m.department_id, list)
+  }
+
+  return deptRows.map((d) => ({
+    id: d.id,
+    name: d.name,
+    memberIds: memberIdsByDept.get(d.id) ?? [],
+    createdAt: d.created_at,
+  }))
+}
+
+export async function createDepartment(
+  db: SupabaseClient,
+  accountId: string,
+  userId: string,
+  name: string,
+): Promise<{ id: string }> {
+  const { data, error } = await db
+    .from('workspace_departments')
+    .insert({ account_id: accountId, name, created_by: userId })
+    .select('id')
+    .single()
+  if (error) throw new Error(error.message)
+  return data as { id: string }
+}
+
+export async function deleteDepartment(db: SupabaseClient, accountId: string, departmentId: string): Promise<void> {
+  const { error } = await db.from('workspace_departments').delete().eq('id', departmentId).eq('account_id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+export async function addDepartmentMember(db: SupabaseClient, departmentId: string, userId: string): Promise<void> {
+  const { error } = await db
+    .from('workspace_department_members')
+    .upsert({ department_id: departmentId, user_id: userId }, { onConflict: 'department_id,user_id' })
+  if (error) throw new Error(error.message)
+}
+
+export async function removeDepartmentMember(db: SupabaseClient, departmentId: string, userId: string): Promise<void> {
+  const { error } = await db
+    .from('workspace_department_members')
+    .delete()
+    .eq('department_id', departmentId)
+    .eq('user_id', userId)
+  if (error) throw new Error(error.message)
+}
+
+// ---------------------------------------------------------------
+// Internal Chat — "General" (departmentId null) or a specific
+// department's channel. Polling-based (matches Personal Inbox's
+// pattern elsewhere in this module) rather than a Realtime
+// subscription, to stay consistent with how every other live-ish
+// view in this module already works.
+// ---------------------------------------------------------------
+
+export interface InternalMessageRow {
+  id: string
+  senderId: string
+  senderName: string | null
+  contentText: string
+  createdAt: string
+}
+
+export async function getInternalMessages(
+  db: SupabaseClient,
+  accountId: string,
+  departmentId: string | null,
+  limit = 100,
+): Promise<InternalMessageRow[]> {
+  let query = db
+    .from('workspace_internal_messages')
+    .select('id, sender_id, content_text, created_at')
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  query = departmentId ? query.eq('department_id', departmentId) : query.is('department_id', null)
+
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+
+  const rows = (data ?? []) as Array<{ id: string; sender_id: string; content_text: string; created_at: string }>
+  if (rows.length === 0) return []
+
+  const senderIds = [...new Set(rows.map((r) => r.sender_id))]
+  const { data: profiles } = await db.from('profiles').select('user_id, full_name').in('user_id', senderIds)
+  const nameByUserId = new Map((profiles ?? []).map((p) => [(p as { user_id: string }).user_id, (p as { full_name: string }).full_name]))
+
+  return rows.map((r) => ({
+    id: r.id,
+    senderId: r.sender_id,
+    senderName: nameByUserId.get(r.sender_id) ?? null,
+    contentText: r.content_text,
+    createdAt: r.created_at,
+  }))
+}
+
+export async function postInternalMessage(
+  db: SupabaseClient,
+  accountId: string,
+  departmentId: string | null,
+  senderId: string,
+  text: string,
+): Promise<void> {
+  const { error } = await db.from('workspace_internal_messages').insert({
+    account_id: accountId,
+    department_id: departmentId,
+    sender_id: senderId,
+    content_text: text,
+  })
+  if (error) throw new Error(error.message)
 }
