@@ -214,9 +214,11 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-border bg-card",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
-          // Desktop: static, always-visible narrow icon rail — reset all
-          // the mobile framing and collapse to icon-rail width.
-          "lg:static lg:z-0 lg:w-[76px] lg:translate-x-0 lg:transition-none",
+          // Desktop: static, always-visible icon rail — reset all the
+          // mobile framing and collapse to icon-rail width. Wide enough
+          // that two-word labels (e.g. "Campaign Intelligence") wrap
+          // onto a clean second line instead of clipping mid-word.
+          "lg:static lg:z-0 lg:w-24 lg:translate-x-0 lg:transition-none",
         )}
         aria-label="Primary"
       >
@@ -273,7 +275,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       // (lg): icon stacked over a small label — the
                       // AiSensy-style narrow icon rail.
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
+                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       isActive
                         ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -335,7 +337,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     title="Campaign Intelligence"
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
+                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       pathname.startsWith("/campaign-intelligence")
                         ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -364,7 +366,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     title="Business Workspace"
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
+                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       pathname.startsWith("/business-workspace")
                         ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -395,7 +397,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       : {})}
                     className={cn(
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
-                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight",
+                      "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       isActive
                         ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
                         : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -412,7 +414,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 <Link
                   href="/platform"
                   title={t("superAdmin")}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1 lg:py-2.5 lg:text-center lg:text-[10px] lg:leading-tight"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight"
                 >
                   <Shield className="h-4 w-4 shrink-0" />
                   <span className="truncate lg:w-full lg:overflow-visible lg:whitespace-normal lg:text-clip">{t("superAdmin")}</span>
