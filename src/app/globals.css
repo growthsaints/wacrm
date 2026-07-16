@@ -307,6 +307,63 @@ html[data-theme="ember"] {
   --sidebar-ring: #ff6b2c;
 }
 
+/* Sunshine — warm golden-yellow background (matches the dashboard's
+ * feature-banner gallery) with crisp ivory cards and dark-navy text.
+ * Like Ember, it overrides the full surface set (not just accent
+ * tokens) so it reads as one cohesive look regardless of the light/
+ * dark mode toggle; unlike Ember it keeps a bright ivory sidebar
+ * instead of a fixed dark one. */
+html[data-theme="sunshine"] {
+  --background: #fff9e0;
+  --foreground: #16143f;
+  --card: #ffffff;
+  --card-2: #fff3d6;
+  --card-foreground: #16143f;
+  --popover: #ffffff;
+  --popover-foreground: #16143f;
+  --secondary: #fff3d6;
+  --secondary-foreground: #16143f;
+  --muted: #fff3d6;
+  --muted-foreground: #7c5a00;
+  --accent: #ffedb8;
+  --accent-foreground: #16143f;
+  --destructive: #ef4444;
+  --border: #f5dfa0;
+  --input: #f5dfa0;
+  --radius: 0.75rem;
+
+  --primary: #f59e0b;
+  --primary-foreground: #ffffff;
+  --primary-hover: #ea8c00;
+  --primary-soft: rgba(245, 158, 11, 0.12);
+  --primary-soft-2: rgba(245, 158, 11, 0.22);
+  --ring: #f59e0b;
+  --chart-1: #f59e0b;
+  --chart-2: #22c55e;
+  --chart-3: #3b82f6;
+  --chart-4: #a855f7;
+  --chart-5: #ef4444;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #16143f;
+  --sidebar-accent: #fff3d6;
+  --sidebar-accent-foreground: #16143f;
+  --sidebar-border: #f5dfa0;
+  --sidebar-primary: #f59e0b;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #f59e0b;
+}
+
+/* The gradient itself — painted on both `body` and `.app-shell-surface`
+ * for the same reason as Ember's pattern below: the shell wrappers
+ * paint their own opaque `bg-background` on top of `body` and would
+ * otherwise hide anything painted there. */
+html[data-theme="sunshine"] body,
+html[data-theme="sunshine"] .app-shell-surface {
+  background-image: linear-gradient(135deg, #fff9e0 0%, #ffe999 55%, #ffd35c 100%);
+  background-attachment: fixed;
+}
+
 /* Ember's own layered background — soft radial washes over a
  * seamless, repeating scattered-icon pattern tile (public/bg-pattern-
  * tile.svg — chat/phone/star/heart/calendar/lightbulb/chart/users/

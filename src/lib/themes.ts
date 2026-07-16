@@ -21,6 +21,7 @@ export const THEME_IDS = [
   "amber",
   "rose",
   "ember",
+  "sunshine",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -113,6 +114,12 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
     name: "Ember",
     tagline: "Warm cream + burnt orange — premium enterprise look, fixed dark sidebar.",
     swatch: "#FF6B2C",
+  },
+  {
+    id: "sunshine",
+    name: "Sunshine",
+    tagline: "Golden-yellow gradient background with crisp ivory cards — bright and optimistic.",
+    swatch: "#F59E0B",
   },
 ];
 
