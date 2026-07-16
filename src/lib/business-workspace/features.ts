@@ -23,6 +23,7 @@ export const BUSINESS_WORKSPACE_FEATURES = [
   'campaign_planner',
   'analytics',
   'reports',
+  'whatsapp_personal_connect',
 ] as const
 
 export type BusinessWorkspaceFeature = (typeof BUSINESS_WORKSPACE_FEATURES)[number]

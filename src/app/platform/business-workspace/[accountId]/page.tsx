@@ -42,6 +42,7 @@ const FEATURE_LABELS: Record<BusinessWorkspaceFeature, string> = {
   campaign_planner: "Campaign Planner",
   analytics: "Analytics",
   reports: "Reports",
+  whatsapp_personal_connect: "WhatsApp Personal Connect (QR)",
 };
 
 const ACCESS_TYPES = [

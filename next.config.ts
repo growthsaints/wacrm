@@ -69,6 +69,13 @@ const SECURITY_HEADERS = [
 ] as const;
 
 const nextConfig: NextConfig = {
+  // baileys (Business Workspace's QR-linked personal WhatsApp
+  // connection) does its own optional `import('jimp')` /
+  // `import('sharp')` for media processing we don't use — bundling it
+  // makes Turbopack try to statically resolve those and fail the
+  // build. Treating the package as external falls back to a runtime
+  // `require`, which matches how the library expects to be consumed.
+  serverExternalPackages: ["baileys"],
   /**
    * Cache-Control policy.
    *

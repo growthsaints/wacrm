@@ -42,3 +42,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# WhatsApp personal-connect session credentials (per-tenant, local disk —
+# never committed, never uploaded anywhere else). See
+# src/lib/whatsapp-personal/socket-manager.ts.
+/.whatsapp-sessions/

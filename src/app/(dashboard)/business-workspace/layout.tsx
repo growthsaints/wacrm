@@ -21,6 +21,7 @@ const LIVE_TABS = [
   { href: "/business-workspace/campaign-planner", label: "Campaign Planner" },
   { href: "/business-workspace/analytics", label: "Analytics" },
   { href: "/business-workspace/reports", label: "Reports" },
+  { href: "/business-workspace/whatsapp-connect", label: "WhatsApp Connect" },
 ];
 
 const COMING_SOON_TABS: string[] = [];
