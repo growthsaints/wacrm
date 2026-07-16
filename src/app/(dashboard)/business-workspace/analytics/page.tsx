@@ -130,6 +130,42 @@ export default function AnalyticsPage() {
         </CardContent>
       </Card>
 
+      {data.personalWhatsapp.conversationCount > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">WhatsApp Personal Connect</CardTitle>
+          </CardHeader>
+          <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Conversations</p>
+              <p className="mt-1 text-xl font-semibold text-foreground">
+                {data.personalWhatsapp.conversationCount.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Messages Captured</p>
+              <p className="mt-1 text-xl font-semibold text-foreground">
+                {data.personalWhatsapp.messageCount.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Messages Today</p>
+              <p className="mt-1 text-xl font-semibold text-foreground">
+                {data.personalWhatsapp.messagesToday.toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Avg. Response Time</p>
+              <p className="mt-1 text-xl font-semibold text-foreground">
+                {data.personalWhatsapp.avgResponseTimeMinutes === null
+                  ? "—"
+                  : `${data.personalWhatsapp.avgResponseTimeMinutes} min`}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {data.notTrackedYet.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {data.notTrackedYet.map((label) => (

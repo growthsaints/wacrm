@@ -1217,6 +1217,14 @@ export interface WorkspaceAnalytics {
   labelDistribution: Array<{ name: string; color: string; count: number }>
   customerGrowth: Array<{ weekStart: string; count: number }>
   retentionRate: number
+  /** Only meaningful once the tenant has connected a QR personal
+   *  WhatsApp number — all zero (not fabricated) if they haven't. */
+  personalWhatsapp: {
+    conversationCount: number
+    messageCount: number
+    messagesToday: number
+    avgResponseTimeMinutes: number | null
+  }
   notTrackedYet: string[]
 }
 
@@ -1224,6 +1232,7 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
   const weekAgo = daysAgoIso(7)
   const monthAgo = daysAgoIso(30)
   const eightWeeksAgo = daysAgoIso(56)
+  const todayStart = startOfLocalDay()
 
   const [
     { data: convStatuses },
@@ -1232,6 +1241,10 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
     { data: followupRows },
     { data: tags },
     { data: activeConvs },
+    { count: personalConvCount },
+    { count: personalMsgCount },
+    { count: personalMsgToday },
+    { data: personalRecentMsgs },
   ] = await Promise.all([
     db.from('conversations').select('status').eq('account_id', accountId),
     db.from('contacts').select('id, source, created_at').eq('account_id', accountId),
@@ -1239,6 +1252,20 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
     db.from('workspace_scheduled_items').select('status').eq('account_id', accountId).in('item_type', ['follow_up', 'reminder', 'task']),
     db.from('tags').select('id, name, color').eq('account_id', accountId),
     db.from('conversations').select('contact_id, last_message_at').eq('account_id', accountId).gte('last_message_at', monthAgo),
+    db.from('workspace_whatsapp_personal_conversations').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+    db.from('workspace_whatsapp_personal_messages').select('id', { count: 'exact', head: true }).eq('account_id', accountId),
+    db
+      .from('workspace_whatsapp_personal_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .gte('created_at', todayStart),
+    db
+      .from('workspace_whatsapp_personal_messages')
+      .select('conversation_id, direction, created_at')
+      .eq('account_id', accountId)
+      .gte('created_at', weekAgo)
+      .order('created_at', { ascending: true })
+      .limit(2000),
   ])
 
   const conversations = { open: 0, pending: 0, closed: 0, archived: 0 }
@@ -1301,6 +1328,27 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
     .sort(([a], [b]) => (a > b ? 1 : -1))
     .map(([weekStart, count]) => ({ weekStart, count }))
 
+  // Same "gap between an inbound message and the next outbound reply"
+  // approach as the Overview's Cloud API response time, applied to
+  // the isolated personal-WhatsApp message table instead.
+  const byPersonalConversation = new Map<string, Array<{ direction: string; created_at: string }>>()
+  for (const m of (personalRecentMsgs ?? []) as Array<{ conversation_id: string; direction: string; created_at: string }>) {
+    const list = byPersonalConversation.get(m.conversation_id) ?? []
+    list.push({ direction: m.direction, created_at: m.created_at })
+    byPersonalConversation.set(m.conversation_id, list)
+  }
+  const personalGaps: number[] = []
+  for (const msgs of byPersonalConversation.values()) {
+    for (let i = 0; i < msgs.length - 1; i++) {
+      if (msgs[i].direction === 'inbound' && msgs[i + 1].direction === 'outbound') {
+        const gap = (new Date(msgs[i + 1].created_at).getTime() - new Date(msgs[i].created_at).getTime()) / 60000
+        if (gap >= 0) personalGaps.push(gap)
+      }
+    }
+  }
+  const personalAvgResponseTimeMinutes =
+    personalGaps.length > 0 ? Math.round((personalGaps.reduce((a, b) => a + b, 0) / personalGaps.length) * 10) / 10 : null
+
   return {
     conversations,
     customers: {
@@ -1314,6 +1362,12 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
     labelDistribution,
     customerGrowth,
     retentionRate,
+    personalWhatsapp: {
+      conversationCount: personalConvCount ?? 0,
+      messageCount: personalMsgCount ?? 0,
+      messagesToday: personalMsgToday ?? 0,
+      avgResponseTimeMinutes: personalAvgResponseTimeMinutes,
+    },
     notTrackedYet: ['AI Usage (no per-call usage log yet)'],
   }
 }
