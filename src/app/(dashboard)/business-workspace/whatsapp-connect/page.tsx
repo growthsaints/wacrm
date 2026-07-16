@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, Smartphone, Wifi, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -164,6 +165,13 @@ export default function WhatsAppPersonalConnectPage() {
             <div className="space-y-3">
               <p className="text-sm text-foreground">
                 Connected{state.phoneNumber ? ` as +${state.phoneNumber}` : ""}.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Chats sent to or from this number appear in{" "}
+                <Link href="/business-workspace/personal-inbox" className="text-primary hover:underline">
+                  Personal Inbox
+                </Link>
+                .
               </p>
               <Button variant="destructive" onClick={handleDisconnect} disabled={busy}>
                 {busy && <Loader2 className="size-4 animate-spin" />}

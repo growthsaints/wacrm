@@ -4,11 +4,13 @@ import type { Boom } from '@hapi/boom'
 import {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  isJidGroup,
   makeWASocket,
   // Aliased away from its original name — it's a plain Node.js
   // helper, not a React Hook, but eslint-plugin-react-hooks flags any
   // `use`-prefixed function call outside a component/hook body.
   useMultiFileAuthState as loadMultiFileAuthState,
+  type WAMessage,
   type WASocket,
 } from 'baileys'
 import pino from 'pino'
@@ -124,6 +126,12 @@ export async function startConnection(accountId: string): Promise<void> {
 
   socket.ev.on('creds.update', saveCreds)
 
+  socket.ev.on('messages.upsert', ({ messages }) => {
+    captureIncomingMessages(accountId, messages).catch((err) =>
+      console.error('[whatsapp-personal] message capture failed:', err),
+    )
+  })
+
   socket.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update
 
@@ -179,6 +187,154 @@ export async function disconnectConnection(accountId: string): Promise<void> {
     phoneNumber: null,
     lastDisconnectedAt: new Date().toISOString(),
   })
+}
+
+function extractText(msg: WAMessage): string | null {
+  const content = msg.message
+  if (!content) return null
+  // Plain text only in this phase — media/stickers/locations/polls
+  // etc. are silently skipped rather than half-represented.
+  return content.conversation ?? content.extendedTextMessage?.text ?? null
+}
+
+function phoneFromJid(jid: string): string {
+  return jid.split('@')[0].split(':')[0]
+}
+
+/**
+ * Persists inbound AND outbound (echoed back from our own sends, or
+ * sent from the linked phone itself) text messages into the isolated
+ * workspace_whatsapp_personal_* tables. Group chats and non-text
+ * messages are skipped — this is a 1:1 text-capture tool, not a full
+ * WhatsApp client.
+ */
+async function captureIncomingMessages(accountId: string, messages: WAMessage[]): Promise<void> {
+  const admin = platformAdminClient()
+
+  for (const msg of messages) {
+    const remoteJid = msg.key.remoteJid
+    if (!remoteJid || isJidGroup(remoteJid)) continue
+
+    const text = extractText(msg)
+    if (!text) continue
+
+    const phoneNumber = phoneFromJid(remoteJid)
+    const direction: 'inbound' | 'outbound' = msg.key.fromMe ? 'outbound' : 'inbound'
+    const createdAt = msg.messageTimestamp
+      ? new Date(Number(msg.messageTimestamp) * 1000).toISOString()
+      : new Date().toISOString()
+
+    const { data: contact, error: contactErr } = await admin
+      .from('workspace_whatsapp_personal_contacts')
+      .upsert(
+        { account_id: accountId, phone_number: phoneNumber, display_name: msg.pushName || undefined },
+        { onConflict: 'account_id,phone_number' },
+      )
+      .select('id')
+      .single()
+    if (contactErr || !contact) {
+      console.error('[whatsapp-personal] contact upsert failed:', contactErr)
+      continue
+    }
+
+    const { data: conversation, error: convErr } = await admin
+      .from('workspace_whatsapp_personal_conversations')
+      .upsert({ account_id: accountId, contact_id: contact.id }, { onConflict: 'contact_id' })
+      .select('id, unread_count')
+      .single()
+    if (convErr || !conversation) {
+      console.error('[whatsapp-personal] conversation upsert failed:', convErr)
+      continue
+    }
+
+    const { error: msgErr } = await admin.from('workspace_whatsapp_personal_messages').upsert(
+      {
+        account_id: accountId,
+        conversation_id: conversation.id,
+        direction,
+        content_text: text,
+        wa_message_id: msg.key.id ?? null,
+        created_at: createdAt,
+      },
+      { onConflict: 'conversation_id,wa_message_id', ignoreDuplicates: true },
+    )
+    if (msgErr) {
+      console.error('[whatsapp-personal] message insert failed:', msgErr)
+      continue
+    }
+
+    const { unread_count: currentUnread } = conversation as { unread_count: number }
+    await admin
+      .from('workspace_whatsapp_personal_conversations')
+      .update({
+        last_message_text: text,
+        last_message_at: createdAt,
+        unread_count: direction === 'inbound' ? currentUnread + 1 : currentUnread,
+      })
+      .eq('id', conversation.id)
+  }
+}
+
+/**
+ * Sends a text reply through the tenant's connected personal WhatsApp
+ * socket and records it as an outbound message. Throws if the tenant
+ * isn't currently connected — the caller (API route) turns that into
+ * a 409 for the UI.
+ */
+export async function sendPersonalMessage(
+  accountId: string,
+  phoneNumber: string,
+  text: string,
+  userId: string,
+): Promise<void> {
+  const conn = connections.get(accountId)
+  if (!conn || conn.status !== 'connected' || !conn.socket) {
+    throw new Error('WhatsApp is not currently connected for this account')
+  }
+
+  const jid = `${phoneNumber}@s.whatsapp.net`
+  const sent = await conn.socket.sendMessage(jid, { text })
+  // Baileys re-emits our own sends through the same `messages.upsert`
+  // stream (when emitOwnEvents is on, the default) — captureIncoming
+  // Messages() will try to persist that echo independently. Keying
+  // both writes to the same wa_message_id and using upsert here (not
+  // insert) means whichever of the two async paths lands first wins
+  // and the other is a safe no-op, instead of a duplicate row or a
+  // unique-constraint error racing this call.
+  const waMessageId = sent?.key?.id ?? null
+
+  const admin = platformAdminClient()
+  const { data: contact, error: contactErr } = await admin
+    .from('workspace_whatsapp_personal_contacts')
+    .upsert({ account_id: accountId, phone_number: phoneNumber }, { onConflict: 'account_id,phone_number' })
+    .select('id')
+    .single()
+  if (contactErr || !contact) throw new Error(contactErr?.message ?? 'Failed to resolve contact')
+
+  const { data: conversation, error: convErr } = await admin
+    .from('workspace_whatsapp_personal_conversations')
+    .upsert({ account_id: accountId, contact_id: contact.id }, { onConflict: 'contact_id' })
+    .select('id')
+    .single()
+  if (convErr || !conversation) throw new Error(convErr?.message ?? 'Failed to resolve conversation')
+
+  const now = new Date().toISOString()
+  await admin.from('workspace_whatsapp_personal_messages').upsert(
+    {
+      account_id: accountId,
+      conversation_id: conversation.id,
+      direction: 'outbound',
+      content_text: text,
+      wa_message_id: waMessageId,
+      sent_by: userId,
+      created_at: now,
+    },
+    { onConflict: 'conversation_id,wa_message_id' },
+  )
+  await admin
+    .from('workspace_whatsapp_personal_conversations')
+    .update({ last_message_text: text, last_message_at: now })
+    .eq('id', conversation.id)
 }
 
 /**
