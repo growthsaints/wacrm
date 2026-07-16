@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
+import { hasModuleAccessGrant } from '@/lib/rbac/module-access-grants'
 import {
   getBusinessWorkspaceLicense,
   isLicenseActive,
@@ -23,6 +24,9 @@ export async function GET() {
     const { supabase, accountId, role } = await getCurrentAccount()
 
     if (!canAccessBusinessWorkspace(role)) {
+      return NextResponse.json({ enabled: false, features: {}, accessType: null, expiryDate: null })
+    }
+    if (role === 'admin' && !(await hasModuleAccessGrant(supabase, accountId, 'business_workspace'))) {
       return NextResponse.json({ enabled: false, features: {}, accessType: null, expiryDate: null })
     }
 

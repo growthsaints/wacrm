@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2 } from "lucide-react";
+import { ImageUp, Loader2, Plus, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { uploadAccountMedia, MEDIA_MAX_BYTES } from "@/lib/storage/upload-media";
 import type { CampaignPlanRow } from "@/lib/business-workspace/queries";
 
 const STATUSES = ["draft", "in_review", "approved", "scheduled", "completed", "cancelled"];
@@ -29,6 +30,9 @@ export default function CampaignPlannerPage() {
   const [audienceSegment, setAudienceSegment] = useState("");
   const [contentDraft, setContentDraft] = useState("");
   const [creating, setCreating] = useState(false);
+  const [uploadingFor, setUploadingFor] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [uploadTargetId, setUploadTargetId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -89,6 +93,42 @@ export default function CampaignPlannerPage() {
     if (res.ok) load();
   }
 
+  async function setMediaUrl(id: string, mediaUrl: string | null) {
+    const res = await fetch(`/api/business-workspace/campaign-planner/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaUrl }),
+    });
+    if (res.ok) load();
+  }
+
+  function triggerUpload(planId: string) {
+    setUploadTargetId(planId);
+    fileInputRef.current?.click();
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const planId = uploadTargetId;
+    e.target.value = "";
+    if (!file || !planId) return;
+    if (file.size > MEDIA_MAX_BYTES) {
+      toast.error("File is too large (max 16 MB).");
+      return;
+    }
+    setUploadingFor(planId);
+    try {
+      const { publicUrl } = await uploadAccountMedia("campaign-media", file);
+      await setMediaUrl(planId, publicUrl);
+      toast.success("Media attached.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed.");
+    } finally {
+      setUploadingFor(null);
+      setUploadTargetId(null);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -106,6 +146,13 @@ export default function CampaignPlannerPage() {
 
   return (
     <div className="space-y-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,video/mp4,video/3gpp,application/pdf"
+        className="hidden"
+        onChange={handleFileSelected}
+      />
       <p className="text-xs text-muted-foreground">
         Planning only — drafting, audience notes, and internal approval.
         Nothing here sends a message; when a plan is ready, build the actual
@@ -157,6 +204,43 @@ export default function CampaignPlannerPage() {
                   <p className="text-xs text-muted-foreground">Audience: {plan.audienceSegment}</p>
                 )}
                 {plan.contentDraft && <p className="text-sm text-foreground">{plan.contentDraft}</p>}
+
+                {plan.mediaUrl ? (
+                  <div className="flex items-center gap-2 rounded-lg border border-border p-2">
+                    <a
+                      href={plan.mediaUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="truncate text-xs text-primary underline"
+                    >
+                      {plan.mediaUrl.split("/").pop()}
+                    </a>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="ml-auto"
+                      onClick={() => setMediaUrl(plan.id, null)}
+                      aria-label="Remove media"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => triggerUpload(plan.id)}
+                    disabled={uploadingFor === plan.id}
+                  >
+                    {uploadingFor === plan.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ImageUp className="h-3.5 w-3.5" />
+                    )}
+                    Attach Media
+                  </Button>
+                )}
+
                 <div className="flex items-center justify-between pt-1">
                   <Select value={plan.status} onValueChange={(v) => v && updateStatus(plan.id, v)}>
                     <SelectTrigger className="h-8 w-36">

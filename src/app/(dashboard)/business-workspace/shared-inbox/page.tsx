@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ExternalLink, Loader2, Pin, Search } from "lucide-react";
+import { toast } from "sonner";
+import { ExternalLink, Loader2, NotebookPen, Pin, Search, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -20,6 +22,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { SharedInboxResult } from "@/lib/business-workspace/queries";
 
@@ -32,6 +40,9 @@ export default function SharedInboxPage() {
   const [notEnabled, setNotEnabled] = useState(false);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [noteOpenFor, setNoteOpenFor] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -55,6 +66,28 @@ export default function SharedInboxPage() {
     const timer = setTimeout(load, 250);
     return () => clearTimeout(timer);
   }, [load]);
+
+  async function handleSaveNote(contactId: string) {
+    if (!noteDraft.trim()) return;
+    setSavingNote(true);
+    try {
+      const res = await fetch(`/api/business-workspace/customer-360/${contactId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ noteText: noteDraft.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to save note.");
+        return;
+      }
+      toast.success("Note added.");
+      setNoteDraft("");
+      setNoteOpenFor(null);
+    } finally {
+      setSavingNote(false);
+    }
+  }
 
   if (notEnabled) {
     return (
@@ -152,16 +185,55 @@ export default function SharedInboxPage() {
                     {r.unreadCount > 0 ? <Badge variant="secondary">{r.unreadCount}</Badge> : "—"}
                   </TableCell>
                   <TableCell>
-                    <Link
-                      href={
-                        r.channel === "personal_whatsapp"
-                          ? `/business-workspace/personal-inbox?conversation=${r.id}`
-                          : `/inbox?c=${r.id}`
-                      }
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      Open <ExternalLink className="size-3" />
-                    </Link>
+                    <div className="flex items-center gap-3">
+                      <Link
+                        href={
+                          r.channel === "personal_whatsapp"
+                            ? `/business-workspace/personal-inbox?conversation=${r.id}`
+                            : `/inbox?c=${r.id}`
+                        }
+                        className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                      >
+                        Open <ExternalLink className="size-3" />
+                      </Link>
+
+                      {r.channel === "cloud_api" && (
+                        <Popover
+                          open={noteOpenFor === r.contactId}
+                          onOpenChange={(open) => {
+                            setNoteOpenFor(open ? r.contactId : null);
+                            if (!open) setNoteDraft("");
+                          }}
+                        >
+                          <PopoverTrigger
+                            render={
+                              <Button variant="ghost" size="icon-sm" aria-label="Add internal note">
+                                <NotebookPen className="size-3.5" />
+                              </Button>
+                            }
+                          />
+                          <PopoverContent className="w-72 space-y-2">
+                            <p className="text-xs text-muted-foreground">
+                              Internal note on {r.contactName || r.contactPhone}. Use @FirstName to notify a teammate.
+                            </p>
+                            <Textarea
+                              value={noteDraft}
+                              onChange={(e) => setNoteDraft(e.target.value)}
+                              rows={3}
+                              placeholder="e.g. @Priya please follow up tomorrow"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => handleSaveNote(r.contactId)}
+                              disabled={savingNote || !noteDraft.trim()}
+                            >
+                              {savingNote ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                              Save Note
+                            </Button>
+                          </PopoverContent>
+                        </Popover>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

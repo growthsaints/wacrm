@@ -21,6 +21,7 @@ export async function PATCH(
       checklist: Array.isArray(body.checklist) ? (body.checklist as ChecklistItem[]) : undefined,
       contentDraft: 'contentDraft' in body ? (body.contentDraft as string | null) : undefined,
       notes: 'notes' in body ? (body.notes as string | null) : undefined,
+      mediaUrl: 'mediaUrl' in body ? (body.mediaUrl as string | null) : undefined,
     })
 
     return NextResponse.json({ success: true })

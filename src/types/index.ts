@@ -219,7 +219,7 @@ export interface ConversationFavorite {
 // Notifications (migration 027)
 // ============================================================
 
-export type NotificationType = 'conversation_assigned';
+export type NotificationType = 'conversation_assigned' | 'mention';
 
 export interface Notification {
   id: string;

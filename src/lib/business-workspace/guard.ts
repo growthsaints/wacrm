@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { AccountRole } from '@/lib/auth/roles'
 import { ForbiddenError } from '@/lib/auth/account'
+import { hasModuleAccessGrant } from '@/lib/rbac/module-access-grants'
 import {
   canAccessBusinessWorkspace,
   getBusinessWorkspaceLicense,
@@ -16,10 +17,27 @@ import {
 // component or anything a client component imports.
 
 /**
+ * Owner always passes; an admin only passes once the account owner
+ * has explicitly granted them Business Workspace access
+ * (module_access_grants, migration 053).
+ */
+async function requireModuleRole(supabase: SupabaseClient, accountId: string, role: AccountRole): Promise<void> {
+  if (!canAccessBusinessWorkspace(role)) {
+    throw new ForbiddenError('This feature requires an Owner or Admin role')
+  }
+  if (role === 'admin') {
+    const granted = await hasModuleAccessGrant(supabase, accountId, 'business_workspace')
+    if (!granted) {
+      throw new ForbiddenError("Business Workspace access hasn't been granted to your admin account yet — ask the account owner.")
+    }
+  }
+}
+
+/**
  * Server-side gate for every Business Workspace API route — checks
- * role, license status, AND the specific feature flag. Throws
- * ForbiddenError (never just relies on the sidebar hiding the nav
- * item) when any check fails.
+ * role (+ per-admin grant), license status, AND the specific feature
+ * flag. Throws ForbiddenError (never just relies on the sidebar
+ * hiding the nav item) when any check fails.
  */
 export async function requireBusinessWorkspaceFeature(
   supabase: SupabaseClient,
@@ -27,9 +45,7 @@ export async function requireBusinessWorkspaceFeature(
   role: AccountRole,
   feature: BusinessWorkspaceFeature,
 ): Promise<void> {
-  if (!canAccessBusinessWorkspace(role)) {
-    throw new ForbiddenError('This feature requires an Owner or Admin role')
-  }
+  await requireModuleRole(supabase, accountId, role)
   const license = await getBusinessWorkspaceLicense(supabase, accountId)
   if (!hasBusinessWorkspaceFeature(license, feature)) {
     throw new ForbiddenError('This feature is not enabled for your account')
@@ -47,9 +63,7 @@ export async function requireBusinessWorkspaceLicense(
   accountId: string,
   role: AccountRole,
 ): Promise<void> {
-  if (!canAccessBusinessWorkspace(role)) {
-    throw new ForbiddenError('This feature requires an Owner or Admin role')
-  }
+  await requireModuleRole(supabase, accountId, role)
   const license = await getBusinessWorkspaceLicense(supabase, accountId)
   if (!isLicenseActive(license)) {
     throw new ForbiddenError('Business Workspace is not enabled for your account')

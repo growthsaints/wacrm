@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { buildContactTimeline } from '@/lib/timeline/build-timeline'
 import type { TimelineEvent } from '@/lib/timeline/types'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 
 // ============================================================
 // Business Workspace query layer — Phase 1 (Overview, Customer Hub,
@@ -532,6 +533,14 @@ export async function getCustomerProfile(
   }
 }
 
+/** Matches `@word` tokens — the mentioned name is matched against each
+ *  account member's first name (case-insensitive), so "@Priya" hits a
+ *  member named "Priya Sharma". */
+function extractMentionTokens(text: string): string[] {
+  const matches = text.match(/@([A-Za-z][A-Za-z0-9_]*)/g) ?? []
+  return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))]
+}
+
 export async function addContactNote(
   db: SupabaseClient,
   accountId: string,
@@ -546,6 +555,47 @@ export async function addContactNote(
     .single()
   if (error) throw new Error(error.message)
   const row = data as { id: string; note_text: string; created_at: string }
+
+  // @mentions — best-effort, fire-and-forget. `notifications` has no
+  // authenticated-role INSERT policy (rows are normally created only by
+  // the conversation-assignment trigger, migration 027), so this needs
+  // the service-role client, same pattern as the AI usage logging.
+  const mentionTokens = extractMentionTokens(noteText)
+  if (mentionTokens.length > 0) {
+    void (async () => {
+      try {
+        const { data: members } = await db
+          .from('profiles')
+          .select('user_id, full_name')
+          .eq('account_id', accountId)
+        const mentioned = ((members ?? []) as Array<{ user_id: string; full_name: string | null }>).filter((m) => {
+          if (!m.full_name || m.user_id === userId) return false
+          const firstName = m.full_name.trim().split(/\s+/)[0]?.toLowerCase()
+          return !!firstName && mentionTokens.includes(firstName)
+        })
+        if (mentioned.length === 0) return
+
+        const { data: actor } = await db.from('profiles').select('full_name').eq('user_id', userId).maybeSingle()
+        const actorName = (actor as { full_name: string | null } | null)?.full_name ?? 'Someone'
+
+        const admin = supabaseAdmin()
+        await admin.from('notifications').insert(
+          mentioned.map((m) => ({
+            account_id: accountId,
+            user_id: m.user_id,
+            type: 'mention',
+            contact_id: contactId,
+            actor_user_id: userId,
+            title: 'You were mentioned in a note',
+            body: `${actorName} mentioned you: "${noteText.slice(0, 140)}"`,
+          })),
+        )
+      } catch {
+        // Best-effort — a missed mention notification shouldn't fail the note save.
+      }
+    })()
+  }
+
   return { id: row.id, noteText: row.note_text, createdAt: row.created_at }
 }
 
@@ -804,7 +854,7 @@ export async function getTeamWorkspace(db: SupabaseClient, accountId: string): P
 
   return {
     members,
-    notTrackedYet: ['Announcements'],
+    notTrackedYet: [],
   }
 }
 
@@ -812,9 +862,12 @@ export async function getTeamWorkspace(db: SupabaseClient, accountId: string): P
 // Shared Inbox — Phase 3. A management lens over `conversations`
 // (assign/pin/status/last-message), not a second live-chat engine —
 // "Open" links back into the existing, already-working Inbox for the
-// actual message thread. Internal Notes/Mentions have no backing
-// column/table yet; the per-contact Notes page is the closest real
-// substitute today.
+// actual message thread. Internal Notes reuse `contact_notes` (same
+// table/API as the Notes page and Customer 360) and @mentions reuse
+// `notifications` — see `addContactNote`'s mention parsing below.
+// Only `cloud_api` rows have a real `contacts` row behind them, so
+// quick-notes are cloud_api-only; personal_whatsapp contacts live in a
+// separate table (see isolation note on SharedInboxRow.channel).
 // ---------------------------------------------------------------
 
 export interface SharedInboxRow {
@@ -975,7 +1028,7 @@ export async function getSharedInbox(
   return {
     rows: merged.slice(0, pageSize),
     totalCount: (count ?? 0) + personalTotalCount,
-    notTrackedYet: ['Internal Notes (use the Notes page against the contact today)', 'Mentions'],
+    notTrackedYet: [],
   }
 }
 
@@ -1249,13 +1302,20 @@ export async function updateCampaignPlan(
   db: SupabaseClient,
   accountId: string,
   id: string,
-  patch: { status?: string; checklist?: ChecklistItem[]; contentDraft?: string | null; notes?: string | null },
+  patch: {
+    status?: string
+    checklist?: ChecklistItem[]
+    contentDraft?: string | null
+    notes?: string | null
+    mediaUrl?: string | null
+  },
 ): Promise<void> {
   const update: Record<string, unknown> = {}
   if (patch.status !== undefined) update.status = patch.status
   if (patch.checklist !== undefined) update.checklist = patch.checklist
   if (patch.contentDraft !== undefined) update.content_draft = patch.contentDraft
   if (patch.notes !== undefined) update.notes = patch.notes
+  if (patch.mediaUrl !== undefined) update.media_url = patch.mediaUrl
 
   const { error } = await db.from('workspace_campaign_plans').update(update).eq('id', id).eq('account_id', accountId)
   if (error) throw new Error(error.message)
@@ -1669,5 +1729,69 @@ export async function postInternalMessage(
     sender_id: senderId,
     content_text: text,
   })
+  if (error) throw new Error(error.message)
+}
+
+// ---------------------------------------------------------------
+// Announcements — broadcast-style posts, admin+ only (RLS on
+// workspace_announcements enforces this independently), distinct from
+// Internal Chat's 1:1/group messaging. Closes the last Team Workspace
+// gap.
+// ---------------------------------------------------------------
+
+export interface AnnouncementRow {
+  id: string
+  title: string
+  contentText: string
+  authorName: string | null
+  createdAt: string
+}
+
+export async function getAnnouncements(db: SupabaseClient, accountId: string, limit = 20): Promise<AnnouncementRow[]> {
+  const { data, error } = await db
+    .from('workspace_announcements')
+    .select('id, title, content_text, created_at, created_by')
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+
+  const rows = (data ?? []) as Array<{ id: string; title: string; content_text: string; created_at: string; created_by: string | null }>
+  if (rows.length === 0) return []
+
+  const authorIds = [...new Set(rows.map((r) => r.created_by).filter((v): v is string => !!v))]
+  const { data: profiles } =
+    authorIds.length > 0
+      ? await db.from('profiles').select('user_id, full_name').in('user_id', authorIds)
+      : { data: [] as Array<{ user_id: string; full_name: string }> }
+  const nameByUserId = new Map((profiles ?? []).map((p) => [p.user_id, p.full_name]))
+
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    contentText: r.content_text,
+    authorName: r.created_by ? nameByUserId.get(r.created_by) ?? null : null,
+    createdAt: r.created_at,
+  }))
+}
+
+export async function createAnnouncement(
+  db: SupabaseClient,
+  accountId: string,
+  userId: string,
+  title: string,
+  contentText: string,
+): Promise<{ id: string }> {
+  const { data, error } = await db
+    .from('workspace_announcements')
+    .insert({ account_id: accountId, title, content_text: contentText, created_by: userId })
+    .select('id')
+    .single()
+  if (error) throw new Error(error.message)
+  return data as { id: string }
+}
+
+export async function deleteAnnouncement(db: SupabaseClient, accountId: string, id: string): Promise<void> {
+  const { error } = await db.from('workspace_announcements').delete().eq('id', id).eq('account_id', accountId)
   if (error) throw new Error(error.message)
 }

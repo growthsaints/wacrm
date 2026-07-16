@@ -25,6 +25,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import {
   AlertTriangle,
+  Building2,
   Loader2,
   Mail,
   MailX,
@@ -78,6 +79,7 @@ import {
 } from '@/components/presence/presence-dot';
 import { InviteMemberDialog } from './invite-member-dialog';
 import { FeatureAccessDialog } from './feature-access-dialog';
+import { ModuleAccessDialog } from './module-access-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
 
@@ -132,7 +134,7 @@ function fmtExpiresIn(iso: string, t: (key: string, values?: Record<string, stri
 export function MembersTab() {
   const t = useTranslations('Settings.members');
   const tRoles = useTranslations('Settings.roles');
-  const { user, canManageMembers } = useAuth();
+  const { user, isOwner: isOwnerViewer, canManageMembers } = useAuth();
   const { getPresence, getRow, now } = usePresence();
 
   const [members, setMembers] = useState<Member[]>([]);
@@ -146,6 +148,7 @@ export function MembersTab() {
     null,
   );
   const [managingAccessFor, setManagingAccessFor] = useState<Member | null>(null);
+  const [managingModuleAccessFor, setManagingModuleAccessFor] = useState<Member | null>(null);
 
   const loadEverything = useCallback(async () => {
     try {
@@ -516,6 +519,22 @@ export function MembersTab() {
                       </Button>
                     )}
 
+                    {/* Manage module access — owner only, admin rows
+                        only. Enterprise/Business Workspace are hidden
+                        from admins by default (module_access_grants,
+                        migration 053); only the owner can grant them
+                        to a specific admin. */}
+                    {isOwnerViewer && member.role === 'admin' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setManagingModuleAccessFor(member)}
+                        disabled={isBusy}
+                      >
+                        <Building2 className="size-4" />
+                      </Button>
+                    )}
+
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -642,6 +661,17 @@ export function MembersTab() {
           open={managingAccessFor !== null}
           onOpenChange={(open) => {
             if (!open) setManagingAccessFor(null);
+          }}
+        />
+      )}
+
+      {managingModuleAccessFor && (
+        <ModuleAccessDialog
+          userId={managingModuleAccessFor.user_id}
+          memberName={managingModuleAccessFor.full_name || t('unnamed')}
+          open={managingModuleAccessFor !== null}
+          onOpenChange={(open) => {
+            if (!open) setManagingModuleAccessFor(null);
           }}
         />
       )}

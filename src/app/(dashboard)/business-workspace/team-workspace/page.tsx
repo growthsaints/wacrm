@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Plus, Send, Trash2, UserMinus, UserPlus } from "lucide-react";
+import { Loader2, Megaphone, Plus, Send, Trash2, UserMinus, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -23,7 +24,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import type { TeamWorkspaceResult, DepartmentRow, InternalMessageRow } from "@/lib/business-workspace/queries";
+import { useAuth } from "@/hooks/use-auth";
+import type {
+  TeamWorkspaceResult,
+  DepartmentRow,
+  InternalMessageRow,
+  AnnouncementRow,
+} from "@/lib/business-workspace/queries";
 
 const GENERAL = "__general__";
 
@@ -41,6 +48,7 @@ function PresenceDot({ status }: { status: "online" | "away" | "offline" }) {
 }
 
 export default function TeamWorkspacePage() {
+  const { canManageMembers } = useAuth();
   const [data, setData] = useState<TeamWorkspaceResult | null>(null);
   const [departments, setDepartments] = useState<DepartmentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +56,11 @@ export default function TeamWorkspacePage() {
   const [newDeptName, setNewDeptName] = useState("");
   const [creatingDept, setCreatingDept] = useState(false);
   const [addMemberFor, setAddMemberFor] = useState<Record<string, string>>({});
+
+  const [announcements, setAnnouncements] = useState<AnnouncementRow[]>([]);
+  const [announceTitle, setAnnounceTitle] = useState("");
+  const [announceBody, setAnnounceBody] = useState("");
+  const [postingAnnouncement, setPostingAnnouncement] = useState(false);
 
   const [channel, setChannel] = useState(GENERAL);
   const [messages, setMessages] = useState<InternalMessageRow[]>([]);
@@ -59,6 +72,12 @@ export default function TeamWorkspacePage() {
     fetch("/api/business-workspace/departments")
       .then((res) => res.json())
       .then((json) => setDepartments(json.departments ?? []));
+  }, []);
+
+  const loadAnnouncements = useCallback(() => {
+    fetch("/api/business-workspace/announcements")
+      .then((res) => res.json())
+      .then((json) => setAnnouncements(json.announcements ?? []));
   }, []);
 
   useEffect(() => {
@@ -73,7 +92,8 @@ export default function TeamWorkspacePage() {
       })
       .finally(() => setLoading(false));
     loadDepartments();
-  }, [loadDepartments]);
+    loadAnnouncements();
+  }, [loadDepartments, loadAnnouncements]);
 
   const loadMessages = useCallback(() => {
     const params = channel === GENERAL ? "" : `?department=${channel}`;
@@ -142,6 +162,33 @@ export default function TeamWorkspacePage() {
     if (res.ok) loadDepartments();
   }
 
+  async function handlePostAnnouncement() {
+    if (!announceTitle.trim() || !announceBody.trim()) return;
+    setPostingAnnouncement(true);
+    try {
+      const res = await fetch("/api/business-workspace/announcements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: announceTitle.trim(), contentText: announceBody.trim() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || "Failed to post announcement.");
+        return;
+      }
+      setAnnounceTitle("");
+      setAnnounceBody("");
+      loadAnnouncements();
+    } finally {
+      setPostingAnnouncement(false);
+    }
+  }
+
+  async function handleDeleteAnnouncement(id: string) {
+    const res = await fetch(`/api/business-workspace/announcements/${id}`, { method: "DELETE" });
+    if (res.ok) loadAnnouncements();
+  }
+
   async function handleSendMessage() {
     if (!draft.trim()) return;
     setSending(true);
@@ -183,6 +230,67 @@ export default function TeamWorkspacePage() {
 
   return (
     <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Megaphone className="size-4" /> Announcements
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {canManageMembers && (
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <Input
+                value={announceTitle}
+                onChange={(e) => setAnnounceTitle(e.target.value)}
+                placeholder="Announcement title"
+              />
+              <Textarea
+                value={announceBody}
+                onChange={(e) => setAnnounceBody(e.target.value)}
+                placeholder="Write something for the whole team…"
+                rows={2}
+              />
+              <Button
+                size="sm"
+                onClick={handlePostAnnouncement}
+                disabled={postingAnnouncement || !announceTitle.trim() || !announceBody.trim()}
+              >
+                {postingAnnouncement ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                Post Announcement
+              </Button>
+            </div>
+          )}
+
+          {announcements.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No announcements yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {announcements.map((a) => (
+                <div key={a.id} className="rounded-lg border border-border p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-foreground">{a.title}</p>
+                    {canManageMembers && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => handleDeleteAnnouncement(a.id)}
+                        aria-label="Delete announcement"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    )}
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{a.contentText}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {a.authorName ?? "Unknown"} · {new Date(a.createdAt).toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Roster &amp; Availability</CardTitle>
