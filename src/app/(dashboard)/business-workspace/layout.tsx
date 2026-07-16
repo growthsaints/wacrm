@@ -10,21 +10,20 @@ const LIVE_TABS = [
   { href: "/business-workspace", label: "Overview" },
   { href: "/business-workspace/customer-hub", label: "Customer Hub" },
   { href: "/business-workspace/customer-360", label: "Customer 360" },
+  { href: "/business-workspace/shared-inbox", label: "Shared Inbox" },
   { href: "/business-workspace/team-workspace", label: "Team Workspace" },
+  { href: "/business-workspace/ai-assistant", label: "AI Assistant" },
   { href: "/business-workspace/labels", label: "Labels" },
   { href: "/business-workspace/notes", label: "Notes" },
+  { href: "/business-workspace/followup-center", label: "Follow-up Center" },
+  { href: "/business-workspace/calendar", label: "Calendar" },
   { href: "/business-workspace/deals", label: "Deals" },
+  { href: "/business-workspace/campaign-planner", label: "Campaign Planner" },
+  { href: "/business-workspace/analytics", label: "Analytics" },
+  { href: "/business-workspace/reports", label: "Reports" },
 ];
 
-const COMING_SOON_TABS = [
-  "Shared Inbox",
-  "AI Assistant",
-  "Follow-up Center",
-  "Calendar",
-  "Campaign Planner",
-  "Analytics",
-  "Reports",
-];
+const COMING_SOON_TABS: string[] = [];
 
 export default function BusinessWorkspaceLayout({
   children,

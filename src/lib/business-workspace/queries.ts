@@ -811,3 +811,580 @@ export async function getTeamWorkspace(db: SupabaseClient, accountId: string): P
     ],
   }
 }
+
+// ---------------------------------------------------------------
+// Shared Inbox — Phase 3. A management lens over `conversations`
+// (assign/pin/status/last-message), not a second live-chat engine —
+// "Open" links back into the existing, already-working Inbox for the
+// actual message thread. Internal Notes/Mentions have no backing
+// column/table yet; the per-contact Notes page is the closest real
+// substitute today.
+// ---------------------------------------------------------------
+
+export interface SharedInboxRow {
+  id: string
+  contactId: string
+  contactName: string | null
+  contactPhone: string
+  status: string
+  isPinned: boolean
+  assignedAgentId: string | null
+  assignedAgentName: string | null
+  lastMessageText: string | null
+  lastMessageAt: string | null
+  unreadCount: number
+}
+
+export interface SharedInboxResult {
+  rows: SharedInboxRow[]
+  totalCount: number
+  notTrackedYet: string[]
+}
+
+export async function getSharedInbox(
+  db: SupabaseClient,
+  accountId: string,
+  filters: { status?: string; assignedAgentId?: string; pinnedOnly?: boolean; search?: string; page?: number; pageSize?: number },
+): Promise<SharedInboxResult> {
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
+  const page = filters.page ?? 0
+  const from = page * pageSize
+  const to = from + pageSize - 1
+
+  let query = db
+    .from('conversations')
+    .select('id, contact_id, status, is_pinned, assigned_agent_id, last_message_text, last_message_at, unread_count, contacts(name, phone)', {
+      count: 'exact',
+    })
+    .eq('account_id', accountId)
+    .order('is_pinned', { ascending: false })
+    .order('last_message_at', { ascending: false, nullsFirst: false })
+
+  if (filters.status) query = query.eq('status', filters.status)
+  if (filters.assignedAgentId) query = query.eq('assigned_agent_id', filters.assignedAgentId)
+  if (filters.pinnedOnly) query = query.eq('is_pinned', true)
+
+  const { data, count, error } = await query.range(from, to)
+  if (error) throw new Error(error.message)
+
+  let rows = (data ?? []) as unknown as Array<{
+    id: string
+    contact_id: string
+    status: string
+    is_pinned: boolean
+    assigned_agent_id: string | null
+    last_message_text: string | null
+    last_message_at: string | null
+    unread_count: number
+    contacts: { name: string | null; phone: string }[] | { name: string | null; phone: string } | null
+  }>
+
+  if (filters.search) {
+    const term = filters.search.toLowerCase()
+    rows = rows.filter((r) => {
+      const contact = Array.isArray(r.contacts) ? r.contacts[0] : r.contacts
+      return (contact?.name ?? '').toLowerCase().includes(term) || (contact?.phone ?? '').includes(term)
+    })
+  }
+
+  const agentUserIds = [...new Set(rows.map((r) => r.assigned_agent_id).filter((v): v is string => !!v))]
+  const { data: agents } =
+    agentUserIds.length > 0
+      ? await db.from('profiles').select('user_id, full_name').in('user_id', agentUserIds)
+      : { data: [] as Array<{ user_id: string; full_name: string }> }
+  const agentNameByUserId = new Map((agents ?? []).map((a) => [a.user_id, a.full_name]))
+
+  return {
+    rows: rows.map((r) => {
+      const contact = Array.isArray(r.contacts) ? r.contacts[0] : r.contacts
+      return {
+        id: r.id,
+        contactId: r.contact_id,
+        contactName: contact?.name ?? null,
+        contactPhone: contact?.phone ?? '',
+        status: r.status,
+        isPinned: r.is_pinned,
+        assignedAgentId: r.assigned_agent_id,
+        assignedAgentName: r.assigned_agent_id ? agentNameByUserId.get(r.assigned_agent_id) ?? null : null,
+        lastMessageText: r.last_message_text,
+        lastMessageAt: r.last_message_at,
+        unreadCount: r.unread_count,
+      }
+    }),
+    totalCount: count ?? 0,
+    notTrackedYet: ['Internal Notes (use the Notes page against the contact today)', 'Mentions'],
+  }
+}
+
+// ---------------------------------------------------------------
+// Follow-up Center + Calendar — Phase 3. Share `workspace_scheduled_
+// items` (migration 047): Follow-up Center filters to
+// follow_up/reminder/task; Calendar shows every type across a date
+// range. Same table, two lenses — not a fork.
+// ---------------------------------------------------------------
+
+export type ScheduledItemType = 'meeting' | 'appointment' | 'callback' | 'task' | 'follow_up' | 'event' | 'birthday' | 'reminder'
+
+export interface ScheduledItemRow {
+  id: string
+  title: string
+  itemType: ScheduledItemType
+  dueAt: string
+  isRecurring: boolean
+  priority: string | null
+  status: string
+  assignedToId: string | null
+  assignedToName: string | null
+  contactId: string | null
+  contactName: string | null
+  notes: string | null
+  createdAt: string
+}
+
+async function hydrateScheduledItems(
+  db: SupabaseClient,
+  rows: Array<{
+    id: string
+    title: string
+    item_type: ScheduledItemType
+    due_at: string
+    is_recurring: boolean
+    priority: string | null
+    status: string
+    assigned_to: string | null
+    contact_id: string | null
+    notes: string | null
+    created_at: string
+  }>,
+): Promise<ScheduledItemRow[]> {
+  const agentIds = [...new Set(rows.map((r) => r.assigned_to).filter((v): v is string => !!v))]
+  const contactIds = [...new Set(rows.map((r) => r.contact_id).filter((v): v is string => !!v))]
+
+  const [{ data: agents }, { data: contacts }] = await Promise.all([
+    agentIds.length > 0
+      ? db.from('profiles').select('id, full_name').in('id', agentIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; full_name: string }> }),
+    contactIds.length > 0
+      ? db.from('contacts').select('id, name').in('id', contactIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; name: string | null }> }),
+  ])
+  const agentNameById = new Map((agents ?? []).map((a) => [a.id, a.full_name]))
+  const contactNameById = new Map((contacts ?? []).map((c) => [c.id, c.name]))
+
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    itemType: r.item_type,
+    dueAt: r.due_at,
+    isRecurring: r.is_recurring,
+    priority: r.priority,
+    status: r.status,
+    assignedToId: r.assigned_to,
+    assignedToName: r.assigned_to ? agentNameById.get(r.assigned_to) ?? null : null,
+    contactId: r.contact_id,
+    contactName: r.contact_id ? contactNameById.get(r.contact_id) ?? null : null,
+    notes: r.notes,
+    createdAt: r.created_at,
+  }))
+}
+
+export async function getScheduledItems(
+  db: SupabaseClient,
+  accountId: string,
+  filters: { types?: ScheduledItemType[]; status?: string; fromDate?: string; toDate?: string; page?: number; pageSize?: number },
+): Promise<{ rows: ScheduledItemRow[]; totalCount: number }> {
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
+  const page = filters.page ?? 0
+  const from = page * pageSize
+  const to = from + pageSize - 1
+
+  let query = db
+    .from('workspace_scheduled_items')
+    .select('id, title, item_type, due_at, is_recurring, priority, status, assigned_to, contact_id, notes, created_at', {
+      count: 'exact',
+    })
+    .eq('account_id', accountId)
+    .order('due_at', { ascending: true })
+
+  if (filters.types && filters.types.length > 0) query = query.in('item_type', filters.types)
+  if (filters.status) query = query.eq('status', filters.status)
+  if (filters.fromDate) query = query.gte('due_at', filters.fromDate)
+  if (filters.toDate) query = query.lte('due_at', filters.toDate)
+
+  const { data, count, error } = await query.range(from, to)
+  if (error) throw new Error(error.message)
+
+  const rows = await hydrateScheduledItems(db, (data ?? []) as Parameters<typeof hydrateScheduledItems>[1])
+  return { rows, totalCount: count ?? 0 }
+}
+
+export async function createScheduledItem(
+  db: SupabaseClient,
+  accountId: string,
+  userId: string,
+  input: {
+    title: string
+    itemType: ScheduledItemType
+    dueAt: string
+    isRecurring?: boolean
+    priority?: string | null
+    assignedToId?: string | null
+    contactId?: string | null
+    notes?: string | null
+  },
+): Promise<ScheduledItemRow> {
+  const { data, error } = await db
+    .from('workspace_scheduled_items')
+    .insert({
+      account_id: accountId,
+      title: input.title,
+      item_type: input.itemType,
+      due_at: input.dueAt,
+      is_recurring: input.isRecurring ?? false,
+      priority: input.priority ?? null,
+      assigned_to: input.assignedToId ?? null,
+      contact_id: input.contactId ?? null,
+      notes: input.notes ?? null,
+      created_by: userId,
+    })
+    .select('id, title, item_type, due_at, is_recurring, priority, status, assigned_to, contact_id, notes, created_at')
+    .single()
+  if (error) throw new Error(error.message)
+  const [row] = await hydrateScheduledItems(db, [data as Parameters<typeof hydrateScheduledItems>[1][number]])
+  return row
+}
+
+export async function updateScheduledItem(
+  db: SupabaseClient,
+  accountId: string,
+  id: string,
+  patch: { status?: string; title?: string; dueAt?: string; priority?: string | null; assignedToId?: string | null },
+): Promise<void> {
+  const update: Record<string, unknown> = {}
+  if (patch.status !== undefined) update.status = patch.status
+  if (patch.title !== undefined) update.title = patch.title
+  if (patch.dueAt !== undefined) update.due_at = patch.dueAt
+  if (patch.priority !== undefined) update.priority = patch.priority
+  if (patch.assignedToId !== undefined) update.assigned_to = patch.assignedToId
+
+  const { error } = await db.from('workspace_scheduled_items').update(update).eq('id', id).eq('account_id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteScheduledItem(db: SupabaseClient, accountId: string, id: string): Promise<void> {
+  const { error } = await db.from('workspace_scheduled_items').delete().eq('id', id).eq('account_id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+// ---------------------------------------------------------------
+// Campaign Planner — Phase 3. Planning only, per the spec's explicit
+// "do not integrate with unsupported messaging execution" — nothing
+// here ever calls the broadcast/send pipeline.
+// ---------------------------------------------------------------
+
+export interface ChecklistItem {
+  text: string
+  done: boolean
+}
+
+export interface CampaignPlanRow {
+  id: string
+  name: string
+  ownerId: string | null
+  ownerName: string | null
+  audienceSegment: string | null
+  contentDraft: string | null
+  mediaUrl: string | null
+  status: string
+  planningDate: string | null
+  checklist: ChecklistItem[]
+  notes: string | null
+  createdAt: string
+}
+
+export async function getCampaignPlans(
+  db: SupabaseClient,
+  accountId: string,
+  filters: { status?: string; page?: number; pageSize?: number },
+): Promise<{ rows: CampaignPlanRow[]; totalCount: number }> {
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
+  const page = filters.page ?? 0
+  const from = page * pageSize
+  const to = from + pageSize - 1
+
+  let query = db
+    .from('workspace_campaign_plans')
+    .select(
+      'id, name, owner_id, audience_segment, content_draft, media_url, status, planning_date, checklist, notes, created_at, profiles(full_name)',
+      { count: 'exact' },
+    )
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: false })
+
+  if (filters.status) query = query.eq('status', filters.status)
+
+  const { data, count, error } = await query.range(from, to)
+  if (error) throw new Error(error.message)
+
+  const rows = ((data ?? []) as unknown as Array<{
+    id: string
+    name: string
+    owner_id: string | null
+    audience_segment: string | null
+    content_draft: string | null
+    media_url: string | null
+    status: string
+    planning_date: string | null
+    checklist: ChecklistItem[] | null
+    notes: string | null
+    created_at: string
+    profiles: { full_name: string | null }[] | { full_name: string | null } | null
+  }>).map((p) => {
+    const owner = Array.isArray(p.profiles) ? p.profiles[0] : p.profiles
+    return {
+      id: p.id,
+      name: p.name,
+      ownerId: p.owner_id,
+      ownerName: owner?.full_name ?? null,
+      audienceSegment: p.audience_segment,
+      contentDraft: p.content_draft,
+      mediaUrl: p.media_url,
+      status: p.status,
+      planningDate: p.planning_date,
+      checklist: p.checklist ?? [],
+      notes: p.notes,
+      createdAt: p.created_at,
+    }
+  })
+
+  return { rows, totalCount: count ?? 0 }
+}
+
+export async function createCampaignPlan(
+  db: SupabaseClient,
+  accountId: string,
+  userId: string,
+  input: { name: string; audienceSegment?: string | null; contentDraft?: string | null; planningDate?: string | null },
+): Promise<{ id: string }> {
+  const { data, error } = await db
+    .from('workspace_campaign_plans')
+    .insert({
+      account_id: accountId,
+      name: input.name,
+      audience_segment: input.audienceSegment ?? null,
+      content_draft: input.contentDraft ?? null,
+      planning_date: input.planningDate ?? null,
+      created_by: userId,
+    })
+    .select('id')
+    .single()
+  if (error) throw new Error(error.message)
+  return data as { id: string }
+}
+
+export async function updateCampaignPlan(
+  db: SupabaseClient,
+  accountId: string,
+  id: string,
+  patch: { status?: string; checklist?: ChecklistItem[]; contentDraft?: string | null; notes?: string | null },
+): Promise<void> {
+  const update: Record<string, unknown> = {}
+  if (patch.status !== undefined) update.status = patch.status
+  if (patch.checklist !== undefined) update.checklist = patch.checklist
+  if (patch.contentDraft !== undefined) update.content_draft = patch.contentDraft
+  if (patch.notes !== undefined) update.notes = patch.notes
+
+  const { error } = await db.from('workspace_campaign_plans').update(update).eq('id', id).eq('account_id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+export async function deleteCampaignPlan(db: SupabaseClient, accountId: string, id: string): Promise<void> {
+  const { error } = await db.from('workspace_campaign_plans').delete().eq('id', id).eq('account_id', accountId)
+  if (error) throw new Error(error.message)
+}
+
+// ---------------------------------------------------------------
+// Analytics — Phase 3. Every metric is aggregated from tables the
+// tenant already has; AI Usage has no per-call log yet, so it's
+// flagged rather than shown as zero.
+// ---------------------------------------------------------------
+
+export interface WorkspaceAnalytics {
+  conversations: { open: number; pending: number; closed: number; archived: number }
+  customers: { total: number; newThisWeek: number; newThisMonth: number; bySource: Array<{ source: string; count: number }> }
+  leads: { open: number; won: number; lost: number; conversionRate: number }
+  followups: { pending: number; completed: number }
+  labelDistribution: Array<{ name: string; color: string; count: number }>
+  customerGrowth: Array<{ weekStart: string; count: number }>
+  retentionRate: number
+  notTrackedYet: string[]
+}
+
+export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: string): Promise<WorkspaceAnalytics> {
+  const weekAgo = daysAgoIso(7)
+  const monthAgo = daysAgoIso(30)
+  const eightWeeksAgo = daysAgoIso(56)
+
+  const [
+    { data: convStatuses },
+    { data: contactRows },
+    { data: dealStatuses },
+    { data: followupRows },
+    { data: tags },
+    { data: activeConvs },
+  ] = await Promise.all([
+    db.from('conversations').select('status').eq('account_id', accountId),
+    db.from('contacts').select('id, source, created_at').eq('account_id', accountId),
+    db.from('deals').select('status').eq('account_id', accountId),
+    db.from('workspace_scheduled_items').select('status').eq('account_id', accountId).in('item_type', ['follow_up', 'reminder', 'task']),
+    db.from('tags').select('id, name, color').eq('account_id', accountId),
+    db.from('conversations').select('contact_id, last_message_at').eq('account_id', accountId).gte('last_message_at', monthAgo),
+  ])
+
+  const conversations = { open: 0, pending: 0, closed: 0, archived: 0 }
+  for (const c of (convStatuses ?? []) as Array<{ status: string }>) {
+    if (c.status in conversations) conversations[c.status as keyof typeof conversations]++
+  }
+
+  const contacts = (contactRows ?? []) as Array<{ id: string; source: string | null; created_at: string }>
+  const bySourceMap = new Map<string, number>()
+  let newThisWeek = 0
+  let newThisMonth = 0
+  const weekBuckets = new Map<string, number>()
+  for (const c of contacts) {
+    const source = c.source ?? 'unknown'
+    bySourceMap.set(source, (bySourceMap.get(source) ?? 0) + 1)
+    if (c.created_at >= weekAgo) newThisWeek++
+    if (c.created_at >= monthAgo) newThisMonth++
+    if (c.created_at >= eightWeeksAgo) {
+      const weekStart = new Date(c.created_at)
+      weekStart.setHours(0, 0, 0, 0)
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay())
+      const key = weekStart.toISOString().slice(0, 10)
+      weekBuckets.set(key, (weekBuckets.get(key) ?? 0) + 1)
+    }
+  }
+
+  const deals = { open: 0, won: 0, lost: 0 }
+  for (const d of (dealStatuses ?? []) as Array<{ status: string }>) {
+    if (d.status in deals) deals[d.status as keyof typeof deals]++
+  }
+  const closedDeals = deals.won + deals.lost
+  const conversionRate = closedDeals > 0 ? Math.round((deals.won / closedDeals) * 1000) / 10 : 0
+
+  const followups = { pending: 0, completed: 0 }
+  for (const f of (followupRows ?? []) as Array<{ status: string }>) {
+    if (f.status === 'pending') followups.pending++
+    if (f.status === 'completed') followups.completed++
+  }
+
+  const tagRows = (tags ?? []) as Array<{ id: string; name: string; color: string }>
+  const tagIds = tagRows.map((t) => t.id)
+  const { data: tagUsage } =
+    tagIds.length > 0
+      ? await db.from('contact_tags').select('tag_id').in('tag_id', tagIds)
+      : { data: [] as Array<{ tag_id: string }> }
+  const usageCount = new Map<string, number>()
+  for (const u of (tagUsage ?? []) as Array<{ tag_id: string }>) {
+    usageCount.set(u.tag_id, (usageCount.get(u.tag_id) ?? 0) + 1)
+  }
+  const labelDistribution = tagRows
+    .map((t) => ({ name: t.name, color: t.color, count: usageCount.get(t.id) ?? 0 }))
+    .sort((a, b) => b.count - a.count)
+
+  const activeContactIds = new Set(
+    ((activeConvs ?? []) as Array<{ contact_id: string; last_message_at: string | null }>).map((c) => c.contact_id),
+  )
+  const retentionRate = contacts.length > 0 ? Math.round((activeContactIds.size / contacts.length) * 1000) / 10 : 0
+
+  const customerGrowth = [...weekBuckets.entries()]
+    .sort(([a], [b]) => (a > b ? 1 : -1))
+    .map(([weekStart, count]) => ({ weekStart, count }))
+
+  return {
+    conversations,
+    customers: {
+      total: contacts.length,
+      newThisWeek,
+      newThisMonth,
+      bySource: [...bySourceMap.entries()].map(([source, count]) => ({ source, count })),
+    },
+    leads: { open: deals.open, won: deals.won, lost: deals.lost, conversionRate },
+    followups,
+    labelDistribution,
+    customerGrowth,
+    retentionRate,
+    notTrackedYet: ['AI Usage (no per-call usage log yet)'],
+  }
+}
+
+// ---------------------------------------------------------------
+// Reports — Phase 3. One consolidated period report rather than six
+// separate report engines — covers the spec's Customer/Lead/
+// Performance/Activity/Follow-up categories for the chosen period in
+// a single, honest view.
+// ---------------------------------------------------------------
+
+export type ReportPeriod = 'daily' | 'weekly' | 'monthly'
+
+export interface WorkspaceReport {
+  period: ReportPeriod
+  rangeStart: string
+  rangeEnd: string
+  newCustomers: number
+  newLeads: number
+  dealsWon: number
+  dealsLost: number
+  conversationsClosed: number
+  notesAdded: number
+  topAgent: { name: string; conversationsClosed: number } | null
+  notTrackedYet: string[]
+}
+
+export async function getWorkspaceReport(db: SupabaseClient, accountId: string, period: ReportPeriod): Promise<WorkspaceReport> {
+  const days = period === 'daily' ? 1 : period === 'weekly' ? 7 : 30
+  const rangeStart = daysAgoIso(days)
+  const rangeEnd = new Date().toISOString()
+
+  const [{ count: newCustomers }, { data: newDeals }, { data: closedConvs }, { count: notesAdded }] = await Promise.all([
+    db.from('contacts').select('id', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', rangeStart),
+    db.from('deals').select('status').eq('account_id', accountId).gte('updated_at', rangeStart),
+    db
+      .from('conversations')
+      .select('assigned_agent_id')
+      .eq('account_id', accountId)
+      .eq('status', 'closed')
+      .gte('updated_at', rangeStart),
+    db.from('contact_notes').select('id', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', rangeStart),
+  ])
+
+  const dealRows = (newDeals ?? []) as Array<{ status: string }>
+  const dealsWon = dealRows.filter((d) => d.status === 'won').length
+  const dealsLost = dealRows.filter((d) => d.status === 'lost').length
+
+  const closedByAgent = new Map<string, number>()
+  for (const c of (closedConvs ?? []) as Array<{ assigned_agent_id: string | null }>) {
+    if (!c.assigned_agent_id) continue
+    closedByAgent.set(c.assigned_agent_id, (closedByAgent.get(c.assigned_agent_id) ?? 0) + 1)
+  }
+  let topAgent: { name: string; conversationsClosed: number } | null = null
+  if (closedByAgent.size > 0) {
+    const [topUserId, topCount] = [...closedByAgent.entries()].sort((a, b) => b[1] - a[1])[0]
+    const { data: profile } = await db.from('profiles').select('full_name').eq('user_id', topUserId).maybeSingle()
+    topAgent = { name: (profile as { full_name: string } | null)?.full_name ?? 'Unknown', conversationsClosed: topCount }
+  }
+
+  return {
+    period,
+    rangeStart,
+    rangeEnd,
+    newCustomers: newCustomers ?? 0,
+    newLeads: dealRows.length,
+    dealsWon,
+    dealsLost,
+    conversationsClosed: [...closedByAgent.values()].reduce((a, b) => a + b, 0),
+    notesAdded: notesAdded ?? 0,
+    topAgent,
+    notTrackedYet: ['AI Reports (no per-call usage log yet)'],
+  }
+}
