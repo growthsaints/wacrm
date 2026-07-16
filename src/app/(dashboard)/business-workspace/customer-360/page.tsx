@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   Briefcase,
+  CalendarClock,
   Loader2,
   Search,
   ShieldAlert,
@@ -232,6 +233,17 @@ export default function Customer360Page() {
             <p className="text-sm text-foreground">
               {profile.lastActivity ? new Date(profile.lastActivity).toLocaleString() : "No activity yet"}
             </p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Next Follow-up</p>
+            {profile.nextFollowup ? (
+              <p className="inline-flex items-center gap-1 text-sm text-foreground">
+                <CalendarClock className="size-3.5 text-primary" />
+                {profile.nextFollowup.title} · {new Date(profile.nextFollowup.dueAt).toLocaleDateString()}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">None scheduled</p>
+            )}
           </div>
         </CardContent>
         {profile.tags.length > 0 && (

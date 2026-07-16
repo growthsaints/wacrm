@@ -9,10 +9,12 @@ import { supabaseAdmin } from '@/lib/ai/admin-client'
 // tracks (contacts, conversations, messages, deals, contact_notes,
 // notifications) via the SAME tables the existing Cloud API module
 // reads — Business Workspace is a second lens over the same tenant
-// data, not a parallel copy of it. Widgets the spec asks for that
-// have no real backing signal yet (Follow-up Center, Calendar, Tasks,
-// Team Workspace, AI Assistant — all later phases) are explicitly
-// flagged as not-yet-available rather than shown as a fabricated zero.
+// data, not a parallel copy of it. Widgets that had no real backing
+// signal in Phase 1 (Follow-up Center, Calendar, Team Workspace, AI
+// Assistant) got their own tables in later phases and now feed
+// Overview/Customer 360 directly (see getWorkspaceOverview below) —
+// only Customer Satisfaction, per-customer billing, and document
+// management genuinely still have no backing table.
 // ============================================================
 
 function startOfLocalDay(): string {
@@ -48,6 +50,14 @@ export interface WorkspaceOverview {
     createdAt: string
   }>
   activityTimeline: Array<{ id: string; text: string; at: string; href?: string }>
+  /** Open workspace_scheduled_items — same table Follow-up Center/Calendar use. */
+  pendingFollowups: number
+  upcomingMeetings: number
+  todaysTasks: number
+  /** Account-wide, this week — same signals Team Workspace shows per-member. */
+  teamPerformance: { conversationsClosed: number; dealsWon: number }
+  /** ai_usage_log rows with mode='workspace_assistant', this week. */
+  aiSuggestionsThisWeek: number
   /** User-facing labels for spec'd widgets with no real signal to back
    *  them yet — rendered as "coming soon" rather than a fake number. */
   notTrackedYet: string[]
@@ -70,6 +80,12 @@ export async function getWorkspaceOverview(
     { data: recentConvRows },
     { data: recentDealRows },
     { data: recentMessages },
+    { count: pendingFollowups },
+    { count: upcomingMeetings },
+    { count: todaysTasks },
+    { count: conversationsClosedThisWeek },
+    { count: dealsWonThisWeek },
+    { count: aiSuggestionsThisWeek },
   ] = await Promise.all([
     db
       .from('contacts')
@@ -117,6 +133,44 @@ export async function getWorkspaceOverview(
       .gte('created_at', sevenDaysAgo)
       .order('created_at', { ascending: true })
       .limit(2000),
+    db
+      .from('workspace_scheduled_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('item_type', 'follow_up')
+      .eq('status', 'pending'),
+    db
+      .from('workspace_scheduled_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('item_type', 'meeting')
+      .eq('status', 'pending')
+      .gte('due_at', new Date().toISOString()),
+    db
+      .from('workspace_scheduled_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('item_type', 'task')
+      .eq('status', 'pending')
+      .gte('due_at', todayStart),
+    db
+      .from('conversations')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('status', 'closed')
+      .gte('updated_at', sevenDaysAgo),
+    db
+      .from('deals')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('status', 'won')
+      .gte('updated_at', sevenDaysAgo),
+    db
+      .from('ai_usage_log')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_id', accountId)
+      .eq('mode', 'workspace_assistant')
+      .gte('created_at', sevenDaysAgo),
   ])
 
   const openLeads = (openDeals ?? []).length
@@ -197,14 +251,15 @@ export async function getWorkspaceOverview(
     avgResponseTimeMinutes,
     recentNotes,
     activityTimeline: activity.slice(0, 10),
-    notTrackedYet: [
-      'Pending Follow-ups (Follow-up Center)',
-      'Upcoming Meetings (Calendar)',
-      "Today's Tasks (Task Manager)",
-      'Customer Satisfaction (no survey mechanism yet)',
-      'Team Performance (Team Workspace)',
-      'AI Suggestions (AI Assistant)',
-    ],
+    pendingFollowups: pendingFollowups ?? 0,
+    upcomingMeetings: upcomingMeetings ?? 0,
+    todaysTasks: todaysTasks ?? 0,
+    teamPerformance: {
+      conversationsClosed: conversationsClosedThisWeek ?? 0,
+      dealsWon: dealsWonThisWeek ?? 0,
+    },
+    aiSuggestionsThisWeek: aiSuggestionsThisWeek ?? 0,
+    notTrackedYet: ['Customer Satisfaction (no survey mechanism yet)'],
   }
 }
 
@@ -402,6 +457,9 @@ export interface CustomerProfile {
   deals: Array<{ id: string; title: string; value: number; currency: string | null; status: string; createdAt: string }>
   conversationCount: number
   lastActivity: string | null
+  /** Nearest pending workspace_scheduled_items row for this contact — same
+   *  table Follow-up Center/Calendar use. Null if nothing's scheduled. */
+  nextFollowup: { id: string; title: string; itemType: ScheduledItemType; dueAt: string } | null
   /** Computed from days since last activity — not a Meta or predictive
    *  signal. See computeRiskLevel(). */
   riskLevel: RiskLevel
@@ -449,7 +507,7 @@ export async function getCustomerProfile(
     created_at: string
   }
 
-  const [tagLinksRes, notesRes, dealsRes, convsRes, agentRes, timeline] = await Promise.all([
+  const [tagLinksRes, notesRes, dealsRes, convsRes, agentRes, timeline, nextFollowupRes] = await Promise.all([
     db.from('contact_tags').select('tags(id, name, color)').eq('contact_id', contactId),
     db.from('contact_notes').select('id, note_text, created_at').eq('contact_id', contactId).order('created_at', { ascending: false }),
     db
@@ -467,6 +525,15 @@ export async function getCustomerProfile(
       ? db.from('profiles').select('full_name').eq('id', c.assigned_agent_id).maybeSingle()
       : Promise.resolve({ data: null }),
     buildContactTimeline(db, contactId),
+    db
+      .from('workspace_scheduled_items')
+      .select('id, title, item_type, due_at')
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId)
+      .eq('status', 'pending')
+      .order('due_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
   ])
 
   const tags = ((tagLinksRes.data ?? []) as unknown as Array<{
@@ -520,6 +587,14 @@ export async function getCustomerProfile(
     })),
     conversationCount: conversations.length,
     lastActivity,
+    nextFollowup: nextFollowupRes.data
+      ? {
+          id: (nextFollowupRes.data as { id: string }).id,
+          title: (nextFollowupRes.data as { title: string }).title,
+          itemType: (nextFollowupRes.data as { item_type: ScheduledItemType }).item_type,
+          dueAt: (nextFollowupRes.data as { due_at: string }).due_at,
+        }
+      : null,
     riskLevel: computeRiskLevel(lastActivity),
     customerScore: c.lead_score,
     timeline,
@@ -527,7 +602,6 @@ export async function getCustomerProfile(
     notTrackedYet: [
       'Invoices & Payments (no billing-per-customer module yet)',
       'Documents beyond chat attachments',
-      'Next Follow-up (Follow-up Center)',
       'AI Summary (AI Assistant)',
     ],
   }

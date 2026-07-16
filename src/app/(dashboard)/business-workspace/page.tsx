@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Bell,
+  Bot,
+  CalendarClock,
+  CheckSquare,
   ClipboardList,
   Clock,
   Loader2,
   MessageSquare,
   StickyNote,
   Target,
+  Trophy,
   Users,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -78,6 +82,18 @@ export default function BusinessWorkspaceOverviewPage() {
         <StatTile label="Open Leads" value={data.openLeads.toLocaleString()} icon={Target} />
         <StatTile label="Assigned Deals" value={data.assignedDeals.toLocaleString()} icon={ClipboardList} />
         <StatTile label="Unread Notifications" value={data.unreadNotifications.toLocaleString()} icon={Bell} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        <StatTile label="Pending Follow-ups" value={data.pendingFollowups.toLocaleString()} icon={CalendarClock} />
+        <StatTile label="Upcoming Meetings" value={data.upcomingMeetings.toLocaleString()} icon={CalendarClock} />
+        <StatTile label="Today's Tasks" value={data.todaysTasks.toLocaleString()} icon={CheckSquare} />
+        <StatTile
+          label="Team Wins (7d)"
+          value={`${data.teamPerformance.conversationsClosed.toLocaleString()} closed · ${data.teamPerformance.dealsWon.toLocaleString()} won`}
+          icon={Trophy}
+        />
+        <StatTile label="AI Suggestions (7d)" value={data.aiSuggestionsThisWeek.toLocaleString()} icon={Bot} />
       </div>
 
       <Card>
@@ -165,9 +181,7 @@ export default function BusinessWorkspaceOverviewPage() {
             ))}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            These widgets need their own sub-page (Follow-up Center, Calendar,
-            Task Manager, Team Workspace, AI Assistant) before they can show
-            real numbers — arriving in later phases.
+            No survey mechanism exists yet to measure customer satisfaction.
           </p>
         </CardContent>
       </Card>
