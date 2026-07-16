@@ -49,6 +49,7 @@ import { WalletBalanceCard } from '@/components/dashboard/wallet-balance-card'
 import { WhatsAppStatusCard } from '@/components/dashboard/whatsapp-status-card'
 import { WhatsAppOnboardingChecklist } from '@/components/dashboard/whatsapp-onboarding-checklist'
 import { DashboardGuideCarousel } from '@/components/dashboard/dashboard-guide-carousel'
+import { DashboardImageCarousel } from '@/components/dashboard/dashboard-image-carousel'
 
 import { useTranslations } from 'next-intl'
 
@@ -203,6 +204,9 @@ export default function DashboardPage() {
           <WhatsAppStatusCard />
         </div>
       </div>
+
+      {/* Feature & guide showcase */}
+      <DashboardImageCarousel />
 
       {/* Getting started: guide carousel + WhatsApp setup checklist */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
