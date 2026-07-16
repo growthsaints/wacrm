@@ -835,9 +835,8 @@ export async function getDealsList(
 // Team Workspace — Roster + live presence (reuses member_presence,
 // migration 024) + a simple, real weekly performance count.
 // Departments and Internal Chat live further down this file
-// (migration 051). Announcements still aren't built — a genuinely
-// separate feature (broadcast-style posts, not 1:1/group chat) left
-// for a later phase.
+// (migration 051); Announcements (broadcast-style posts, distinct
+// from 1:1/group chat) further down still (migration 054).
 // ---------------------------------------------------------------
 
 export interface TeamMemberRow {
