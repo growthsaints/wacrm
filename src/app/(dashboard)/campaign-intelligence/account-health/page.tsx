@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Gauge, Loader2, OctagonAlert } from "lucide-react";
+import { AlertTriangle, Gauge, LineChart, Loader2, OctagonAlert } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BarChart } from "@/components/tremor/bar-chart";
 import { cn } from "@/lib/utils";
 import type { AccountHealth } from "@/lib/enterprise/queries";
 
@@ -60,6 +61,36 @@ export default function AccountHealthPage() {
           <p className="mt-1 text-2xl font-semibold text-foreground">{data.replyRate}%</p>
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <LineChart className="h-4 w-4 text-primary" /> Health Score Trend
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.history.length < 2 ? (
+            <p className="text-sm text-muted-foreground">
+              History starts accumulating once the daily snapshot has run more
+              than once — check back tomorrow. There&apos;s no way to backfill
+              scores from before this was wired up.
+            </p>
+          ) : (
+            <BarChart
+              data={data.history.map((h) => ({
+                date: new Date(h.date).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+                Score: h.score,
+              }))}
+              index="date"
+              categories={["Score"]}
+              colors={["theme1"]}
+              showLegend={false}
+              yAxisWidth={32}
+              className="h-40"
+            />
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

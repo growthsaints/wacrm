@@ -160,12 +160,44 @@ export interface AccountHealthWarning {
   recommendation: string
 }
 
+export interface AccountHealthHistoryPoint {
+  date: string
+  score: number
+}
+
 export interface AccountHealth {
   score: number
   qualityRating: string | null
   failureRate: number
   replyRate: number
   warnings: AccountHealthWarning[]
+  /** Daily snapshots from enterprise_account_health_history — empty
+   *  until the cron (/api/enterprise/account-health/cron) has run at
+   *  least once for this account. No backfill exists for days before
+   *  that; the page says so rather than showing a fabricated flat
+   *  line. */
+  history: AccountHealthHistoryPoint[]
+}
+
+export async function getAccountHealthHistory(
+  db: SupabaseClient,
+  accountId: string,
+  days = 30,
+): Promise<AccountHealthHistoryPoint[]> {
+  const since = new Date()
+  since.setDate(since.getDate() - days)
+
+  const { data } = await db
+    .from('enterprise_account_health_history')
+    .select('snapshot_date, score')
+    .eq('account_id', accountId)
+    .gte('snapshot_date', since.toISOString().slice(0, 10))
+    .order('snapshot_date', { ascending: true })
+
+  return ((data ?? []) as Array<{ snapshot_date: string; score: number }>).map((r) => ({
+    date: r.snapshot_date,
+    score: r.score,
+  }))
 }
 
 export async function getAccountHealth(
@@ -249,12 +281,15 @@ export async function getAccountHealth(
     })
   }
 
+  const history = await getAccountHealthHistory(db, accountId)
+
   return {
     score,
     qualityRating: config?.quality_rating ?? null,
     failureRate,
     replyRate,
     warnings,
+    history,
   }
 }
 
@@ -763,29 +798,109 @@ export async function getRiskCenter(db: SupabaseClient, accountId: string): Prom
 // Compliance Center
 // ============================================================
 
+export interface ComplianceEvent {
+  id: string
+  source: 'broadcast_failure' | 'account_event'
+  message: string
+  flagged: boolean
+  createdAt: string
+}
+
 export interface ComplianceCenter {
   displayName: string | null
   phoneStatus: string
   messagingLimitTier: string | null
   qualityRating: string | null
   phoneVerificationStatus: string | null
-  errorsTracked: false
+  errorsTracked: true
+  totalFailedMessages: number
+  unresolvedFlaggedEvents: number
+  recentErrors: ComplianceEvent[]
+}
+
+const ACCOUNT_EVENT_FIELD_LABELS: Record<string, string> = {
+  account_review_update: 'Account review update',
+  account_alerts: 'Account alert',
+  phone_number_quality_update: 'Phone number quality changed',
+  business_capability_update: 'Business capability changed',
+  messaging_limit_tier: 'Messaging tier changed',
 }
 
 /**
- * Recent Errors / API Errors / Webhook Errors from the original spec
- * are NOT included — there is no operational error-log table in this
- * codebase today (webhook/API failures only go to console logs, never
- * persisted). Showing a fabricated "0 errors" would be misleading, so
- * `errorsTracked: false` tells the UI to say so explicitly rather than
- * render an empty, falsely-reassuring table.
+ * Recent Errors now come from two real, already-populated sources —
+ * no new error-log table needed:
+ *   - broadcast_recipients.error_message (set whenever a broadcast
+ *     send actually fails — this data has existed since the original
+ *     broadcast schema).
+ *   - whatsapp_account_events (migration 042) — every account-level
+ *     webhook field Meta sends that isn't otherwise acted on (quality/
+ *     capability/tier changes, review updates, alerts), already
+ *     written by the webhook handler with a keyword-heuristic
+ *     `flagged` column.
+ * Earlier this page said "not tracked yet" because neither source had
+ * been wired in — the data was there the whole time.
  */
 export async function getComplianceCenter(db: SupabaseClient, accountId: string): Promise<ComplianceCenter> {
-  const { data: config } = await db
-    .from('whatsapp_config')
-    .select('display_name, status, messaging_limit_tier, quality_rating, code_verification_status')
-    .eq('account_id', accountId)
-    .maybeSingle()
+  const [{ data: config }, { data: failedRecipients }, { data: accountEvents }, totals] = await Promise.all([
+    db
+      .from('whatsapp_config')
+      .select('display_name, status, messaging_limit_tier, quality_rating, code_verification_status')
+      .eq('account_id', accountId)
+      .maybeSingle(),
+    db
+      .from('broadcast_recipients')
+      .select('id, error_message, created_at, broadcasts!inner(account_id)')
+      .eq('broadcasts.account_id', accountId)
+      .eq('status', 'failed')
+      .not('error_message', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(10),
+    db
+      .from('whatsapp_account_events')
+      .select('id, field, raw_value, flagged, resolved, created_at')
+      .eq('account_id', accountId)
+      .order('created_at', { ascending: false })
+      .limit(10),
+    sumBroadcastTotals(db, accountId),
+  ])
+
+  const failureEvents: ComplianceEvent[] = ((failedRecipients ?? []) as unknown as Array<{
+    id: string
+    error_message: string | null
+    created_at: string
+  }>).map((r) => ({
+    id: `broadcast-${r.id}`,
+    source: 'broadcast_failure' as const,
+    message: r.error_message ?? 'Message failed to send',
+    flagged: false,
+    createdAt: r.created_at,
+  }))
+
+  const accountEventRows = (accountEvents ?? []) as Array<{
+    id: string
+    field: string
+    raw_value: unknown
+    flagged: boolean
+    resolved: boolean
+    created_at: string
+  }>
+  const accountEventItems: ComplianceEvent[] = accountEventRows.map((e) => {
+    const label = ACCOUNT_EVENT_FIELD_LABELS[e.field] ?? e.field.replace(/_/g, ' ')
+    const snippet = JSON.stringify(e.raw_value).slice(0, 140)
+    return {
+      id: `event-${e.id}`,
+      source: 'account_event' as const,
+      message: `${label}: ${snippet}`,
+      flagged: e.flagged && !e.resolved,
+      createdAt: e.created_at,
+    }
+  })
+
+  const recentErrors = [...failureEvents, ...accountEventItems]
+    .sort((a, b) => (a.createdAt > b.createdAt ? -1 : 1))
+    .slice(0, 15)
+
+  const unresolvedFlaggedEvents = accountEventRows.filter((e) => e.flagged && !e.resolved).length
 
   return {
     displayName: config?.display_name ?? null,
@@ -793,7 +908,10 @@ export async function getComplianceCenter(db: SupabaseClient, accountId: string)
     messagingLimitTier: config?.messaging_limit_tier ?? null,
     qualityRating: config?.quality_rating ?? null,
     phoneVerificationStatus: config?.code_verification_status ?? null,
-    errorsTracked: false,
+    errorsTracked: true,
+    totalFailedMessages: totals.failedCount,
+    unresolvedFlaggedEvents,
+    recentErrors,
   }
 }
 

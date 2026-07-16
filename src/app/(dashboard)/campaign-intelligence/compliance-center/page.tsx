@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Info, Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { ComplianceCenter } from "@/lib/enterprise/queries";
 
 export default function ComplianceCenterPage() {
@@ -59,19 +61,52 @@ export default function ComplianceCenterPage() {
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-2">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-xs text-muted-foreground">Failed Messages (lifetime)</p>
+          <p className="mt-1 text-xl font-semibold text-foreground">{data.totalFailedMessages.toLocaleString()}</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-xs text-muted-foreground">Unresolved Flagged Events</p>
+          <p className="mt-1 text-xl font-semibold text-foreground">{data.unresolvedFlaggedEvents.toLocaleString()}</p>
+        </div>
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Recent Errors</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-            <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>
-              API and webhook error logging isn&apos;t tracked yet — this
-              section will show real failures once that&apos;s built, rather
-              than a fabricated &quot;0 errors&quot; count.
-            </p>
-          </div>
+          {data.recentErrors.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No broadcast failures or account-level events recorded.</p>
+          ) : (
+            <ul className="space-y-2">
+              {data.recentErrors.map((e) => (
+                <li
+                  key={e.id}
+                  className={cn(
+                    "flex items-start justify-between gap-3 rounded-lg border px-3 py-2.5 text-sm",
+                    e.flagged ? "border-red-500/30 bg-red-500/5" : "border-border",
+                  )}
+                >
+                  <span className="flex items-start gap-2">
+                    {e.flagged ? (
+                      <ShieldAlert className="mt-0.5 size-4 shrink-0 text-red-500" />
+                    ) : (
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="text-foreground">{e.message}</span>
+                  </span>
+                  <span className="flex shrink-0 flex-col items-end gap-1">
+                    <Badge variant="outline" className="text-[10px] capitalize text-muted-foreground">
+                      {e.source === "broadcast_failure" ? "Broadcast" : "Account Event"}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{new Date(e.createdAt).toLocaleString()}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>
