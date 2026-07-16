@@ -149,7 +149,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
   const totalUnread = useTotalUnread();
   const unreadNotifications = useUnreadNotifications();
   const isPlatformAdmin = usePlatformAdmin();
-  const { enabled: enterpriseEnabled } = useEnterpriseFeatures();
+  const { enabled: enterpriseLicensed, features: enterpriseFeatures } = useEnterpriseFeatures();
+  const enterpriseEnabled = enterpriseLicensed && Boolean(enterpriseFeatures.campaign_intelligence);
   // Only surface the account-name strip when it actually carries
   // information. A solo user's personal account is named after them
   // (the 017 signup trigger seeds it from `full_name`), so showing it
