@@ -4,7 +4,9 @@ import type { Boom } from '@hapi/boom'
 import {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  isJidBroadcast,
   isJidGroup,
+  isJidNewsletter,
   makeWASocket,
   // Aliased away from its original name — it's a plain Node.js
   // helper, not a React Hook, but eslint-plugin-react-hooks flags any
@@ -204,16 +206,18 @@ function phoneFromJid(jid: string): string {
 /**
  * Persists inbound AND outbound (echoed back from our own sends, or
  * sent from the linked phone itself) text messages into the isolated
- * workspace_whatsapp_personal_* tables. Group chats and non-text
- * messages are skipped — this is a 1:1 text-capture tool, not a full
- * WhatsApp client.
+ * workspace_whatsapp_personal_* tables. Group chats, WhatsApp Channels
+ * (@newsletter), and broadcast lists (@broadcast, incl. status@broadcast)
+ * are all skipped — this is strictly a 1:1 text-capture tool, and a
+ * channel a linked number happens to follow (or a status update) is
+ * not a contact. Non-text messages are skipped too.
  */
 async function captureIncomingMessages(accountId: string, messages: WAMessage[]): Promise<void> {
   const admin = platformAdminClient()
 
   for (const msg of messages) {
     const remoteJid = msg.key.remoteJid
-    if (!remoteJid || isJidGroup(remoteJid)) continue
+    if (!remoteJid || isJidGroup(remoteJid) || isJidBroadcast(remoteJid) || isJidNewsletter(remoteJid)) continue
 
     const text = extractText(msg)
     if (!text) continue
