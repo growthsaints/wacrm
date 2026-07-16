@@ -9,6 +9,8 @@ import {
 import { loadAiConfig } from '@/lib/ai/config'
 import { generateReply } from '@/lib/ai/generate'
 import { AiError } from '@/lib/ai/types'
+import { logAiUsage } from '@/lib/ai/usage'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 
 const RECOMMENDATION_PROMPT = `You are a WhatsApp marketing analyst reviewing one business's own account metrics. Given the account health, delivery, and engagement data below, write 3-5 short, specific, actionable recommendations (one line each, no preamble) to improve campaign performance and account health. Only base suggestions on the numbers provided — never invent facts about the business. If the data shows no real issues, say so briefly instead of inventing problems.`
 
@@ -63,10 +65,19 @@ Best sending day: ${engagement.bestSendingDay ?? 'not enough data'}
 Top performing template: ${engagement.topTemplate?.name ?? 'none yet'} (${engagement.topTemplate?.readRate ?? 0}% read rate)
 `.trim()
 
-    const { text } = await generateReply({
+    const { text, usage } = await generateReply({
       config,
       systemPrompt: RECOMMENDATION_PROMPT,
       messages: [{ role: 'user', content: metricsSummary }],
+    })
+
+    void logAiUsage(supabaseAdmin(), {
+      accountId,
+      conversationId: null,
+      mode: 'enterprise_recommendations',
+      provider: config.provider,
+      model: config.model,
+      usage,
     })
 
     const recommendations = text

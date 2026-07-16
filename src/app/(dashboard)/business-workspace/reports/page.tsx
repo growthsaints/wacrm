@@ -132,6 +132,14 @@ export default function ReportsPage() {
                 )}
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm text-muted-foreground">AI Assistant Calls</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold text-foreground">{report.aiCalls}</p>
+              </CardContent>
+            </Card>
           </div>
 
           {report.notTrackedYet.length > 0 && (

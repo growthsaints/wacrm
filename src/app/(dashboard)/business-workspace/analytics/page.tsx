@@ -166,6 +166,22 @@ export default function AnalyticsPage() {
         </Card>
       )}
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">AI Usage (30 days)</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-muted-foreground">AI Assistant Calls</p>
+            <p className="mt-1 text-xl font-semibold text-foreground">{data.aiUsage.calls.toLocaleString()}</p>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Total Tokens</p>
+            <p className="mt-1 text-xl font-semibold text-foreground">{data.aiUsage.totalTokens.toLocaleString()}</p>
+          </div>
+        </CardContent>
+      </Card>
+
       {data.notTrackedYet.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {data.notTrackedYet.map((label) => (

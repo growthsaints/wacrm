@@ -1267,9 +1267,11 @@ export async function deleteCampaignPlan(db: SupabaseClient, accountId: string, 
 }
 
 // ---------------------------------------------------------------
-// Analytics — Phase 3. Every metric is aggregated from tables the
-// tenant already has; AI Usage has no per-call log yet, so it's
-// flagged rather than shown as zero.
+// Analytics — Every metric is aggregated from tables the tenant
+// already has. AI Usage reuses the existing ai_usage_log table
+// (migration 033, widened by migration 052) — the same one that
+// already tracked the tenant's auto-reply/draft AI spend; it just
+// hadn't been queried from here yet.
 // ---------------------------------------------------------------
 
 export interface WorkspaceAnalytics {
@@ -1288,6 +1290,7 @@ export interface WorkspaceAnalytics {
     messagesToday: number
     avgResponseTimeMinutes: number | null
   }
+  aiUsage: { calls: number; totalTokens: number }
   notTrackedYet: string[]
 }
 
@@ -1308,6 +1311,7 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
     { count: personalMsgCount },
     { count: personalMsgToday },
     { data: personalRecentMsgs },
+    { data: aiUsageRows },
   ] = await Promise.all([
     db.from('conversations').select('status').eq('account_id', accountId),
     db.from('contacts').select('id, source, created_at').eq('account_id', accountId),
@@ -1329,6 +1333,7 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
       .gte('created_at', weekAgo)
       .order('created_at', { ascending: true })
       .limit(2000),
+    db.from('ai_usage_log').select('total_tokens').eq('account_id', accountId).eq('mode', 'workspace_assistant').gte('created_at', monthAgo),
   ])
 
   const conversations = { open: 0, pending: 0, closed: 0, archived: 0 }
@@ -1431,7 +1436,11 @@ export async function getWorkspaceAnalytics(db: SupabaseClient, accountId: strin
       messagesToday: personalMsgToday ?? 0,
       avgResponseTimeMinutes: personalAvgResponseTimeMinutes,
     },
-    notTrackedYet: ['AI Usage (no per-call usage log yet)'],
+    aiUsage: {
+      calls: (aiUsageRows ?? []).length,
+      totalTokens: ((aiUsageRows ?? []) as Array<{ total_tokens: number }>).reduce((sum, r) => sum + r.total_tokens, 0),
+    },
+    notTrackedYet: [],
   }
 }
 
@@ -1455,6 +1464,7 @@ export interface WorkspaceReport {
   conversationsClosed: number
   notesAdded: number
   topAgent: { name: string; conversationsClosed: number } | null
+  aiCalls: number
   notTrackedYet: string[]
 }
 
@@ -1463,17 +1473,24 @@ export async function getWorkspaceReport(db: SupabaseClient, accountId: string, 
   const rangeStart = daysAgoIso(days)
   const rangeEnd = new Date().toISOString()
 
-  const [{ count: newCustomers }, { data: newDeals }, { data: closedConvs }, { count: notesAdded }] = await Promise.all([
-    db.from('contacts').select('id', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', rangeStart),
-    db.from('deals').select('status').eq('account_id', accountId).gte('updated_at', rangeStart),
-    db
-      .from('conversations')
-      .select('assigned_agent_id')
-      .eq('account_id', accountId)
-      .eq('status', 'closed')
-      .gte('updated_at', rangeStart),
-    db.from('contact_notes').select('id', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', rangeStart),
-  ])
+  const [{ count: newCustomers }, { data: newDeals }, { data: closedConvs }, { count: notesAdded }, { count: aiCalls }] =
+    await Promise.all([
+      db.from('contacts').select('id', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', rangeStart),
+      db.from('deals').select('status').eq('account_id', accountId).gte('updated_at', rangeStart),
+      db
+        .from('conversations')
+        .select('assigned_agent_id')
+        .eq('account_id', accountId)
+        .eq('status', 'closed')
+        .gte('updated_at', rangeStart),
+      db.from('contact_notes').select('id', { count: 'exact', head: true }).eq('account_id', accountId).gte('created_at', rangeStart),
+      db
+        .from('ai_usage_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('account_id', accountId)
+        .eq('mode', 'workspace_assistant')
+        .gte('created_at', rangeStart),
+    ])
 
   const dealRows = (newDeals ?? []) as Array<{ status: string }>
   const dealsWon = dealRows.filter((d) => d.status === 'won').length
@@ -1502,7 +1519,8 @@ export async function getWorkspaceReport(db: SupabaseClient, accountId: string, 
     conversationsClosed: [...closedByAgent.values()].reduce((a, b) => a + b, 0),
     notesAdded: notesAdded ?? 0,
     topAgent,
-    notTrackedYet: ['AI Reports (no per-call usage log yet)'],
+    aiCalls: aiCalls ?? 0,
+    notTrackedYet: [],
   }
 }
 

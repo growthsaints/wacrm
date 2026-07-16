@@ -4,6 +4,8 @@ import { requireBusinessWorkspaceFeature } from '@/lib/business-workspace/guard'
 import { loadAiConfig } from '@/lib/ai/config'
 import { generateReply } from '@/lib/ai/generate'
 import { AiError } from '@/lib/ai/types'
+import { logAiUsage } from '@/lib/ai/usage'
+import { supabaseAdmin } from '@/lib/ai/admin-client'
 
 const TASKS = {
   summarize: 'Summarize the following WhatsApp conversation in 2-3 short sentences. Only state what is actually written — never invent details.',
@@ -66,10 +68,19 @@ export async function POST(request: Request) {
       systemPrompt = systemPrompt.replace('{tone}', tone)
     }
 
-    const { text } = await generateReply({
+    const { text, usage } = await generateReply({
       config,
       systemPrompt,
       messages: [{ role: 'user', content: input }],
+    })
+
+    void logAiUsage(supabaseAdmin(), {
+      accountId,
+      conversationId: null,
+      mode: 'workspace_assistant',
+      provider: config.provider,
+      model: config.model,
+      usage,
     })
 
     return NextResponse.json({ result: text.trim() })
