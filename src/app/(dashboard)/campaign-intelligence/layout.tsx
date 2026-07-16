@@ -9,23 +9,20 @@ import { useEnterpriseFeatures } from "@/hooks/use-enterprise-features";
 const LIVE_TABS = [
   { href: "/campaign-intelligence", label: "Overview" },
   { href: "/campaign-intelligence/account-health", label: "Account Health" },
+  { href: "/campaign-intelligence/contact-intelligence", label: "Contact Intelligence" },
+  { href: "/campaign-intelligence/campaign-analyzer", label: "Campaign Analyzer" },
+  { href: "/campaign-intelligence/broadcast-queue", label: "Broadcast Queue" },
   { href: "/campaign-intelligence/delivery-insights", label: "Delivery Insights" },
+  { href: "/campaign-intelligence/engagement-analytics", label: "Engagement Analytics" },
+  { href: "/campaign-intelligence/template-intelligence", label: "Template Intelligence" },
+  { href: "/campaign-intelligence/warmup-center", label: "Warm-up Center" },
+  { href: "/campaign-intelligence/risk-center", label: "Risk Center" },
+  { href: "/campaign-intelligence/compliance-center", label: "Compliance Center" },
+  { href: "/campaign-intelligence/ai-recommendations", label: "AI Recommendations" },
+  { href: "/campaign-intelligence/automation-rules", label: "Automation Rules" },
 ];
 
-// Not built yet — shown so the module reads as one coherent app rather
-// than three unrelated pages, without pretending they're clickable.
-const COMING_SOON_TABS = [
-  "Contact Intelligence",
-  "Campaign Analyzer",
-  "Broadcast Queue",
-  "Engagement Analytics",
-  "Template Intelligence",
-  "Warm-up Center",
-  "Risk Center",
-  "Compliance Center",
-  "AI Recommendations",
-  "Automation Rules",
-];
+const COMING_SOON_TABS: string[] = [];
 
 export default function CampaignIntelligenceLayout({
   children,
