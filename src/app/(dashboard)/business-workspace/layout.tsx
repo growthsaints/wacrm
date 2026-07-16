@@ -10,17 +10,17 @@ const LIVE_TABS = [
   { href: "/business-workspace", label: "Overview" },
   { href: "/business-workspace/customer-hub", label: "Customer Hub" },
   { href: "/business-workspace/customer-360", label: "Customer 360" },
+  { href: "/business-workspace/team-workspace", label: "Team Workspace" },
+  { href: "/business-workspace/labels", label: "Labels" },
+  { href: "/business-workspace/notes", label: "Notes" },
+  { href: "/business-workspace/deals", label: "Deals" },
 ];
 
 const COMING_SOON_TABS = [
   "Shared Inbox",
-  "Team Workspace",
   "AI Assistant",
-  "Labels",
-  "Notes",
   "Follow-up Center",
   "Calendar",
-  "Deals",
   "Campaign Planner",
   "Analytics",
   "Reports",

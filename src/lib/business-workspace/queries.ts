@@ -548,3 +548,266 @@ export async function addContactNote(
   const row = data as { id: string; note_text: string; created_at: string }
   return { id: row.id, noteText: row.note_text, createdAt: row.created_at }
 }
+
+// ---------------------------------------------------------------
+// Notes (account-wide list) — Phase 2
+// ---------------------------------------------------------------
+
+export interface NotesListRow {
+  id: string
+  contactId: string
+  contactName: string | null
+  contactPhone: string | null
+  noteText: string
+  createdAt: string
+}
+
+export interface NotesListResult {
+  rows: NotesListRow[]
+  totalCount: number
+}
+
+export async function getNotesList(
+  db: SupabaseClient,
+  accountId: string,
+  filters: { search?: string; page?: number; pageSize?: number },
+): Promise<NotesListResult> {
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
+  const page = filters.page ?? 0
+  const from = page * pageSize
+  const to = from + pageSize - 1
+
+  let query = db
+    .from('contact_notes')
+    .select('id, contact_id, note_text, created_at, contacts(name, phone)', { count: 'exact' })
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: false })
+
+  if (filters.search) {
+    query = query.ilike('note_text', `%${filters.search}%`)
+  }
+
+  const { data, count, error } = await query.range(from, to)
+  if (error) throw new Error(error.message)
+
+  const rows = ((data ?? []) as unknown as Array<{
+    id: string
+    contact_id: string
+    note_text: string
+    created_at: string
+    contacts: { name: string | null; phone: string }[] | { name: string | null; phone: string } | null
+  }>).map((n) => {
+    const contact = Array.isArray(n.contacts) ? n.contacts[0] : n.contacts
+    return {
+      id: n.id,
+      contactId: n.contact_id,
+      contactName: contact?.name ?? null,
+      contactPhone: contact?.phone ?? null,
+      noteText: n.note_text,
+      createdAt: n.created_at,
+    }
+  })
+
+  return { rows, totalCount: count ?? 0 }
+}
+
+// ---------------------------------------------------------------
+// Deals (flat, filterable list) — Phase 2. Same `deals` table the
+// existing Pipelines Kanban board uses; this is a second, list-shaped
+// lens over it (sortable/filterable across every stage at once)
+// rather than a parallel deals schema.
+// ---------------------------------------------------------------
+
+export interface DealsListRow {
+  id: string
+  title: string
+  value: number
+  currency: string | null
+  status: string
+  stageName: string | null
+  contactId: string
+  contactName: string | null
+  assignedToId: string | null
+  assignedToName: string | null
+  expectedCloseDate: string | null
+  createdAt: string
+}
+
+export interface DealsListResult {
+  rows: DealsListRow[]
+  totalCount: number
+}
+
+export async function getDealsList(
+  db: SupabaseClient,
+  accountId: string,
+  filters: { search?: string; status?: string; assignedToId?: string; page?: number; pageSize?: number },
+): Promise<DealsListResult> {
+  const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
+  const page = filters.page ?? 0
+  const from = page * pageSize
+  const to = from + pageSize - 1
+
+  let query = db
+    .from('deals')
+    .select(
+      'id, title, value, currency, status, expected_close_date, created_at, assigned_to, contact_id, pipeline_stages(name), contacts(name)',
+      { count: 'exact' },
+    )
+    .eq('account_id', accountId)
+    .order('created_at', { ascending: false })
+
+  if (filters.search) query = query.ilike('title', `%${filters.search}%`)
+  if (filters.status) query = query.eq('status', filters.status)
+  if (filters.assignedToId) query = query.eq('assigned_to', filters.assignedToId)
+
+  const { data, count, error } = await query.range(from, to)
+  if (error) throw new Error(error.message)
+
+  const dealRows = (data ?? []) as unknown as Array<{
+    id: string
+    title: string
+    value: number
+    currency: string | null
+    status: string
+    expected_close_date: string | null
+    created_at: string
+    assigned_to: string | null
+    contact_id: string
+    pipeline_stages: { name: string }[] | { name: string } | null
+    contacts: { name: string | null }[] | { name: string | null } | null
+  }>
+
+  const agentIds = [...new Set(dealRows.map((d) => d.assigned_to).filter((v): v is string => !!v))]
+  const { data: agents } =
+    agentIds.length > 0
+      ? await db.from('profiles').select('id, full_name').in('id', agentIds)
+      : { data: [] as Array<{ id: string; full_name: string }> }
+  const agentNameById = new Map((agents ?? []).map((a) => [a.id, a.full_name]))
+
+  const rows = dealRows.map((d) => {
+    const stage = Array.isArray(d.pipeline_stages) ? d.pipeline_stages[0] : d.pipeline_stages
+    const contact = Array.isArray(d.contacts) ? d.contacts[0] : d.contacts
+    return {
+      id: d.id,
+      title: d.title,
+      value: d.value,
+      currency: d.currency,
+      status: d.status,
+      stageName: stage?.name ?? null,
+      contactId: d.contact_id,
+      contactName: contact?.name ?? null,
+      assignedToId: d.assigned_to,
+      assignedToName: d.assigned_to ? agentNameById.get(d.assigned_to) ?? null : null,
+      expectedCloseDate: d.expected_close_date,
+      createdAt: d.created_at,
+    }
+  })
+
+  return { rows, totalCount: count ?? 0 }
+}
+
+// ---------------------------------------------------------------
+// Team Workspace — Phase 2. Roster + live presence (reuses
+// member_presence, migration 024) + a simple, real weekly performance
+// count. Departments/Teams-as-structured-entities, Internal Chat, and
+// Announcements aren't in this phase — this app's data model only has
+// flat account membership with a role, not sub-teams/departments, and
+// internal chat is a distinct realtime feature scoped for later.
+// ---------------------------------------------------------------
+
+export interface TeamMemberRow {
+  userId: string
+  fullName: string | null
+  email: string
+  accountRole: string
+  presenceStatus: 'online' | 'away' | 'offline'
+  lastSeenAt: string | null
+  conversationsClosedThisWeek: number
+  dealsWonThisWeek: number
+}
+
+export interface TeamWorkspaceResult {
+  members: TeamMemberRow[]
+  notTrackedYet: string[]
+}
+
+const PRESENCE_ONLINE_WINDOW_MINUTES = 2
+const PRESENCE_AWAY_WINDOW_MINUTES = 10
+
+function derivePresenceStatus(status: string | undefined, lastSeenAt: string | undefined): 'online' | 'away' | 'offline' {
+  if (!lastSeenAt) return 'offline'
+  const minutesAgo = (Date.now() - new Date(lastSeenAt).getTime()) / 60000
+  if (status === 'online' && minutesAgo <= PRESENCE_ONLINE_WINDOW_MINUTES) return 'online'
+  if (minutesAgo <= PRESENCE_AWAY_WINDOW_MINUTES) return 'away'
+  return 'offline'
+}
+
+export async function getTeamWorkspace(db: SupabaseClient, accountId: string): Promise<TeamWorkspaceResult> {
+  const weekAgo = daysAgoIso(7)
+
+  const [{ data: profiles }, { data: presence }, { data: closedConvs }, { data: wonDeals }] = await Promise.all([
+    db.from('profiles').select('id, user_id, full_name, email, account_role').eq('account_id', accountId),
+    db.from('member_presence').select('user_id, status, last_seen_at').eq('account_id', accountId),
+    db
+      .from('conversations')
+      .select('assigned_agent_id')
+      .eq('account_id', accountId)
+      .eq('status', 'closed')
+      .gte('updated_at', weekAgo),
+    db
+      .from('deals')
+      .select('assigned_to')
+      .eq('account_id', accountId)
+      .eq('status', 'won')
+      .gte('updated_at', weekAgo),
+  ])
+
+  const presenceByUser = new Map(
+    ((presence ?? []) as Array<{ user_id: string; status: string; last_seen_at: string }>).map((p) => [p.user_id, p]),
+  )
+
+  const closedCountByAgent = new Map<string, number>()
+  for (const c of (closedConvs ?? []) as Array<{ assigned_agent_id: string | null }>) {
+    if (!c.assigned_agent_id) continue
+    closedCountByAgent.set(c.assigned_agent_id, (closedCountByAgent.get(c.assigned_agent_id) ?? 0) + 1)
+  }
+
+  const wonCountByAgent = new Map<string, number>()
+  for (const d of (wonDeals ?? []) as Array<{ assigned_to: string | null }>) {
+    if (!d.assigned_to) continue
+    wonCountByAgent.set(d.assigned_to, (wonCountByAgent.get(d.assigned_to) ?? 0) + 1)
+  }
+
+  const members = ((profiles ?? []) as Array<{
+    id: string
+    user_id: string
+    full_name: string | null
+    email: string
+    account_role: string
+  }>).map((p) => {
+    const pres = presenceByUser.get(p.user_id)
+    return {
+      userId: p.user_id,
+      fullName: p.full_name,
+      email: p.email,
+      accountRole: p.account_role,
+      presenceStatus: derivePresenceStatus(pres?.status, pres?.last_seen_at),
+      lastSeenAt: pres?.last_seen_at ?? null,
+      // conversations.assigned_agent_id stores auth.users.id (= profiles.user_id);
+      // deals.assigned_to stores profiles.id — two different id spaces (see
+      // migration 002 vs conversation-list.tsx's `assigned_agent_id === user.id`).
+      conversationsClosedThisWeek: closedCountByAgent.get(p.user_id) ?? 0,
+      dealsWonThisWeek: wonCountByAgent.get(p.id) ?? 0,
+    }
+  })
+
+  return {
+    members,
+    notTrackedYet: [
+      'Departments & Teams (no sub-team structure yet — flat account roster only)',
+      'Internal Chat',
+      'Announcements',
+    ],
+  }
+}
