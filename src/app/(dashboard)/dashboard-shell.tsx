@@ -8,7 +8,6 @@ import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
 import { ImpersonationBanner } from "@/components/platform/impersonation-banner";
 import { SupportChatWidget } from "@/components/support/support-chat-widget";
-import { TopStatusBar } from "@/components/dashboard/top-status-bar";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
 // itself can stay a server component and export metadata (noindex) —
@@ -53,7 +52,6 @@ function DashboardShellInner({
       {impersonatingAccountName ? (
         <ImpersonationBanner accountName={impersonatingAccountName} />
       ) : null}
-      <TopStatusBar />
       <div className="flex flex-1 overflow-hidden">
         {/* Reports this tab's online/away presence once we know a user is
             signed in. Headless — renders nothing. */}

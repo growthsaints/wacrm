@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ModeToggle } from "@/components/layout/mode-toggle";
+import { TopStatusBar } from "@/components/dashboard/top-status-bar";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "dashboard",
@@ -57,8 +58,8 @@ export function Header({ onOpenSidebar }: HeaderProps) {
     "U";
 
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 lg:px-6">
-      <div className="flex min-w-0 items-center gap-2">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4 lg:px-6">
+      <div className="flex min-w-0 shrink-0 items-center gap-2">
         {/* Hamburger — mobile only. 44×44 hit target per Apple HIG. */}
         <button
           type="button"
@@ -73,7 +74,11 @@ export function Header({ onOpenSidebar }: HeaderProps) {
         </h1>
       </div>
 
-      <div className="flex items-center gap-1 sm:gap-2">
+      <div className="flex min-w-0 flex-1 justify-center">
+        <TopStatusBar />
+      </div>
+
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         <ModeToggle />
 
         <DropdownMenu>

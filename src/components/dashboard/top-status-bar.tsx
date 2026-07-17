@@ -1,11 +1,10 @@
 'use client';
 
 // ============================================================
-// TopStatusBar — AiSensy-style thin strip across the very top of the
-// authenticated shell (every dashboard page), nudging an admin to
-// connect WhatsApp and/or explore plans. Admin+ only — an agent/viewer
-// can't act on either button, so there's nothing for them to do with
-// it.
+// TopStatusBar — AiSensy-style WhatsApp/plan status, centered in the
+// header row between the page title and the theme toggle/avatar.
+// Admin+ only — an agent/viewer can't act on either button, so
+// there's nothing for them to do with it.
 // ============================================================
 
 import { useEffect, useState } from 'react';
@@ -54,9 +53,10 @@ export function TopStatusBar() {
   if (!canEditSettings || connected === null) return null;
 
   return (
-    <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-2 border-b border-border bg-muted/40 px-4 py-2 text-sm">
-      <div className="flex items-center gap-2">
-        <span className="text-muted-foreground">WhatsApp Business API Status:</span>
+    <div className="hidden items-center gap-6 whitespace-nowrap text-xs md:flex lg:gap-8 lg:text-sm">
+      <div className="flex items-center gap-1.5">
+        <span className="hidden text-muted-foreground lg:inline">WhatsApp Business API Status:</span>
+        <span className="text-muted-foreground lg:hidden">WABA:</span>
         {connected ? (
           <span className="font-semibold text-emerald-600 dark:text-emerald-400">CONNECTED</span>
         ) : (
@@ -67,7 +67,7 @@ export function TopStatusBar() {
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="hidden items-center gap-1.5 lg:flex">
         <span className="text-muted-foreground">Current Plan:</span>
         <span className="font-semibold text-foreground">
           {planType ? PLAN_LABEL[planType] : '—'}
