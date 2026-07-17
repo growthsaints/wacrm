@@ -4,23 +4,26 @@
 // Every connected WhatsApp number across every organization, for the
 // Super Admin "WhatsApp Numbers" page: connection health, token
 // status, sync status, last activity, and which organization owns
-// it. Reads go through the RLS-scoped client — the
-// `whatsapp_config_platform_select` / `accounts_platform_select`
-// policies from migration 037 already grant a platform admin
-// visibility here, so no service-role client is needed.
+// it. `whatsapp_config` reads go through the service-role client (see
+// migration 056 — the old `whatsapp_config_platform_select` RLS
+// policy applied to *every* query a platform admin made, including
+// their own regular Settings → WhatsApp page). `accounts` still reads
+// through the RLS-scoped client via `accounts_platform_select`.
 // ============================================================
 
 import { NextResponse } from "next/server";
 
 import { toErrorResponse } from "@/lib/auth/account";
 import { requirePlatformAdmin } from "@/lib/auth/platform";
+import { platformAdminClient } from "@/lib/platform/admin-client";
 import { computeHealthStatus } from "@/lib/whatsapp/embedded-signup";
 
 export async function GET() {
   try {
     const { supabase } = await requirePlatformAdmin();
+    const admin = platformAdminClient();
 
-    const { data: configs, error } = await supabase
+    const { data: configs, error } = await admin
       .from("whatsapp_config")
       .select(
         "account_id, phone_number_id, display_phone_number, business_name, display_name, status, quality_rating, messaging_limit_tier, code_verification_status, onboarding_method, registered_at, last_registration_error, last_synced_at, connected_at, created_at",

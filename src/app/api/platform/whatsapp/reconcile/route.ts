@@ -18,11 +18,13 @@ import { NextResponse } from "next/server";
 
 import { toErrorResponse } from "@/lib/auth/account";
 import { requirePlatformAdmin } from "@/lib/auth/platform";
+import { platformAdminClient } from "@/lib/platform/admin-client";
 import { fetchBusinessWabaAccounts } from "@/lib/whatsapp/meta-api";
 
 export async function GET() {
   try {
     const { supabase } = await requirePlatformAdmin();
+    const admin = platformAdminClient();
 
     const businessId = process.env.META_BUSINESS_ID;
     const systemUserToken = process.env.META_SYSTEM_USER_TOKEN;
@@ -30,7 +32,7 @@ export async function GET() {
       return NextResponse.json({ configured: false });
     }
 
-    const { data: configs, error } = await supabase
+    const { data: configs, error } = await admin
       .from("whatsapp_config")
       .select("account_id, waba_id, business_name, display_phone_number")
       .not("waba_id", "is", null);

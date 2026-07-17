@@ -2,21 +2,32 @@
 // GET /api/platform/overview
 //
 // Platform-wide usage totals + the most recently created tenants, for
-// the Super Admin dashboard home. Reads go through the RLS-scoped
-// client — the `_platform_select` policies from migration 037 grant
-// a platform admin visibility across every tenant's rows, so no
-// service-role client is needed here.
+// the Super Admin dashboard home. `accounts` reads go through the
+// RLS-scoped client (the `accounts_platform_select` policy grants a
+// platform admin visibility there). Everything else — contacts,
+// conversations, messages, broadcasts, whatsapp_config — goes through
+// the service-role client instead of relying on an equivalent
+// `_platform_select` policy: those tables hold tenant PII/business
+// data, and an RLS policy that grants a platform admin blanket SELECT
+// there applies to *every* query they make anywhere in the app, not
+// just this dashboard — including their own regular /contacts,
+// /inbox, /broadcasts pages, which query these same tables without an
+// explicit account_id filter and so silently returned every tenant's
+// rows. See migration 056, which drops those five policies now that
+// nothing needs them.
 // ============================================================
 
 import { NextResponse } from "next/server";
 
 import { toErrorResponse } from "@/lib/auth/account";
 import { requirePlatformAdmin } from "@/lib/auth/platform";
+import { platformAdminClient } from "@/lib/platform/admin-client";
 import { startOfMonthIso } from "@/lib/platform/usage";
 
 export async function GET() {
   try {
     const { supabase } = await requirePlatformAdmin();
+    const admin = platformAdminClient();
 
     const [
       accountsTotal,
@@ -39,15 +50,15 @@ export async function GET() {
         .from("accounts")
         .select("id", { count: "exact", head: true })
         .eq("status", "suspended"),
-      supabase.from("contacts").select("id", { count: "exact", head: true }),
-      supabase.from("conversations").select("id", { count: "exact", head: true }),
-      supabase.from("messages").select("id", { count: "exact", head: true }),
-      supabase
+      admin.from("contacts").select("id", { count: "exact", head: true }),
+      admin.from("conversations").select("id", { count: "exact", head: true }),
+      admin.from("messages").select("id", { count: "exact", head: true }),
+      admin
         .from("messages")
         .select("id", { count: "exact", head: true })
         .gte("created_at", startOfMonthIso()),
-      supabase.from("broadcasts").select("id", { count: "exact", head: true }),
-      supabase
+      admin.from("broadcasts").select("id", { count: "exact", head: true }),
+      admin
         .from("whatsapp_config")
         .select("id", { count: "exact", head: true })
         .eq("status", "connected"),
