@@ -1,6 +1,21 @@
 import { NextResponse } from 'next/server'
 import { verifyRazorpayWebhookSignature } from '@/lib/billing/razorpay-client'
 import { supabaseAdmin } from '@/lib/billing/admin-client'
+import { recordInvoice } from '@/lib/billing/invoices'
+import { GST_RATE } from '@/lib/billing/rates'
+
+// Monthly and Monthly Pro share plan_type 'self_serve_monthly' (see
+// /api/billing/subscription) — only razorpay_plan_id tells them apart.
+function subscriptionTierLabel(planType: string, razorpayPlanId: string | null): string {
+  if (planType === 'managed') return 'Managed plan'
+  if (planType === 'self_serve_quarterly') return 'Self-serve Quarterly plan'
+  if (planType === 'self_serve_monthly') {
+    return razorpayPlanId === process.env.RAZORPAY_MONTHLY_PRO_PLAN_ID
+      ? 'Self-serve Monthly Pro plan'
+      : 'Self-serve Monthly plan'
+  }
+  return 'Subscription plan'
+}
 
 /**
  * POST /api/webhooks/razorpay
@@ -67,6 +82,16 @@ export async function POST(request: Request) {
         console.error('[razorpay-webhook] credit_wallet failed:', error.message)
         return NextResponse.json({ error: error.message }, { status: 500 })
       }
+      await recordInvoice(admin, {
+        accountId: notes.account_id,
+        invoiceType: 'wallet_recharge',
+        description: 'WhatsApp Conversation Credits recharge',
+        baseAmount,
+        gstAmount: gstAmt,
+        totalAmount: totalPaid,
+        razorpayPaymentId: payment.id as string,
+        razorpayOrderId: payment.order_id as string,
+      })
     }
     return NextResponse.json({ received: true })
   }
@@ -112,7 +137,7 @@ export async function POST(request: Request) {
     if (payload.event === 'subscription.charged') {
       const { data: account } = await admin
         .from('accounts')
-        .select('plan_type, plan_expires_at')
+        .select('plan_type, plan_expires_at, razorpay_plan_id')
         .eq('id', accountId)
         .single()
       if (account?.plan_type === 'self_serve_monthly' || account?.plan_type === 'self_serve_quarterly') {
@@ -121,6 +146,28 @@ export async function POST(request: Request) {
         const next = base > new Date() ? base : new Date()
         next.setMonth(next.getMonth() + months)
         update.plan_expires_at = next.toISOString()
+      }
+
+      // The Plan's amount is a single GST-inclusive figure (there's no
+      // separate base/GST split stored anywhere for subscriptions, unlike
+      // wallet recharge order notes) — back it out assuming the standard
+      // 18% rate, which holds for every Plan created after the GST
+      // rollout.
+      const chargePayment = payload.payload?.payment?.entity
+      if (account && chargePayment) {
+        const totalPaid = (chargePayment.amount as number) / 100
+        const baseAmount = Math.round((totalPaid / (1 + GST_RATE)) * 100) / 100
+        const gstAmt = Math.round((totalPaid - baseAmount) * 100) / 100
+        await recordInvoice(admin, {
+          accountId,
+          invoiceType: 'subscription',
+          description: subscriptionTierLabel(account.plan_type, account.razorpay_plan_id),
+          baseAmount,
+          gstAmount: gstAmt,
+          totalAmount: totalPaid,
+          razorpayPaymentId: chargePayment.id as string,
+          razorpayOrderId: (chargePayment.order_id as string) ?? null,
+        })
       }
     }
 

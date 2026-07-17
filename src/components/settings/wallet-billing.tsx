@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Script from 'next/script';
 import { toast } from 'sonner';
-import { Loader2, Wallet, IndianRupee } from 'lucide-react';
+import { Loader2, Wallet, IndianRupee, Download } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -56,6 +56,17 @@ interface WalletData {
   gstRate: number;
   rates: Record<string, number>;
   transactions: WalletTransaction[];
+}
+
+interface Invoice {
+  id: string;
+  invoice_number: string;
+  invoice_type: 'wallet_recharge' | 'subscription';
+  description: string;
+  base_amount: number;
+  gst_amount: number;
+  total_amount: number;
+  issued_at: string;
 }
 
 type PlanType = 'none' | 'managed' | 'self_serve_monthly' | 'self_serve_quarterly';
@@ -111,6 +122,9 @@ export function WalletBilling() {
   const [subscribing, setSubscribing] = useState<SelfServePlan | null>(null);
   const [choosingPlan, setChoosingPlan] = useState(false);
 
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(true);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch('/api/billing/wallet', { cache: 'no-store' });
@@ -132,10 +146,21 @@ export function WalletBilling() {
     }
   }, []);
 
+  const loadInvoices = useCallback(async () => {
+    try {
+      const res = await fetch('/api/billing/invoices', { cache: 'no-store' });
+      const json = await res.json();
+      if (res.ok) setInvoices(json.invoices ?? []);
+    } finally {
+      setInvoicesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void load();
     void loadPlan();
-  }, [load, loadPlan]);
+    void loadInvoices();
+  }, [load, loadPlan, loadInvoices]);
 
   const handleSubscribe = useCallback(
     async (selected: SelfServePlan) => {
@@ -233,6 +258,7 @@ export function WalletBilling() {
             toast.success('Wallet recharged successfully');
             setRechargeOpen(false);
             void load();
+            void loadInvoices();
           } else {
             toast.error(verifyJson.error || 'Payment verification failed');
           }
@@ -247,7 +273,7 @@ export function WalletBilling() {
       toast.error('Failed to start payment');
       setPaying(false);
     }
-  }, [amount, data?.minRechargeAmount, sdkReady, load]);
+  }, [amount, data?.minRechargeAmount, sdkReady, load, loadInvoices]);
 
   if (loading) {
     return (
@@ -464,6 +490,45 @@ export function WalletBilling() {
                         incl. {formatInr(tx.gst_amount)} GST — paid {formatInr(tx.total_paid ?? tx.amount + tx.gst_amount)}
                       </p>
                     )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="border-border bg-card">
+        <CardContent className="py-6">
+          <h3 className="mb-3 text-sm font-medium text-foreground">Invoices</h3>
+          {invoicesLoading ? (
+            <div className="flex items-center justify-center py-6 text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+            </div>
+          ) : invoices.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No invoices yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {invoices.map((inv) => (
+                <div
+                  key={inv.id}
+                  className="flex items-center justify-between border-b border-border py-2 text-sm last:border-0"
+                >
+                  <div>
+                    <p className="font-medium text-foreground">{inv.invoice_number}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {inv.description} · {new Date(inv.issued_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-muted-foreground">{formatInr(inv.total_amount)}</span>
+                    <a
+                      href={`/api/billing/invoices/${inv.id}/pdf`}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      <Download className="size-3.5" />
+                      PDF
+                    </a>
                   </div>
                 </div>
               ))}

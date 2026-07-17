@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/billing/razorpay-client'
 import { supabaseAdmin } from '@/lib/billing/admin-client'
+import { recordInvoice } from '@/lib/billing/invoices'
 
 interface PostBody {
   razorpay_order_id?: string
@@ -81,6 +82,17 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
+
+    await recordInvoice(admin, {
+      accountId,
+      invoiceType: 'wallet_recharge',
+      description: 'WhatsApp Conversation Credits recharge',
+      baseAmount,
+      gstAmount: gstAmt,
+      totalAmount: payment.amount / 100,
+      razorpayPaymentId: razorpay_payment_id,
+      razorpayOrderId: razorpay_order_id,
+    })
 
     return NextResponse.json({ credited: true, newBalance: data })
   } catch (err) {
