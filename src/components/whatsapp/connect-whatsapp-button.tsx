@@ -70,9 +70,15 @@ const META_JS_SDK_VERSION = 'v25.0';
 
 export function ConnectWhatsAppButton({
   onConnected,
+  label,
+  size = 'lg',
 }: {
   /** Called after the server finishes automatic setup, success or partial. */
   onConnected: () => void;
+  /** Overrides the default "Continue with Facebook" text — used by the
+   *  dashboard top status bar, which wants a shorter "Apply Now". */
+  label?: string;
+  size?: React.ComponentProps<typeof Button>['size'];
 }) {
   const t = useTranslations('Settings.whatsappManagement');
   const [sdkReady, setSdkReady] = useState(false);
@@ -300,9 +306,9 @@ export function ConnectWhatsAppButton({
           window.fbAsyncInit();
         }}
       />
-      <Button onClick={handleConnect} disabled={!sdkReady || connecting} size="lg">
+      <Button onClick={handleConnect} disabled={!sdkReady || connecting} size={size}>
         {connecting ? <Loader2 className="size-4 animate-spin" /> : null}
-        {connecting ? t('connecting') : t('continueWithFacebook')}
+        {connecting ? t('connecting') : (label ?? t('continueWithFacebook'))}
       </Button>
     </>
   );
