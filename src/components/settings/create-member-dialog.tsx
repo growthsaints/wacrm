@@ -72,6 +72,7 @@ interface CreatedMember {
   password: string;
   role: MemberRole;
   accountName: string;
+  loginUrl: string;
 }
 
 export function CreateMemberDialog({
@@ -145,6 +146,7 @@ export function CreateMemberDialog({
         password,
         role,
         accountName: account?.name ?? 'our wacrm account',
+        loginUrl: `${window.location.origin}/login`,
       });
       onCreated();
     } catch (err) {
@@ -170,6 +172,7 @@ export function CreateMemberDialog({
       accountName: result.accountName,
       email: result.email,
       password: result.password,
+      loginUrl: result.loginUrl,
     });
     return `https://wa.me/?text=${encodeURIComponent(message)}`;
   }
@@ -199,6 +202,25 @@ export function CreateMemberDialog({
             </DialogHeader>
 
             <div className="space-y-3 py-2">
+              <div className="space-y-1">
+                <Label className="text-muted-foreground">{t('loginUrlLabel')}</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={result.loginUrl}
+                    className="bg-muted border-border text-foreground font-mono text-xs"
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => copyToClipboard(result.loginUrl, t('loginUrlCopied'))}
+                    className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0"
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <Label className="text-muted-foreground">{t('emailLabel')}</Label>
                 <div className="flex gap-2">

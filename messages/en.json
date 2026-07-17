@@ -1477,12 +1477,14 @@
       "memberCreatedDesc": "Share these credentials with your new teammate. They've been added to the account as <bold>{role}</bold> and can log in right away.",
       "emailCopied": "Email copied",
       "passwordCopied": "Password copied",
+      "loginUrlLabel": "Login link",
+      "loginUrlCopied": "Login link copied",
       "clipboardBlocked": "Clipboard blocked — copy it manually",
       "saveNow": "Save these credentials now.",
       "saveNowHint": "This password won't be shown again after you close this dialog — if it's lost, you'll need to reset it from the Members list instead.",
       "sendViaWhatsApp": "Send via WhatsApp",
       "done": "Done",
-      "whatsappMessage": "You've been added to {accountName} on Growth Saints. Log in with:\nEmail: {email}\nPassword: {password}"
+      "whatsappMessage": "You've been added to {accountName} on Growth Saints. Log in at {loginUrl} with:\nEmail: {email}\nPassword: {password}"
     },
     "tagsAndFields": {
       "title": "Fields & tags",
