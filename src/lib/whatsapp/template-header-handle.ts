@@ -4,28 +4,23 @@ import type { TemplatePayload } from '@/lib/whatsapp/template-validators'
 /**
  * Meta requires an `example.header_handle` (from the Resumable Upload
  * API) to create/edit a template with an IMAGE header — a plain public
- * URL is not accepted at creation time. This helper turns the template's
- * `header_media_url` (whether the user uploaded a file or pasted a link)
- * into a handle and writes it onto the payload, so both the upload path
- * and the legacy URL path actually succeed.
+ * URL is not accepted at creation time. This helper turns a
+ * `header_media_url` (whether the user uploaded a file or pasted a
+ * link) into a handle and writes it onto the payload (or carousel
+ * card), so both the upload path and the legacy URL path actually
+ * succeed.
  *
  * No-op unless the header is an image that has a URL but no handle yet.
  * Image-only for now (the #230 scope); video/document handles can follow
- * the same shape.
+ * the same shape — those formats currently ride along on a plain
+ * `header_url` example instead (see template-components.ts).
  */
 
 // Meta's image-header sample limits.
 const IMAGE_MAX_BYTES = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png']
 
-export async function ensureImageHeaderHandle(
-  payload: TemplatePayload,
-  accessToken: string,
-): Promise<void> {
-  if (payload.header_type !== 'image') return
-  if (payload.header_handle) return // already have one
-  if (!payload.header_media_url) return // validator already requires url-or-handle
-
+async function resolveImageHandle(mediaUrl: string, accessToken: string): Promise<string> {
   const appId = process.env.META_APP_ID
   if (!appId) {
     throw new Error(
@@ -37,7 +32,7 @@ export async function ensureImageHeaderHandle(
   // and for a manually-pasted public link).
   let res: Response
   try {
-    res = await fetch(payload.header_media_url)
+    res = await fetch(mediaUrl)
   } catch {
     throw new Error('Could not fetch the header image URL. Make sure it is publicly reachable.')
   }
@@ -70,5 +65,28 @@ export async function ensureImageHeaderHandle(
     mimeType,
     bytes,
   })
-  payload.header_handle = handle
+  return handle
+}
+
+export async function ensureImageHeaderHandle(
+  payload: TemplatePayload,
+  accessToken: string,
+): Promise<void> {
+  if (payload.header_type === 'image' && !payload.header_handle && payload.header_media_url) {
+    payload.header_handle = await resolveImageHandle(payload.header_media_url, accessToken)
+  }
+
+  if (!payload.cards) return
+  for (let i = 0; i < payload.cards.length; i++) {
+    const card = payload.cards[i]
+    if (card.header_format !== 'image') continue
+    if (card.header_handle) continue
+    if (!card.header_media_url) continue
+    try {
+      card.header_handle = await resolveImageHandle(card.header_media_url, accessToken)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Header image upload failed.'
+      throw new Error(`Card #${i + 1}: ${message}`)
+    }
+  }
 }

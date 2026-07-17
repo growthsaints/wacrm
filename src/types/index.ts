@@ -368,6 +368,23 @@ export interface TemplateSampleValues {
   header?: string[];
 }
 
+/**
+ * One card of a Carousel template (2-10 per template, all sharing the
+ * same header format — Meta only allows IMAGE or VIDEO for a card
+ * header, never TEXT/DOCUMENT/none). Structurally a miniature template:
+ * its own media header, its own body (own {{N}} variables, independent
+ * of the main body's), and up to 2 buttons — only QUICK_REPLY, URL, and
+ * PHONE_NUMBER are valid inside a card (no COPY_CODE).
+ */
+export interface TemplateCard {
+  header_format: 'image' | 'video';
+  header_media_url?: string;
+  header_handle?: string;
+  body_text: string;
+  buttons?: Array<Exclude<TemplateButton, { type: 'COPY_CODE' }>>;
+  sample_values?: Pick<TemplateSampleValues, 'body'>;
+}
+
 export interface MessageTemplate {
   id: string;
   user_id: string;
@@ -381,6 +398,8 @@ export interface MessageTemplate {
   body_text: string;
   footer_text?: string;
   buttons?: TemplateButton[];
+  /** Present only for Carousel templates — 2-10 cards, see TemplateCard. */
+  cards?: TemplateCard[];
   sample_values?: TemplateSampleValues;
   status?: MessageTemplateStatus;
   meta_template_id?: string;

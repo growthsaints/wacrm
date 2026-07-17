@@ -17,7 +17,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { normalizeStatus } from '@/lib/whatsapp/template-status-normalize'
-import type { TemplateButton, TemplateSampleValues } from '@/types'
+import type { TemplateButton, TemplateCard, TemplateSampleValues } from '@/types'
 
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
@@ -38,8 +38,11 @@ interface MetaTemplateComponent {
   example?: {
     header_text?: string[]
     header_handle?: string[]
+    header_url?: string[]
     body_text?: string[][]
   }
+  /** Only on a CAROUSEL component. */
+  cards?: { components: MetaTemplateComponent[] }[]
 }
 
 interface MetaTemplate {
@@ -115,6 +118,38 @@ function parseButtons(metaButtons: MetaButton[] | undefined): TemplateButton[] {
   return out
 }
 
+/** Parses a synced CAROUSEL component's cards back into our TemplateCard shape. */
+function parseCards(carousel: MetaTemplateComponent | undefined): TemplateCard[] | null {
+  if (!carousel?.cards?.length) return null
+
+  const cards: TemplateCard[] = []
+  for (const { components } of carousel.cards) {
+    const header = components.find((c) => c.type === 'HEADER')
+    const body = components.find((c) => c.type === 'BODY')
+    const buttons = components.find((c) => c.type === 'BUTTONS')
+    if (!body?.text) continue // malformed card — skip rather than crash the whole sync
+
+    const headerFormat = header?.format?.toUpperCase()
+    const cardHeaderFormat: TemplateCard['header_format'] =
+      headerFormat === 'VIDEO' ? 'video' : 'image'
+
+    const parsedButtons = parseButtons(buttons?.buttons).filter(
+      (b): b is Exclude<TemplateButton, { type: 'COPY_CODE' }> => b.type !== 'COPY_CODE',
+    )
+    const bodySample = body.example?.body_text?.[0]
+
+    cards.push({
+      header_format: cardHeaderFormat,
+      header_handle: header?.example?.header_handle?.[0],
+      header_media_url: header?.example?.header_url?.[0],
+      body_text: body.text,
+      buttons: parsedButtons.length ? parsedButtons : undefined,
+      sample_values: bodySample?.length ? { body: bodySample } : undefined,
+    })
+  }
+  return cards.length ? cards : null
+}
+
 function extractSampleValues(
   body: MetaTemplateComponent | undefined,
   header: MetaTemplateComponent | undefined,
@@ -186,9 +221,11 @@ export async function syncTemplatesFromMeta(
     const header = (t.components ?? []).find((c) => c.type === 'HEADER')
     const footer = (t.components ?? []).find((c) => c.type === 'FOOTER')
     const buttons = (t.components ?? []).find((c) => c.type === 'BUTTONS')
+    const carousel = (t.components ?? []).find((c) => c.type === 'CAROUSEL')
 
     const parsedButtons = parseButtons(buttons?.buttons)
     const sampleValues = extractSampleValues(body, header)
+    const cards = parseCards(carousel)
 
     const headerFormat = header?.format?.toUpperCase()
     const headerType =
@@ -211,6 +248,7 @@ export async function syncTemplatesFromMeta(
       body_text: body?.text ?? '',
       footer_text: footer?.text ?? null,
       buttons: parsedButtons.length ? parsedButtons : null,
+      cards,
       sample_values: sampleValues,
       status: normalizeStatus(t.status),
       meta_template_id: t.id,

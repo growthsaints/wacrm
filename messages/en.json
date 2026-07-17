@@ -830,6 +830,8 @@
         "preview": "Preview",
         "previewSample": "Showing preview with sample data.",
         "noPreview": "Preview not available.",
+        "cardsTitle": "Carousel Cards",
+        "cardNumber": "Card {number}",
         "fieldMap": {
           "name": "Name",
           "phone": "Phone",
@@ -1561,7 +1563,20 @@
       "urlSamplePlaceholder": "Example value for {{1}} (required when URL has a variable)",
       "phonePlaceholder": "+15551234567",
       "codePlaceholder": "Example code (e.g. SUMMER20)",
-      
+
+      "carouselToggle": "Carousel (multiple cards)",
+      "carouselToggleDesc": "Show up to 10 swipeable cards, each with its own image/video, text, and buttons — great for showcasing multiple products. Replaces the header, footer, and buttons above with per-card versions (Meta rule).",
+      "carouselOn": "Carousel on",
+      "carouselOff": "Make it a carousel",
+      "cards": "Cards",
+      "cardsMinMax": "Needs 2-10 cards. Every card must use the same header type (all image or all video) and the same buttons in the same order (Meta rule).",
+      "addCard": "Add card",
+      "cardNumber": "Card {number}",
+      "cardHeaderFormat": "Card header",
+      "cardBody": "Card text",
+      "cardBodyPlaceholder": "Card text (max 160 chars, optional {{1}})",
+      "cardButtons": "Card buttons",
+
       "cancel": "Cancel",
       "saving": "Saving…",
       "submitting": "Submitting…",

@@ -46,6 +46,15 @@ interface BroadcastPayload {
    * falls back to the template's stored URL only when this is empty.
    */
   headerMediaUrl?: string;
+  /**
+   * Per-card variable mappings and media URLs for a Carousel template,
+   * parallel to `template.cards`. Every recipient gets the same media
+   * (it's a broadcast, not per-contact media) but each card's {{N}}
+   * placeholders still resolve per-contact via the same field/custom-
+   * field mapping as the main body.
+   */
+  cardVariables?: Record<string, VariableMapping>[];
+  cardHeaderMediaUrls?: string[];
 }
 
 interface UseBroadcastSendingReturn {
@@ -451,25 +460,46 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
         headerType === 'video' ||
         headerType === 'document';
       const headerMediaUrl = payload.headerMediaUrl?.trim();
-      const messageParams =
-        isMediaHeader && headerMediaUrl ? { headerMediaUrl } : undefined;
+
+      // Carousel cards: media URLs are uniform across recipients (same
+      // rationale as headerMediaUrl above), but each card's own {{N}}
+      // placeholders still resolve per-contact — same field/custom-field
+      // mapping mechanism as the main body, just scoped per card.
+      const cards = payload.template.cards ?? [];
+      const cardVariablesList = payload.cardVariables ?? [];
+      const cardHeaderMediaUrls = payload.cardHeaderMediaUrls ?? [];
+
+      function buildCardParams(contact: Contact, customValues?: Map<string, string>) {
+        if (cards.length === 0) return undefined;
+        return cards.map((_, ci) => ({
+          body: resolveVariables(cardVariablesList[ci] ?? {}, contact, customValues),
+          headerMediaUrl: cardHeaderMediaUrls[ci]?.trim() || undefined,
+        }));
+      }
 
       for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
         const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
 
         const apiRecipients = batch
           .filter((r) => r.contact?.phone)
-          .map((r) => ({
-            phone: r.contact!.phone as string,
-            params: r.contact
-              ? resolveVariables(
-                  payload.variables,
-                  r.contact,
-                  customValueIndex.get(r.contact.id),
-                )
-              : [],
-            ...(messageParams ? { messageParams } : {}),
-          }));
+          .map((r) => {
+            const customValues = r.contact ? customValueIndex.get(r.contact.id) : undefined;
+            const cardParams = r.contact ? buildCardParams(r.contact, customValues) : undefined;
+            const messageParams =
+              (isMediaHeader && headerMediaUrl) || cardParams
+                ? {
+                    ...(isMediaHeader && headerMediaUrl ? { headerMediaUrl } : {}),
+                    ...(cardParams ? { cards: cardParams } : {}),
+                  }
+                : undefined;
+            return {
+              phone: r.contact!.phone as string,
+              params: r.contact
+                ? resolveVariables(payload.variables, r.contact, customValues)
+                : [],
+              ...(messageParams ? { messageParams } : {}),
+            };
+          });
 
         if (apiRecipients.length === 0) continue;
 

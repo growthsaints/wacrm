@@ -29,6 +29,16 @@ interface Step3Props {
   /** Media URL for an IMAGE/VIDEO/DOCUMENT header, when the template has one. */
   headerMediaUrl: string;
   onHeaderMediaUrlChange: (url: string) => void;
+  /**
+   * One variable-mapping set and one media URL per Carousel card
+   * (parallel arrays, indexed like `template.cards`). Only meaningful
+   * when the template has cards — a card's {{N}} placeholders are
+   * numbered independently of the main body's.
+   */
+  cardVariables: Record<string, VariableMapping>[];
+  onCardVariablesUpdate: (cardIndex: number, variables: Record<string, VariableMapping>) => void;
+  cardHeaderMediaUrls: string[];
+  onCardHeaderMediaUrlChange: (cardIndex: number, url: string) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -73,6 +83,10 @@ export function Step3Personalize({
   onUpdate,
   headerMediaUrl,
   onHeaderMediaUrlChange,
+  cardVariables,
+  onCardVariablesUpdate,
+  cardHeaderMediaUrls,
+  onCardHeaderMediaUrlChange,
   onNext,
   onBack,
 }: Step3Props) {
@@ -183,6 +197,68 @@ export function Step3Personalize({
     const current = variables[key] ?? { type: 'static' as VariableType, value: '' };
     onUpdate({
       ...variables,
+      [key]: { ...current, ...patch },
+    });
+  }
+
+  // Carousel cards — each card's {{N}} placeholders are numbered
+  // independently of the main body's, and each card needs its own
+  // media URL (Meta requires the media component on every card, every
+  // send, just like a regular media header).
+  // `?? []` would otherwise produce a fresh array every render when
+  // template.cards is undefined, busting every memo below keyed on it.
+  const cards = useMemo(() => template.cards ?? [], [template.cards]);
+
+  const cardPlaceholders = useMemo(
+    () =>
+      cards.map((card) => {
+        const matches = card.body_text.match(/\{\{(\d+)\}\}/g);
+        return matches ? [...new Set(matches)].sort() : [];
+      }),
+    [cards],
+  );
+
+  const unmappedCardKeys = useMemo(() => {
+    const missing: { cardIndex: number; placeholder: string }[] = [];
+    cardPlaceholders.forEach((placeholders, ci) => {
+      for (const placeholder of placeholders) {
+        const key = placeholder.replace(/^\{\{|\}\}$/g, '');
+        const mapping = cardVariables[ci]?.[key];
+        if (!mapping || !mapping.value?.trim()) {
+          missing.push({ cardIndex: ci, placeholder });
+        }
+      }
+    });
+    return missing;
+  }, [cardPlaceholders, cardVariables]);
+
+  const cardMediaErrors = useMemo(
+    () =>
+      cards.map((_, ci) => {
+        const value = (cardHeaderMediaUrls[ci] ?? '').trim();
+        if (!value) return 'missing' as const;
+        if (!isValidHttpUrl(value)) return 'invalid' as const;
+        return null;
+      }),
+    [cards, cardHeaderMediaUrls],
+  );
+
+  // Seed each card's media field from its own stored sample URL the
+  // first time we land on a carousel template, same rationale as the
+  // main header's seeding effect below.
+  useEffect(() => {
+    cards.forEach((card, ci) => {
+      if (!cardHeaderMediaUrls[ci] && card.header_media_url) {
+        onCardHeaderMediaUrlChange(ci, card.header_media_url);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards]);
+
+  function updateCardVariable(cardIndex: number, key: string, patch: Partial<VariableMapping>) {
+    const current = cardVariables[cardIndex]?.[key] ?? { type: 'static' as VariableType, value: '' };
+    onCardVariablesUpdate(cardIndex, {
+      ...(cardVariables[cardIndex] ?? {}),
       [key]: { ...current, ...patch },
     });
   }
@@ -400,6 +476,124 @@ export function Step3Personalize({
         </div>
       )}
 
+      {cards.length > 0 && (
+        <div className="space-y-4">
+          <p className="text-sm font-medium text-foreground">{t('personalize.cardsTitle')}</p>
+          {cards.map((card, ci) => (
+            <div key={ci} className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium uppercase text-primary">
+                  {t('personalize.cardNumber', { number: ci + 1 })}
+                </span>
+                <span className="text-xs text-muted-foreground">({card.header_format})</span>
+              </div>
+
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                  {t('personalize.imageUrl')}
+                </label>
+                <Input
+                  type="url"
+                  value={cardHeaderMediaUrls[ci] ?? ''}
+                  onChange={(e) => onCardHeaderMediaUrlChange(ci, e.target.value)}
+                  placeholder={t('personalize.imageUrlPlaceholder')}
+                  className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
+                />
+                {cardMediaErrors[ci] && (
+                  <p className="mt-1.5 text-xs text-amber-300">
+                    {cardMediaErrors[ci] === 'missing'
+                      ? 'A media URL is required to send this card.'
+                      : 'Enter a valid http(s) URL.'}
+                  </p>
+                )}
+              </div>
+
+              {cardPlaceholders[ci]?.map((placeholder) => {
+                const key = placeholder.replace(/^\{\{|\}\}$/g, '');
+                const mapping = cardVariables[ci]?.[key] ?? { type: 'static', value: '' };
+                return (
+                  <div key={placeholder} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        {placeholder} — {t('personalize.type')}
+                      </label>
+                      <Select
+                        value={mapping.type}
+                        onValueChange={(val) =>
+                          updateCardVariable(ci, key, { type: val as VariableType, value: '' })
+                        }
+                      >
+                        <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="border-border bg-popover">
+                          <SelectItem value="static">{t('personalize.typeStatic')}</SelectItem>
+                          <SelectItem value="field">{t('personalize.typeContact')}</SelectItem>
+                          <SelectItem value="custom_field">{t('personalize.typeCustom')}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                        {mapping.type === 'static' ? t('personalize.staticValue') : t('personalize.contactField')}
+                      </label>
+                      {mapping.type === 'static' ? (
+                        <Input
+                          value={mapping.value}
+                          onChange={(e) => updateCardVariable(ci, key, { value: e.target.value })}
+                          placeholder="Enter value..."
+                          className="border-border bg-muted text-foreground placeholder:text-muted-foreground"
+                        />
+                      ) : mapping.type === 'field' ? (
+                        <Select
+                          value={mapping.value || undefined}
+                          onValueChange={(val) => updateCardVariable(ci, key, { value: val || '' })}
+                        >
+                          <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                            <SelectValue placeholder={t('personalize.selectContactField')} />
+                          </SelectTrigger>
+                          <SelectContent className="border-border bg-popover">
+                            {contactFields.map((field) => (
+                              <SelectItem key={field.value} value={field.value}>
+                                {t(`personalize.fieldMap.${field.labelKey}`)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Select
+                          value={mapping.value || undefined}
+                          onValueChange={(val) => updateCardVariable(ci, key, { value: val || '' })}
+                        >
+                          <SelectTrigger className="w-full border-border bg-muted text-foreground">
+                            <SelectValue
+                              placeholder={
+                                loadingFields
+                                  ? 'Loading…'
+                                  : customFields.length === 0
+                                    ? 'No custom fields'
+                                    : 'Select custom field…'
+                              }
+                            />
+                          </SelectTrigger>
+                          <SelectContent className="border-border bg-popover">
+                            {customFields.map((f) => (
+                              <SelectItem key={f.id} value={f.id}>
+                                {f.field_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Live Preview — rendered as a WhatsApp-style bubble so the user
           sees approximately what the recipient will see. */}
       <div className="rounded-xl border border-border bg-card/50 p-4">
@@ -430,6 +624,16 @@ export function Step3Personalize({
         </div>
       )}
 
+      {unmappedCardKeys.length > 0 && (
+        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          Map every card placeholder before continuing — still missing{' '}
+          <span className="font-mono font-semibold">
+            {unmappedCardKeys.map((m) => `card ${m.cardIndex + 1} ${m.placeholder}`).join(', ')}
+          </span>
+          .
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-t border-border pt-4">
         <Button
           variant="outline"
@@ -441,7 +645,12 @@ export function Step3Personalize({
         </Button>
         <Button
           onClick={onNext}
-          disabled={unmappedKeys.length > 0 || headerMediaError !== null}
+          disabled={
+            unmappedKeys.length > 0 ||
+            headerMediaError !== null ||
+            unmappedCardKeys.length > 0 ||
+            cardMediaErrors.some((e) => e !== null)
+          }
           className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {t('next')}

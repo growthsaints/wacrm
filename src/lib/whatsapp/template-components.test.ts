@@ -123,4 +123,50 @@ describe('buildMetaTemplatePayload', () => {
       'BUTTONS',
     ]);
   });
+
+  it('emits a CAROUSEL component after BODY, one mini component-list per card', () => {
+    const payload = buildMetaTemplatePayload({
+      ...base,
+      cards: [
+        {
+          header_format: 'image',
+          header_media_url: 'https://example.com/card1.jpg',
+          body_text: 'Card one {{1}}',
+          sample_values: { body: ['Alice'] },
+          buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }],
+        },
+        {
+          header_format: 'image',
+          header_handle: '4::card2handle',
+          body_text: 'Card two',
+          buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }],
+        },
+      ],
+    });
+
+    expect(payload.components.map((c) => c.type)).toEqual(['BODY', 'CAROUSEL']);
+
+    const carousel = payload.components.find((c) => c.type === 'CAROUSEL');
+    expect(carousel?.cards).toEqual([
+      {
+        components: [
+          { type: 'HEADER', format: 'IMAGE', example: { header_url: ['https://example.com/card1.jpg'] } },
+          { type: 'BODY', text: 'Card one {{1}}', example: { body_text: [['Alice']] } },
+          { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }] },
+        ],
+      },
+      {
+        components: [
+          { type: 'HEADER', format: 'IMAGE', example: { header_handle: ['4::card2handle'] } },
+          { type: 'BODY', text: 'Card two' },
+          { type: 'BUTTONS', buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }] },
+        ],
+      },
+    ]);
+  });
+
+  it('omits CAROUSEL when no cards are present', () => {
+    const payload = buildMetaTemplatePayload(base);
+    expect(payload.components.some((c) => c.type === 'CAROUSEL')).toBe(false);
+  });
 });

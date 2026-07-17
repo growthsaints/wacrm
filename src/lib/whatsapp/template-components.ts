@@ -11,10 +11,10 @@
  */
 
 import type { TemplatePayload } from './template-validators';
-import type { TemplateButton } from '@/types';
+import type { TemplateButton, TemplateCard } from '@/types';
 
 export interface MetaComponent {
-  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS';
+  type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS' | 'CAROUSEL';
   format?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT';
   text?: string;
   buttons?: MetaButtonPayload[];
@@ -24,6 +24,13 @@ export interface MetaComponent {
     header_handle?: string[];
     body_text?: string[][];
   };
+  /** Only on the CAROUSEL component — each card is its own mini component list. */
+  cards?: MetaCardPayload[];
+}
+
+/** A carousel card's own components: HEADER (image/video) + BODY + optional BUTTONS. */
+export interface MetaCardPayload {
+  components: MetaComponent[];
 }
 
 interface MetaButtonPayload {
@@ -114,6 +121,51 @@ function buildButtonsComponent(payload: TemplatePayload): MetaComponent | null {
   };
 }
 
+/** A card's header is always media (image/video) — no TEXT variant, unlike the whole-template header. */
+function buildCardHeaderComponent(card: TemplateCard): MetaComponent {
+  const format = card.header_format === 'image' ? 'IMAGE' : 'VIDEO';
+  const component: MetaComponent = { type: 'HEADER', format };
+  if (card.header_handle) {
+    component.example = { header_handle: [card.header_handle] };
+  } else if (card.header_media_url) {
+    component.example = { header_url: [card.header_media_url] };
+  }
+  return component;
+}
+
+function buildCardBodyComponent(card: TemplateCard): MetaComponent {
+  const component: MetaComponent = { type: 'BODY', text: card.body_text };
+  const sample = card.sample_values?.body;
+  if (sample && sample.length > 0) {
+    component.example = { body_text: [sample] };
+  }
+  return component;
+}
+
+function buildCardButtonsComponent(card: TemplateCard): MetaComponent | null {
+  if (!card.buttons || card.buttons.length === 0) return null;
+  return {
+    type: 'BUTTONS',
+    buttons: card.buttons.map((b) => buildButtonPayload(b as TemplateButton)),
+  };
+}
+
+function buildCarouselComponent(payload: TemplatePayload): MetaComponent | null {
+  if (!payload.cards || payload.cards.length === 0) return null;
+  return {
+    type: 'CAROUSEL',
+    cards: payload.cards.map((card) => {
+      const components: MetaComponent[] = [
+        buildCardHeaderComponent(card),
+        buildCardBodyComponent(card),
+      ];
+      const buttons = buildCardButtonsComponent(card);
+      if (buttons) components.push(buttons);
+      return { components };
+    }),
+  };
+}
+
 export interface MetaTemplateSubmitPayload {
   name: string;
   category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
@@ -145,6 +197,11 @@ export function buildMetaTemplatePayload(
   if (footer) components.push(footer);
   const buttons = buildButtonsComponent(payload);
   if (buttons) components.push(buttons);
+  // Mutually exclusive with header/footer/buttons above — validateCards()
+  // rejects a payload that tries to combine them, so in practice at most
+  // one of {buttons, carousel} is ever non-null here.
+  const carousel = buildCarouselComponent(payload);
+  if (carousel) components.push(carousel);
 
   return {
     name: payload.name,

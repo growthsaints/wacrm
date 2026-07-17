@@ -275,3 +275,127 @@ describe('buildSendComponents — end-to-end mix', () => {
     expect((components[2] as { index: string }).index).toBe('1');
   });
 });
+
+describe('buildSendComponents — carousel', () => {
+  function carouselRow(overrides: Partial<MessageTemplate> = {}): MessageTemplate {
+    return row({
+      body_text: 'Check out our new arrivals, {{1}}!',
+      cards: [
+        {
+          header_format: 'image',
+          header_media_url: 'https://x.com/card1.jpg',
+          body_text: 'Card one {{1}}',
+          buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }],
+        },
+        {
+          header_format: 'image',
+          header_media_url: 'https://x.com/card2.jpg',
+          body_text: 'Card two',
+          buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }],
+        },
+      ],
+      ...overrides,
+    });
+  }
+
+  it('emits body then a carousel component with one entry per card', () => {
+    const components = buildSendComponents(carouselRow(), {
+      body: ['John'],
+      cards: [{ body: ['red shoes'] }, {}],
+    });
+    expect(components.map((c) => c.type)).toEqual(['body', 'carousel']);
+
+    const carousel = components[1] as {
+      type: 'carousel';
+      cards: { card_index: number; components: { type: string }[] }[];
+    };
+    expect(carousel.cards).toHaveLength(2);
+    expect(carousel.cards[0].card_index).toBe(0);
+    expect(carousel.cards[0].components.map((c) => c.type)).toEqual(['header', 'body']);
+    expect(carousel.cards[1].card_index).toBe(1);
+    // Card 2's body has no variables, so no body component is emitted —
+    // only its (always-required) header.
+    expect(carousel.cards[1].components.map((c) => c.type)).toEqual(['header']);
+  });
+
+  it('uses each card\'s own header_media_url when no override is given', () => {
+    const components = buildSendComponents(carouselRow(), {
+      body: ['John'],
+      cards: [{ body: ['red shoes'] }, {}],
+    });
+    const carousel = components[1] as {
+      cards: { components: { type: string; parameters: { image: { link: string } }[] }[] }[];
+    };
+    expect(carousel.cards[0].components[0].parameters[0].image.link).toBe(
+      'https://x.com/card1.jpg',
+    );
+    expect(carousel.cards[1].components[0].parameters[0].image.link).toBe(
+      'https://x.com/card2.jpg',
+    );
+  });
+
+  it('lets a per-send override replace a card\'s media link', () => {
+    const components = buildSendComponents(carouselRow(), {
+      body: ['John'],
+      cards: [{ headerMediaUrl: 'https://x.com/override.jpg', body: ['red shoes'] }, {}],
+    });
+    const carousel = components[1] as {
+      cards: { components: { parameters: { image: { link: string } }[] }[] }[];
+    };
+    expect(carousel.cards[0].components[0].parameters[0].image.link).toBe(
+      'https://x.com/override.jpg',
+    );
+  });
+
+  it('throws when a card has no media link or id', () => {
+    expect(() =>
+      buildSendComponents(
+        carouselRow({
+          cards: [
+            { header_format: 'image', body_text: 'no media' },
+            { header_format: 'image', header_media_url: 'https://x.com/2.jpg', body_text: 'ok' },
+          ],
+        }),
+        { body: ['John'], cards: [{}, {}] },
+      ),
+    ).toThrow(/Card #1 needs a media link/);
+  });
+
+  it('throws when a card body variable is missing a value', () => {
+    expect(() =>
+      buildSendComponents(carouselRow(), { body: ['John'], cards: [{}, {}] }),
+    ).toThrow(/Card #1 body has 1 variable\(s\) but only 0/);
+  });
+
+  it('emits a video parameter for a video-format card', () => {
+    const components = buildSendComponents(
+      carouselRow({
+        cards: [
+          {
+            header_format: 'video',
+            header_media_url: 'https://x.com/card1.mp4',
+            body_text: 'Card one',
+          },
+          {
+            header_format: 'video',
+            header_media_url: 'https://x.com/card2.mp4',
+            body_text: 'Card two',
+          },
+        ],
+      }),
+      { body: ['John'], cards: [{}, {}] },
+    );
+    const carousel = components[1] as {
+      cards: { components: { type: string; parameters: { video?: { link: string } }[] }[] }[];
+    };
+    expect(carousel.cards[0].components[0].parameters[0].video?.link).toBe(
+      'https://x.com/card1.mp4',
+    );
+  });
+
+  it('omits carousel when the template has no cards', () => {
+    expect(buildSendComponents(row(), { body: [] }).some((c) => c.type === 'carousel')).toBe(
+      false,
+    );
+  });
+});

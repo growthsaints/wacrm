@@ -194,6 +194,7 @@ export async function PATCH(
         body_text: payload.body_text,
         footer_text: payload.footer_text ?? null,
         buttons: payload.buttons ?? null,
+        cards: payload.cards ?? null,
         sample_values: payload.sample_values ?? null,
         status: 'PENDING',
         submission_error: null,

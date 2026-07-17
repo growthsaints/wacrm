@@ -4,6 +4,7 @@ import {
   TEMPLATE_LIMITS,
   validateBody,
   validateButtons,
+  validateCards,
   validateFooter,
   validateHeader,
   validateSampleValues,
@@ -11,12 +12,19 @@ import {
   validateTemplatePayload,
   type TemplatePayload,
 } from './template-validators';
+import type { TemplateCard } from '@/types';
 
 const baseValid: TemplatePayload = {
   name: 'order_confirmation',
   category: 'Utility',
   language: 'en_US',
   body_text: 'Your order is confirmed.',
+};
+
+const validCard: TemplateCard = {
+  header_format: 'image',
+  header_media_url: 'https://example.com/card.jpg',
+  body_text: 'Check this out',
 };
 
 describe('extractVariableIndices', () => {
@@ -273,5 +281,134 @@ describe('validateTemplatePayload — integration', () => {
         body_text: 'Hi {{1}}',
       }),
     ).toThrow(/exactly 1 sample/);
+  });
+});
+
+describe('validateCards', () => {
+  it('no-ops when cards is absent', () => {
+    expect(() => validateCards(baseValid)).not.toThrow();
+  });
+
+  it('passes for a valid 2-card carousel', () => {
+    expect(() =>
+      validateCards({ ...baseValid, cards: [validCard, validCard] }),
+    ).not.toThrow();
+  });
+
+  it('rejects fewer than 2 cards', () => {
+    expect(() => validateCards({ ...baseValid, cards: [validCard] })).toThrow(
+      /between 2 and 10 cards/,
+    );
+  });
+
+  it('rejects more than 10 cards', () => {
+    expect(() =>
+      validateCards({ ...baseValid, cards: Array(11).fill(validCard) }),
+    ).toThrow(/between 2 and 10 cards/);
+  });
+
+  it('rejects a header on the main template alongside cards', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        header_type: 'text',
+        cards: [validCard, validCard],
+      }),
+    ).toThrow(/cannot also have its own header/);
+  });
+
+  it('rejects a footer on the main template alongside cards', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        footer_text: 'Reply STOP to opt out',
+        cards: [validCard, validCard],
+      }),
+    ).toThrow(/cannot have a footer/);
+  });
+
+  it('rejects top-level buttons alongside cards', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        buttons: [{ type: 'QUICK_REPLY', text: 'Yes' }],
+        cards: [validCard, validCard],
+      }),
+    ).toThrow(/cannot have its own buttons/);
+  });
+
+  it('rejects mismatched header formats across cards', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [validCard, { ...validCard, header_format: 'video' }],
+      }),
+    ).toThrow(/same header type/);
+  });
+
+  it('rejects a card with no media url or handle', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [validCard, { ...validCard, header_media_url: undefined }],
+      }),
+    ).toThrow(/needs a image/);
+  });
+
+  it('rejects a card body over 160 chars', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [validCard, { ...validCard, body_text: 'x'.repeat(161) }],
+      }),
+    ).toThrow(/exceeds 160 chars/);
+  });
+
+  it('rejects mismatched button signatures across cards', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [
+          { ...validCard, buttons: [{ type: 'QUICK_REPLY', text: 'Buy' }] },
+          { ...validCard, buttons: [{ type: 'URL', text: 'Go', url: 'https://x' }] },
+        ],
+      }),
+    ).toThrow(/same button types in the same order/);
+  });
+
+  it('rejects a card body variable count mismatched with its own samples', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [
+          { ...validCard, body_text: 'Hi {{1}}' },
+          { ...validCard, body_text: 'Hi {{1}}' },
+        ],
+      }),
+    ).toThrow(/exactly 1 sample/);
+  });
+
+  it('passes when card body variables have matching per-card samples', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [
+          { ...validCard, body_text: 'Hi {{1}}', sample_values: { body: ['Alice'] } },
+          { ...validCard, body_text: 'Hi {{1}}', sample_values: { body: ['Bob'] } },
+        ],
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects an invalid URL button inside a card', () => {
+    expect(() =>
+      validateCards({
+        ...baseValid,
+        cards: [
+          { ...validCard, buttons: [{ type: 'URL', text: 'Go', url: 'not-a-url' }] },
+          { ...validCard, buttons: [{ type: 'URL', text: 'Go', url: 'not-a-url' }] },
+        ],
+      }),
+    ).toThrow(/invalid url/);
   });
 });

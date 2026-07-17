@@ -595,6 +595,7 @@ export async function sendTemplateMessage(
       headerMediaUrl: messageParams?.headerMediaUrl,
       headerMediaId: messageParams?.headerMediaId,
       buttonParams: messageParams?.buttonParams,
+      cards: messageParams?.cards,
     })
     if (components.length > 0) {
       templatePayload.components = components

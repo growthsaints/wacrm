@@ -44,7 +44,34 @@ export default function NewBroadcastPage() {
     Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>
   >({});
   const [headerMediaUrl, setHeaderMediaUrl] = useState('');
+  // Parallel to template.cards — one variable-mapping set and one
+  // media URL per Carousel card. Empty arrays for a non-carousel
+  // template (the personalize step and the send payload both just
+  // no-op on an empty `template.cards`).
+  const [cardVariables, setCardVariables] = useState<
+    Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>[]
+  >([]);
+  const [cardHeaderMediaUrls, setCardHeaderMediaUrls] = useState<string[]>([]);
   const [name, setName] = useState('');
+
+  function updateCardVariables(
+    cardIndex: number,
+    vars: Record<string, { type: 'static' | 'field' | 'custom_field'; value: string }>,
+  ) {
+    setCardVariables((prev) => {
+      const next = [...prev];
+      next[cardIndex] = vars;
+      return next;
+    });
+  }
+
+  function updateCardHeaderMediaUrl(cardIndex: number, url: string) {
+    setCardHeaderMediaUrls((prev) => {
+      const next = [...prev];
+      next[cardIndex] = url;
+      return next;
+    });
+  }
 
   async function handleSend() {
     if (!template) return;
@@ -62,6 +89,8 @@ export default function NewBroadcastPage() {
         },
         variables,
         headerMediaUrl,
+        cardVariables,
+        cardHeaderMediaUrls,
       });
       router.push(`/broadcasts/${broadcastId}`);
     } catch (err) {
@@ -211,6 +240,10 @@ export default function NewBroadcastPage() {
               onUpdate={setVariables}
               headerMediaUrl={headerMediaUrl}
               onHeaderMediaUrlChange={setHeaderMediaUrl}
+              cardVariables={cardVariables}
+              onCardVariablesUpdate={updateCardVariables}
+              cardHeaderMediaUrls={cardHeaderMediaUrls}
+              onCardHeaderMediaUrlChange={updateCardHeaderMediaUrl}
               onNext={() => setCurrentStep(3)}
               onBack={() => setCurrentStep(1)}
             />

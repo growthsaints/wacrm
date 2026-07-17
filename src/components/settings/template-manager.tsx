@@ -45,10 +45,12 @@ import {
 import type {
   MessageTemplate,
   TemplateButton,
+  TemplateCard,
   TemplateSampleValues,
 } from '@/types';
 import { templateStatusConfig } from '@/lib/template-status';
 import {
+  CARD_LIMITS,
   extractVariableIndices,
   TEMPLATE_LIMITS,
 } from '@/lib/whatsapp/template-validators';
@@ -75,6 +77,24 @@ const categoryColors: Record<string, string> = {
   Authentication: 'bg-amber-600/20 text-amber-400 border-amber-600/30',
 };
 
+/**
+ * Editing shape for a single carousel card — mirrors TemplateCard but
+ * keeps body_samples as a plain string array (like the whole-template
+ * form's body_samples) rather than the API's nested `sample_values`
+ * object, so the same "one input per {{N}}" pattern works for cards.
+ */
+interface TemplateCardForm {
+  header_format: 'image' | 'video';
+  header_media_url: string;
+  body_text: string;
+  body_samples: string[];
+  buttons: TemplateButton[];
+}
+
+function emptyCard(): TemplateCardForm {
+  return { header_format: 'image', header_media_url: '', body_text: '', body_samples: [], buttons: [] };
+}
+
 interface TemplateFormData {
   name: string;
   category: MessageTemplate['category'];
@@ -87,6 +107,8 @@ interface TemplateFormData {
   body_samples: string[];
   footer_text: string;
   buttons: TemplateButton[];
+  /** Non-empty means this is a Carousel template — see toggleCarousel(). */
+  cards: TemplateCardForm[];
 }
 
 const emptyForm: TemplateFormData = {
@@ -101,6 +123,7 @@ const emptyForm: TemplateFormData = {
   body_samples: [],
   footer_text: '',
   buttons: [],
+  cards: [],
 };
 
 const COMMON_LANGUAGE_CODES = [
@@ -163,6 +186,12 @@ export function TemplateManager() {
   const [uploadingHeader, setUploadingHeader] = useState(false);
   const headerFileRef = useRef<HTMLInputElement>(null);
 
+  // Per-card media upload — one index at a time (Meta review still only
+  // needs one in flight; the UI disables that card's button while its
+  // own upload runs, other cards stay interactive).
+  const [uploadingCardIndex, setUploadingCardIndex] = useState<number | null>(null);
+  const cardFileRefs = useRef<Record<number, HTMLInputElement | null>>({});
+
   // Body variable indices — `[1, 2, 3]` for "{{1}} {{2}} {{3}}". We
   // re-run the extractor on every render to keep the sample-value rows
   // in sync with what the user typed.
@@ -177,6 +206,13 @@ export function TemplateManager() {
         : 0,
     [form.header_format, form.header_content],
   );
+
+  // A non-empty `cards` array IS what makes this a Carousel template —
+  // no separate boolean to keep in sync. Carousel is mutually exclusive
+  // with the whole-template header/footer/buttons (Meta rule, enforced
+  // server-side in validateCards()), so toggling it on/off also clears
+  // those.
+  const isCarousel = form.cards.length > 0;
 
   // Resize body_samples so it always has exactly bodyVarCount entries.
   // (We mutate via setForm in an effect so React owns the state.)
@@ -240,6 +276,23 @@ export function TemplateManager() {
       body_text: form.body_text.trim(),
       footer_text: form.footer_text.trim() || undefined,
       buttons: form.buttons.length > 0 ? form.buttons : undefined,
+      cards:
+        form.cards.length > 0
+          ? form.cards.map(
+              (card): TemplateCard => ({
+                header_format: card.header_format,
+                header_media_url: card.header_media_url.trim() || undefined,
+                body_text: card.body_text.trim(),
+                buttons:
+                  card.buttons.length > 0
+                    ? (card.buttons as TemplateCard['buttons'])
+                    : undefined,
+                sample_values: card.body_samples.some((v) => v.trim())
+                  ? { body: card.body_samples.map((v) => v.trim()) }
+                  : undefined,
+              }),
+            )
+          : undefined,
       sample_values:
         Object.keys(sample_values).length > 0 ? sample_values : undefined,
     };
@@ -259,6 +312,13 @@ export function TemplateManager() {
       body_samples: template.sample_values?.body ?? [],
       footer_text: template.footer_text ?? '',
       buttons: template.buttons ?? [],
+      cards: (template.cards ?? []).map((card) => ({
+        header_format: card.header_format,
+        header_media_url: card.header_media_url ?? '',
+        body_text: card.body_text,
+        body_samples: card.sample_values?.body ?? [],
+        buttons: card.buttons ?? [],
+      })),
     });
     setDialogOpen(true);
   }
@@ -457,6 +517,126 @@ export function TemplateManager() {
       ...prev,
       buttons: [...prev.buttons, emptyButton('QUICK_REPLY')],
     }));
+  }
+
+  function toggleCarousel(enabled: boolean) {
+    setForm((prev) => ({
+      ...prev,
+      cards: enabled ? [emptyCard(), emptyCard()] : [],
+      // Mutually exclusive with a carousel (Meta rule) — clear them
+      // going in, and restore a sane default coming back out.
+      header_format: enabled ? 'none' : prev.header_format,
+      footer_text: enabled ? '' : prev.footer_text,
+      buttons: enabled ? [] : prev.buttons,
+    }));
+  }
+
+  function updateCard(index: number, patch: Partial<TemplateCardForm>) {
+    setForm((prev) => {
+      const next = [...prev.cards];
+      next[index] = { ...next[index], ...patch };
+      return { ...prev, cards: next };
+    });
+  }
+
+  function addCard() {
+    if (form.cards.length >= CARD_LIMITS.maxCards) return;
+    setForm((prev) => ({ ...prev, cards: [...prev.cards, emptyCard()] }));
+  }
+
+  function removeCard(index: number) {
+    if (form.cards.length <= CARD_LIMITS.minCards) return;
+    setForm((prev) => ({ ...prev, cards: prev.cards.filter((_, i) => i !== index) }));
+  }
+
+  function addCardButton(cardIndex: number) {
+    const card = form.cards[cardIndex];
+    if (!card || card.buttons.length >= CARD_LIMITS.maxButtonsPerCard) return;
+    updateCard(cardIndex, { buttons: [...card.buttons, emptyButton('QUICK_REPLY')] });
+  }
+
+  function removeCardButton(cardIndex: number, buttonIndex: number) {
+    const card = form.cards[cardIndex];
+    if (!card) return;
+    updateCard(cardIndex, { buttons: card.buttons.filter((_, i) => i !== buttonIndex) });
+  }
+
+  function changeCardButtonType(
+    cardIndex: number,
+    buttonIndex: number,
+    type: TemplateButton['type'],
+  ) {
+    const card = form.cards[cardIndex];
+    if (!card) return;
+    const next = [...card.buttons];
+    next[buttonIndex] = emptyButton(type);
+    updateCard(cardIndex, { buttons: next });
+  }
+
+  function updateCardButton(cardIndex: number, buttonIndex: number, patch: ButtonPatch) {
+    const card = form.cards[cardIndex];
+    if (!card) return;
+    const current = card.buttons[buttonIndex];
+    if (!current) return;
+    const next = [...card.buttons];
+    switch (current.type) {
+      case 'QUICK_REPLY':
+        next[buttonIndex] = { ...current, ...(patch.text !== undefined && { text: patch.text }) };
+        break;
+      case 'URL':
+        next[buttonIndex] = {
+          ...current,
+          ...(patch.text !== undefined && { text: patch.text }),
+          ...(patch.url !== undefined && { url: patch.url }),
+          ...(patch.example !== undefined && { example: patch.example }),
+        };
+        break;
+      case 'PHONE_NUMBER':
+        next[buttonIndex] = {
+          ...current,
+          ...(patch.text !== undefined && { text: patch.text }),
+          ...(patch.phone_number !== undefined && { phone_number: patch.phone_number }),
+        };
+        break;
+    }
+    updateCard(cardIndex, { buttons: next });
+  }
+
+  async function handleCardMediaFile(cardIndex: number, file: File) {
+    const card = form.cards[cardIndex];
+    if (!card) return;
+    const kind = card.header_format;
+    const { mimeTypes } = HEADER_MEDIA_ACCEPT[kind];
+    if (!mimeTypes.includes(file.type)) {
+      toast.error(
+        t('toastInvalidFile', {
+          format: kind,
+          types: mimeTypes.map((m) => m.split('/')[1]).join(' / '),
+        }),
+      );
+      return;
+    }
+    const maxBytes = MEDIA_MAX_BYTES_BY_KIND[kind];
+    if (file.size > maxBytes) {
+      toast.error(
+        t('toastFileTooLarge', {
+          size: (file.size / 1024 / 1024).toFixed(1),
+          format: kind,
+          limit: (maxBytes / 1024 / 1024).toFixed(0),
+        }),
+      );
+      return;
+    }
+    setUploadingCardIndex(cardIndex);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      updateCard(cardIndex, { header_media_url: publicUrl });
+      toast.success(t('toastUploadSuccess', { format: kind }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('toastUploadFailed'));
+    } finally {
+      setUploadingCardIndex(null);
+    }
   }
 
   if (loading) {
@@ -754,6 +934,26 @@ export function TemplateManager() {
               </div>
             </div>
 
+            <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-muted/40 p-3">
+              <div>
+                <Label className="text-foreground">{t('carouselToggle')}</Label>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {t('carouselToggleDesc')}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant={isCarousel ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => toggleCarousel(!isCarousel)}
+                className={isCarousel ? '' : 'border-border bg-transparent text-muted-foreground hover:bg-muted'}
+              >
+                {isCarousel ? t('carouselOn') : t('carouselOff')}
+              </Button>
+            </div>
+
+            {!isCarousel && (
+            <>
             <div className="space-y-2">
               <Label className="text-muted-foreground">{t('header')}</Label>
               <Select
@@ -1085,6 +1285,236 @@ export function TemplateManager() {
                 </div>
               )}
             </div>
+            </>
+            )}
+
+            {isCarousel && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-muted-foreground">{t('cards')}</Label>
+                    <p className="text-[11px] text-muted-foreground">{t('cardsMinMax')}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={addCard}
+                    disabled={form.cards.length >= CARD_LIMITS.maxCards}
+                    className="border-border bg-transparent text-muted-foreground hover:bg-muted h-7 text-xs"
+                  >
+                    <Plus className="size-3" />
+                    {t('addCard')}
+                  </Button>
+                </div>
+
+                {form.cards.map((card, ci) => {
+                  const cardVarCount = extractVariableIndices(card.body_text).length;
+                  return (
+                    <div key={ci} className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-foreground">
+                          {t('cardNumber', { number: ci + 1 })}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeCard(ci)}
+                          disabled={form.cards.length <= CARD_LIMITS.minCards}
+                          className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 size-7"
+                        >
+                          <X className="size-3.5" />
+                        </Button>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-[11px] text-muted-foreground">{t('cardHeaderFormat')}</Label>
+                        <Select
+                          value={card.header_format}
+                          onValueChange={(val) => {
+                            if (!val) return;
+                            updateCard(ci, {
+                              header_format: val as 'image' | 'video',
+                              header_media_url: '',
+                            });
+                          }}
+                        >
+                          <SelectTrigger className="w-full bg-muted border-border text-foreground h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-popover border-border">
+                            <SelectItem value="image" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                              {t('headerImage')}
+                            </SelectItem>
+                            <SelectItem value="video" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                              {t('headerVideo')}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            ref={(el) => {
+                              cardFileRefs.current[ci] = el;
+                            }}
+                            type="file"
+                            accept={HEADER_MEDIA_ACCEPT[card.header_format].accept}
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (f) void handleCardMediaFile(ci, f);
+                              e.target.value = '';
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={uploadingCardIndex === ci}
+                            onClick={() => cardFileRefs.current[ci]?.click()}
+                          >
+                            {uploadingCardIndex === ci ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="h-3.5 w-3.5" />
+                            )}
+                            {card.header_format === 'image' ? t('uploadImage') : t('uploadVideo')}
+                          </Button>
+                          <span className="text-[11px] text-muted-foreground">
+                            {card.header_format === 'image' ? t('uploadHint') : t('uploadHintVideo')}
+                          </span>
+                        </div>
+                        <Input
+                          placeholder={t('mediaUrlPlaceholder', { format: card.header_format })}
+                          value={card.header_media_url}
+                          onChange={(e) => updateCard(ci, { header_media_url: e.target.value })}
+                          className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-[11px] text-muted-foreground">{t('cardBody')}</Label>
+                        <Textarea
+                          placeholder={t('cardBodyPlaceholder')}
+                          value={card.body_text}
+                          onChange={(e) => updateCard(ci, { body_text: e.target.value })}
+                          rows={2}
+                          maxLength={CARD_LIMITS.bodyMaxLength}
+                          className="bg-muted border-border text-foreground placeholder:text-muted-foreground resize-none text-xs"
+                        />
+                        {cardVarCount > 0 && (
+                          <div className="space-y-1.5">
+                            {Array.from({ length: cardVarCount }).map((_, si) => (
+                              <Input
+                                key={si}
+                                aria-label={t('sampleAria', { var: `{{${si + 1}}}` })}
+                                placeholder={t('samplePlaceholder', { var: `{{${si + 1}}}` })}
+                                value={card.body_samples[si] ?? ''}
+                                onChange={(e) => {
+                                  const next = [...card.body_samples];
+                                  while (next.length <= si) next.push('');
+                                  next[si] = e.target.value;
+                                  updateCard(ci, { body_samples: next.slice(0, cardVarCount) });
+                                }}
+                                className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-[11px] text-muted-foreground">{t('cardButtons')}</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => addCardButton(ci)}
+                            disabled={card.buttons.length >= CARD_LIMITS.maxButtonsPerCard}
+                            className="border-border bg-transparent text-muted-foreground hover:bg-muted h-6 text-[11px]"
+                          >
+                            <Plus className="size-3" />
+                            {t('addButton')}
+                          </Button>
+                        </div>
+                        {card.buttons.map((btn, bi) => (
+                          <div key={bi} className="space-y-2 rounded border border-border bg-muted/50 p-2">
+                            <div className="flex items-center gap-2">
+                              <Select
+                                value={btn.type}
+                                onValueChange={(val) => {
+                                  if (!val) return;
+                                  changeCardButtonType(ci, bi, val as TemplateButton['type']);
+                                }}
+                              >
+                                <SelectTrigger className="w-36 bg-muted border-border text-foreground h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-popover border-border">
+                                  <SelectItem value="QUICK_REPLY" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                                    {t('btnQuickReply')}
+                                  </SelectItem>
+                                  <SelectItem value="URL" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                                    {t('btnUrl')}
+                                  </SelectItem>
+                                  <SelectItem value="PHONE_NUMBER" className="text-popover-foreground focus:bg-muted focus:text-popover-foreground">
+                                    {t('btnPhone')}
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                placeholder={t('btnLabelPlaceholder')}
+                                value={btn.text}
+                                maxLength={TEMPLATE_LIMITS.buttonTextMaxLength}
+                                onChange={(e) => updateCardButton(ci, bi, { text: e.target.value })}
+                                className="flex-1 bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                              />
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeCardButton(ci, bi)}
+                                className="text-muted-foreground hover:text-red-400 hover:bg-red-950/30 size-7"
+                              >
+                                <X className="size-3.5" />
+                              </Button>
+                            </div>
+                            {btn.type === 'URL' && (
+                              <div className="space-y-1 pl-1">
+                                <Input
+                                  placeholder={t('urlPlaceholder')}
+                                  value={btn.url}
+                                  onChange={(e) => updateCardButton(ci, bi, { url: e.target.value })}
+                                  className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                                />
+                                {extractVariableIndices(btn.url).length > 0 && (
+                                  <Input
+                                    placeholder={t('urlSamplePlaceholder')}
+                                    value={btn.example ?? ''}
+                                    onChange={(e) => updateCardButton(ci, bi, { example: e.target.value })}
+                                    className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                                  />
+                                )}
+                              </div>
+                            )}
+                            {btn.type === 'PHONE_NUMBER' && (
+                              <Input
+                                placeholder={t('phonePlaceholder')}
+                                value={btn.phone_number}
+                                onChange={(e) => updateCardButton(ci, bi, { phone_number: e.target.value })}
+                                className="bg-muted border-border text-foreground placeholder:text-muted-foreground h-8 text-xs"
+                              />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <DialogFooter className="bg-popover border-border">

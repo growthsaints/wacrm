@@ -30,8 +30,19 @@
  * not a 400 from Meta that doesn't say which field broke.
  */
 
-import type { MessageTemplate, TemplateButton } from '@/types';
+import type { MessageTemplate, TemplateButton, TemplateCard } from '@/types';
 import { extractVariableIndices } from './template-validators';
+
+export interface CardSendParams {
+  /** Values for this card's body {{1}}, {{2}}, … — independent of the main body's. */
+  body?: string[];
+  /** Override this card's static media URL for this send. */
+  headerMediaUrl?: string;
+  /** Alternative: send the card's media by Meta media id. */
+  headerMediaId?: string;
+  /** Per-button overrides keyed by the button's index within THIS card. */
+  buttonParams?: Record<number, string>;
+}
 
 export interface SendTimeParams {
   /** Values for body {{1}}, {{2}}, … indexed by variable position. */
@@ -49,6 +60,12 @@ export interface SendTimeParams {
    * override at send time.
    */
   buttonParams?: Record<number, string>;
+  /**
+   * Per-card overrides for a Carousel template, indexed by the card's
+   * position in `template.cards`. Only meaningful when the template
+   * has cards — ignored otherwise.
+   */
+  cards?: CardSendParams[];
 }
 
 export type MetaSendComponent =
@@ -59,6 +76,10 @@ export type MetaSendComponent =
       sub_type: 'url' | 'quick_reply' | 'copy_code';
       index: string;
       parameters: MetaSendParameter[];
+    }
+  | {
+      type: 'carousel';
+      cards: { card_index: number; components: MetaSendComponent[] }[];
     };
 
 type MetaSendParameter =
@@ -211,6 +232,79 @@ function buildButtonComponent(
   }
 }
 
+function buildCardHeaderComponent(
+  card: TemplateCard,
+  params: CardSendParams,
+  cardNumber: number,
+): MetaSendComponent {
+  // Unlike the whole-template header, a card header is always media
+  // (image/video) — Meta requires it on every send just like a regular
+  // media header, so there's no "static, no component needed" case.
+  const link = params.headerMediaUrl ?? card.header_media_url;
+  const id = params.headerMediaId;
+  if (!link && !id) {
+    throw new Error(
+      `Card #${cardNumber} needs a media link or id at send time — set header_media_url on the card or pass cards[${cardNumber - 1}].headerMediaUrl/headerMediaId.`,
+    );
+  }
+  const mediaPayload: { link?: string; id?: string } = id ? { id } : { link };
+  return {
+    type: 'header',
+    parameters: [
+      card.header_format === 'image'
+        ? { type: 'image', image: mediaPayload }
+        : { type: 'video', video: mediaPayload },
+    ],
+  };
+}
+
+function buildCardBodyComponent(
+  card: TemplateCard,
+  params: CardSendParams,
+  cardNumber: number,
+): MetaSendComponent | null {
+  const varCount = extractVariableIndices(card.body_text).length;
+  const body = params.body ?? [];
+  if (varCount === 0 && body.length === 0) return null;
+  if (body.length < varCount) {
+    throw new Error(
+      `Card #${cardNumber} body has ${varCount} variable(s) but only ${body.length} value(s) were supplied.`,
+    );
+  }
+  const values = body.slice(0, varCount);
+  return {
+    type: 'body',
+    parameters: values.map((text) => ({ type: 'text', text: String(text) })),
+  };
+}
+
+function buildCarouselComponent(
+  template: MessageTemplate,
+  params: SendTimeParams,
+): MetaSendComponent | null {
+  if (!template.cards?.length) return null;
+  const cardParams = params.cards ?? [];
+
+  return {
+    type: 'carousel',
+    cards: template.cards.map((card, i) => {
+      const cardNumber = i + 1;
+      const cp = cardParams[i] ?? {};
+      const components: MetaSendComponent[] = [
+        buildCardHeaderComponent(card, cp, cardNumber),
+      ];
+      const body = buildCardBodyComponent(card, cp, cardNumber);
+      if (body) components.push(body);
+      card.buttons?.forEach((btn, bi) => {
+        const override = cp.buttonParams?.[bi];
+        const component = buildButtonComponent(btn, bi, override);
+        if (component) components.push(component);
+      });
+      return { card_index: i, components };
+    }),
+  };
+}
+
 /**
  * Build the full `components` array for the send-message payload.
  * Returns an empty array when the template is fully static (no
@@ -232,5 +326,11 @@ export function buildSendComponents(
       if (component) out.push(component);
     });
   }
+  // Mutually exclusive with the top-level buttons above — a carousel
+  // template never has its own buttons (validateCards() enforces this
+  // at creation time), so in practice at most one of the two is ever
+  // non-empty.
+  const carousel = buildCarouselComponent(template, params);
+  if (carousel) out.push(carousel);
   return out;
 }

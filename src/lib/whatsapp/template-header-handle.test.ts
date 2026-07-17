@@ -78,4 +78,49 @@ describe('ensureImageHeaderHandle', () => {
     vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/png', 6 * 1024 * 1024)));
     await expect(ensureImageHeaderHandle(payload(), 'tok')).rejects.toThrow(/5 MB/);
   });
+
+  it('resolves handles for image cards, independent of the main header', async () => {
+    vi.stubEnv('META_APP_ID', 'app-1');
+    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/jpeg', 2048)));
+    const p = payload({
+      header_type: undefined,
+      header_media_url: undefined,
+      cards: [
+        { header_format: 'image', header_media_url: 'https://x.test/card1.jpg', body_text: 'one' },
+        { header_format: 'image', header_media_url: 'https://x.test/card2.jpg', body_text: 'two' },
+      ],
+    });
+    await ensureImageHeaderHandle(p, 'tok');
+    expect(uploadResumableMedia).toHaveBeenCalledTimes(2);
+    expect(p.cards?.[0].header_handle).toBe('HANDLE123');
+    expect(p.cards?.[1].header_handle).toBe('HANDLE123');
+  });
+
+  it('skips video cards and cards that already have a handle', async () => {
+    vi.stubEnv('META_APP_ID', 'app-1');
+    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('image/jpeg', 2048)));
+    const p = payload({
+      header_type: undefined,
+      header_media_url: undefined,
+      cards: [
+        { header_format: 'video', header_media_url: 'https://x.test/card1.mp4', body_text: 'one' },
+        { header_format: 'image', header_handle: 'existing', body_text: 'two' },
+      ],
+    });
+    await ensureImageHeaderHandle(p, 'tok');
+    expect(uploadResumableMedia).not.toHaveBeenCalled();
+    expect(p.cards?.[0].header_handle).toBeUndefined();
+    expect(p.cards?.[1].header_handle).toBe('existing');
+  });
+
+  it('prefixes a card-image failure with which card it came from', async () => {
+    vi.stubEnv('META_APP_ID', 'app-1');
+    vi.stubGlobal('fetch', vi.fn(async () => imgResponse('text/html')));
+    const p = payload({
+      header_type: undefined,
+      header_media_url: undefined,
+      cards: [{ header_format: 'image', header_media_url: 'https://x.test/card1.jpg', body_text: 'one' }],
+    });
+    await expect(ensureImageHeaderHandle(p, 'tok')).rejects.toThrow(/Card #1:.*JPEG or PNG/);
+  });
 });
