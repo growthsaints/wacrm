@@ -67,6 +67,8 @@ interface PlanData {
   planExpiresAt: string | null;
   managedRenewalsUsed: number;
   managedRenewalsMax: number;
+  monthlyAmount: number;
+  quarterlyAmount: number;
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -265,8 +267,8 @@ export function WalletBilling() {
                 <h3 className="text-sm font-medium text-foreground">Your plan</h3>
                 <p className="text-xs text-muted-foreground">
                   {plan.planType === 'managed' && 'Managed — provisioned by Growth Saints'}
-                  {plan.planType === 'self_serve_monthly' && 'Self-serve Monthly — ₹1200/month'}
-                  {plan.planType === 'self_serve_quarterly' && 'Self-serve Quarterly — ₹3000/quarter (₹999/mo)'}
+                  {plan.planType === 'self_serve_monthly' && `Self-serve Monthly — ${formatInr(plan.monthlyAmount)}/month`}
+                  {plan.planType === 'self_serve_quarterly' && `Self-serve Quarterly — ${formatInr(plan.quarterlyAmount)}/quarter (${formatInr(plan.quarterlyAmount / 3)}/mo)`}
                   {plan.planType === 'none' && 'No plan yet — choose one below'}
                 </p>
               </div>
@@ -336,7 +338,7 @@ export function WalletBilling() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border border-border p-4">
                     <p className="text-sm font-semibold text-foreground">Monthly</p>
-                    <p className="text-lg font-semibold text-foreground">₹1200<span className="text-xs font-normal text-muted-foreground">/month</span></p>
+                    <p className="text-lg font-semibold text-foreground">{formatInr(plan.monthlyAmount)}<span className="text-xs font-normal text-muted-foreground">/month</span></p>
                     <Button
                       className="mt-3 w-full"
                       size="sm"
@@ -349,7 +351,7 @@ export function WalletBilling() {
                   </div>
                   <div className="rounded-lg border border-border p-4">
                     <p className="text-sm font-semibold text-foreground">Quarterly</p>
-                    <p className="text-lg font-semibold text-foreground">₹3000<span className="text-xs font-normal text-muted-foreground">/quarter (₹999/mo)</span></p>
+                    <p className="text-lg font-semibold text-foreground">{formatInr(plan.quarterlyAmount)}<span className="text-xs font-normal text-muted-foreground">/quarter ({formatInr(plan.quarterlyAmount / 3)}/mo)</span></p>
                     <Button
                       className="mt-3 w-full"
                       size="sm"

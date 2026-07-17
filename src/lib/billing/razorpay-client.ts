@@ -147,6 +147,41 @@ export async function createRazorpaySubscription(args: {
   return { id: data.id, status: data.status, shortUrl: data.short_url ?? null };
 }
 
+export interface RazorpayPlan {
+  id: string;
+  amount: number;
+  period: string;
+  interval: number;
+}
+
+/** Fetches a Plan's configured amount straight from Razorpay — used to
+ *  show the self-serve Monthly/Quarterly price without hardcoding it,
+ *  since (unlike the wallet recharge order) a subscription's amount
+ *  lives entirely on the Plan object created in Razorpay's dashboard,
+ *  not in this codebase. Swapping RAZORPAY_MONTHLY_PLAN_ID /
+ *  RAZORPAY_QUARTERLY_PLAN_ID to a new GST-inclusive Plan therefore
+ *  updates the displayed price automatically, with no code change. */
+export async function fetchRazorpayPlan(args: {
+  keyId: string;
+  keySecret: string;
+  planId: string;
+}): Promise<RazorpayPlan> {
+  const response = await fetch(`${RAZORPAY_API_BASE}/plans/${args.planId}`, {
+    headers: { Authorization: basicAuthHeader(args.keyId, args.keySecret) },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Razorpay plan lookup failed: ${response.status} ${text}`);
+  }
+  const data = await response.json();
+  return {
+    id: data.id,
+    amount: data.item?.amount ?? 0,
+    period: data.period,
+    interval: data.interval,
+  };
+}
+
 /** Verifies the signature Razorpay Checkout returns on successful
  *  payment (razorpay_order_id, razorpay_payment_id, razorpay_signature).
  *  This is the client-facing confirmation path — the webhook below is
