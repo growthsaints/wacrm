@@ -189,7 +189,18 @@ export function ConnectWhatsAppButton({
 
       if (message.event === 'FINISH') {
         const { waba_id, phone_number_id, business_id } = message.data ?? {};
-        if (!waba_id || !phone_number_id) return;
+        if (!waba_id || !phone_number_id) {
+          // Facebook reported completion but didn't hand back the ids
+          // we need to finish setup server-side. Surface this instead
+          // of silently leaving the button spinning until the popup-
+          // closed poll eventually resets it with no explanation.
+          toast.error(t('connectFailed', { reason: 'Facebook did not return a WhatsApp number to connect' }));
+          setConnecting(false);
+          pendingCodeRef.current = null;
+          pendingInfoRef.current = null;
+          stopPolling();
+          return;
+        }
         pendingInfoRef.current = { wabaId: waba_id, phoneNumberId: phone_number_id, businessId: business_id };
         if (pendingCodeRef.current) {
           void complete(pendingCodeRef.current, pendingInfoRef.current);
@@ -226,7 +237,10 @@ export function ConnectWhatsAppButton({
         const code = response.authResponse?.code;
         if (!code) {
           // No code and no CANCEL postMessage yet (e.g. the user closed
-          // the popup manually) — treat as cancelled.
+          // the popup manually) — treat as cancelled, same as the
+          // explicit CANCEL postMessage branch above (which does toast)
+          // so this path isn't silently different.
+          toast(t('cancelled'));
           setConnecting(false);
           return;
         }
