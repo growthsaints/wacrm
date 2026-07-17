@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Ban,
@@ -10,6 +10,7 @@ import {
   LogIn,
   MessagesSquare,
   Radio,
+  Trash2,
   Users,
   Wifi,
   WifiOff,
@@ -26,6 +27,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -73,6 +76,7 @@ function fmtDate(iso: string): string {
 
 export default function OrganizationDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
 
   const [data, setData] = useState<OrgDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,6 +84,9 @@ export default function OrganizationDetailPage() {
   const [confirmImpersonate, setConfirmImpersonate] = useState(false);
   const [statusUpdating, setStatusUpdating] = useState(false);
   const [impersonating, setImpersonating] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -113,6 +120,29 @@ export default function OrganizationDetailPage() {
       toast.error("Network error — please try again");
     } finally {
       setStatusUpdating(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!data || deleteConfirmText !== data.organization.name) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/platform/organizations/${id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmName: deleteConfirmText }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(payload.error || "Failed to delete organization");
+        return;
+      }
+      toast.success("Organization deleted");
+      router.push("/platform/organizations");
+    } catch {
+      toast.error("Network error — please try again");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -191,6 +221,17 @@ export default function OrganizationDetailPage() {
               Reinstate
             </Button>
           )}
+          <Button
+            variant="destructive"
+            disabled={deleting}
+            onClick={() => {
+              setDeleteConfirmText("");
+              setConfirmDelete(true);
+            }}
+          >
+            <Trash2 className="size-4" />
+            Delete
+          </Button>
         </div>
       </div>
 
@@ -318,6 +359,56 @@ export default function OrganizationDetailPage() {
             <Button onClick={startImpersonation} disabled={impersonating}>
               {impersonating ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
               Log in as client
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmDelete}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirmText("");
+          setConfirmDelete(open);
+        }}
+      >
+        <DialogContent className="border-border bg-popover sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground">
+              Delete {organization.name} permanently?
+            </DialogTitle>
+            <DialogDescription>
+              This deletes every contact, conversation, message, broadcast, template, and
+              wallet/invoice record this organization has, and permanently deletes every
+              member&apos;s login. <strong>This cannot be undone.</strong> Type the organization
+              name below to confirm.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirm-delete-name">
+              Type <strong>{organization.name}</strong> to confirm
+            </Label>
+            <Input
+              id="confirm-delete-name"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDelete(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleting || deleteConfirmText !== organization.name}
+            >
+              {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+              Delete permanently
             </Button>
           </DialogFooter>
         </DialogContent>
