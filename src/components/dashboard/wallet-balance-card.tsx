@@ -15,8 +15,6 @@ import Link from 'next/link';
 import { useAuth } from '@/hooks/use-auth';
 import { buttonVariants } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { createClient } from '@/lib/supabase/client';
-import { dailyCapForTier } from '@/lib/whatsapp/messaging-limit';
 
 type PlanType = 'none' | 'managed' | 'self_serve_monthly' | 'self_serve_quarterly';
 type PlanStatus = 'inactive' | 'active' | 'cancelled';
@@ -35,12 +33,10 @@ const PLAN_STATUS_BADGE: Record<PlanStatus, { label: string; variant: 'default' 
 };
 
 export function WalletBalanceCard() {
-  const { canEditSettings, isOwner, accountId } = useAuth();
+  const { canEditSettings } = useAuth();
   const [balance, setBalance] = useState<number | null>(null);
   const [planType, setPlanType] = useState<PlanType | null>(null);
   const [planStatus, setPlanStatus] = useState<PlanStatus | null>(null);
-  const [dailyCap, setDailyCap] = useState<number | null>(null);
-  const [usedToday, setUsedToday] = useState<number | null>(null);
 
   useEffect(() => {
     if (!canEditSettings) return;
@@ -64,38 +60,6 @@ export function WalletBalanceCard() {
       cancelled = true;
     };
   }, [canEditSettings]);
-
-  // Broadcast daily-quota usage — owner only (see
-  // src/lib/whatsapp/daily-quota.ts, which enforces the same cap at
-  // send time). Deliberately narrower than the rest of this card
-  // (admin+): this is the number the owner watches to know if a
-  // teammate's broadcast is about to trip Meta's limit, not something
-  // every admin needs surfaced on their dashboard.
-  useEffect(() => {
-    if (!isOwner || !accountId) return;
-    let cancelled = false;
-    const db = createClient();
-    db.from('whatsapp_config')
-      .select('messaging_limit_tier')
-      .eq('account_id', accountId)
-      .maybeSingle()
-      .then(({ data }: { data: { messaging_limit_tier?: string | null } | null }) => {
-        if (cancelled) return;
-        const cap = dailyCapForTier(data?.messaging_limit_tier);
-        setDailyCap(cap);
-        if (cap === null) return;
-        const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-        db.rpc('count_recent_business_initiated_contacts', {
-          p_account_id: accountId,
-          p_since: since,
-        }).then(({ data: count, error }: { data: number | null; error: unknown }) => {
-          if (!cancelled && !error) setUsedToday(count ?? 0);
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isOwner, accountId]);
 
   if (!canEditSettings) return null;
 
@@ -145,15 +109,6 @@ export function WalletBalanceCard() {
           Buy More
         </Link>
       </div>
-
-      {isOwner && dailyCap !== null && (
-        <div className="border-t border-border pt-3">
-          <p className="text-xs text-muted-foreground">Broadcast quota used today</p>
-          <p className="text-sm font-medium text-foreground">
-            {usedToday === null ? '—' : `${usedToday.toLocaleString()} / ${dailyCap.toLocaleString()}`}
-          </p>
-        </div>
-      )}
     </div>
   );
 }

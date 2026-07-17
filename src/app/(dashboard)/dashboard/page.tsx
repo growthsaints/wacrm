@@ -47,6 +47,7 @@ import { ContactGrowthChart } from '@/components/dashboard/contact-growth-chart'
 import { AutomationAnalyticsTable } from '@/components/dashboard/automation-analytics-table'
 import { WalletBalanceCard } from '@/components/dashboard/wallet-balance-card'
 import { WhatsAppStatusCard } from '@/components/dashboard/whatsapp-status-card'
+import { WhatsAppQuotaCard } from '@/components/dashboard/whatsapp-quota-card'
 import { WhatsAppOnboardingChecklist } from '@/components/dashboard/whatsapp-onboarding-checklist'
 import { DashboardGuideCarousel } from '@/components/dashboard/dashboard-guide-carousel'
 import { DashboardImageSlider } from '@/components/dashboard/dashboard-image-slider'
@@ -204,6 +205,8 @@ export default function DashboardPage() {
           <WhatsAppStatusCard />
         </div>
       </div>
+
+      <WhatsAppQuotaCard />
 
       {/* Feature & guide showcase */}
       <DashboardImageSlider />
