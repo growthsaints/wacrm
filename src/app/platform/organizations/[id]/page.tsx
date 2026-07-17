@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   Ban,
   CheckCircle2,
+  Gauge,
   Loader2,
   LogIn,
   MessagesSquare,
@@ -57,6 +58,7 @@ interface OrgDetail {
   };
   members: Member[];
   whatsapp: { configured: boolean; connected: boolean; connectedAt: string | null };
+  quota: { tier: string | null; dailyCap: number | null; usedToday: number | null };
   usage: {
     members: number;
     contacts: number;
@@ -179,7 +181,7 @@ export default function OrganizationDetailPage() {
     return <p className="text-sm text-muted-foreground">Organization not found.</p>;
   }
 
-  const { organization, members, whatsapp, usage } = data;
+  const { organization, members, whatsapp, quota, usage } = data;
   const owner = members.find((m) => m.account_role === "owner");
 
   return (
@@ -245,6 +247,14 @@ export default function OrganizationDetailPage() {
           hint={`${usage.messages.thisMonth} this month`}
         />
         <StatCard icon={Radio} label="Broadcasts sent" value={usage.broadcasts} />
+        {quota.dailyCap !== null && (
+          <StatCard
+            icon={Gauge}
+            label="Broadcast quota today"
+            value={quota.usedToday ?? 0}
+            hint={`of ${quota.dailyCap.toLocaleString()} (${quota.tier})`}
+          />
+        )}
       </div>
 
       <Card>

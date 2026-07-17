@@ -15,6 +15,7 @@ import { requirePlatformAdmin } from "@/lib/auth/platform";
 import { platformAdminClient } from "@/lib/platform/admin-client";
 import { startOfMonthIso } from "@/lib/platform/usage";
 import { checkRateLimit, rateLimitResponse, RATE_LIMITS } from "@/lib/rate-limit";
+import { dailyCapForTier } from "@/lib/whatsapp/messaging-limit";
 
 export async function GET(
   _request: Request,
@@ -66,7 +67,7 @@ export async function GET(
         .order("created_at", { ascending: true }),
       admin
         .from("whatsapp_config")
-        .select("phone_number_id, status, connected_at")
+        .select("phone_number_id, status, connected_at, messaging_limit_tier")
         .eq("account_id", id)
         .maybeSingle(),
       admin
@@ -101,6 +102,20 @@ export async function GET(
         .eq("account_id", id),
     ]);
 
+    // Daily broadcast quota (see src/lib/whatsapp/daily-quota.ts, which
+    // enforces the same cap at send time) — only meaningful once a
+    // tier has actually synced.
+    const dailyCap = dailyCapForTier(whatsappRes.data?.messaging_limit_tier ?? null);
+    let usedToday: number | null = null;
+    if (dailyCap !== null) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: count } = await admin.rpc("count_recent_business_initiated_contacts", {
+        p_account_id: id,
+        p_since: since,
+      });
+      usedToday = (count as number | null) ?? 0;
+    }
+
     return NextResponse.json({
       organization: {
         id: account.id,
@@ -117,6 +132,11 @@ export async function GET(
             connectedAt: whatsappRes.data.connected_at,
           }
         : { configured: false, connected: false, connectedAt: null },
+      quota: {
+        tier: whatsappRes.data?.messaging_limit_tier ?? null,
+        dailyCap,
+        usedToday,
+      },
       usage: {
         members: (membersRes.data ?? []).length,
         contacts: contactsCount.count ?? 0,
