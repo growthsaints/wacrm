@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
-import { MIN_RECHARGE_AMOUNT, CONVERSATION_RATES } from '@/lib/billing/rates'
+import { MIN_RECHARGE_AMOUNT, CONVERSATION_RATES, GST_RATE } from '@/lib/billing/rates'
 
 /** GET /api/billing/wallet — current balance, recent transactions,
  *  and the rate card, for the Settings → Billing page. */
@@ -19,7 +19,7 @@ export async function GET() {
 
     const { data: transactions, error: txError } = await supabase
       .from('wallet_transactions')
-      .select('id, type, amount, conversation_category, balance_after, created_at')
+      .select('id, type, amount, conversation_category, balance_after, gst_amount, total_paid, created_at')
       .eq('account_id', accountId)
       .order('created_at', { ascending: false })
       .limit(50)
@@ -30,6 +30,7 @@ export async function GET() {
     return NextResponse.json({
       balance: account.wallet_balance,
       minRechargeAmount: MIN_RECHARGE_AMOUNT,
+      gstRate: GST_RATE,
       rates: CONVERSATION_RATES,
       transactions: transactions ?? [],
     })

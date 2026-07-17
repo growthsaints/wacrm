@@ -47,11 +47,21 @@ export async function POST(request: Request) {
     }
     const notes = (payment.notes as Record<string, string> | undefined) ?? {}
     if (notes.purpose === 'wallet_recharge' && notes.account_id) {
+      // base_amount/gst_amount were stashed in the order's notes at
+      // creation time (see /api/billing/recharge) and Razorpay copies
+      // order notes onto the resulting payment entity, so this is the
+      // same authoritative split the verify route reads — only the
+      // base amount is ever credited to wallet_balance.
+      const totalPaid = (payment.amount as number) / 100
+      const baseAmount = Number(notes.base_amount ?? totalPaid)
+      const gstAmt = Number(notes.gst_amount ?? 0)
       const { error } = await admin.rpc('credit_wallet', {
         p_account_id: notes.account_id,
-        p_amount: (payment.amount as number) / 100,
+        p_amount: baseAmount,
         p_razorpay_payment_id: payment.id as string,
         p_razorpay_order_id: payment.order_id as string,
+        p_gst_amount: gstAmt,
+        p_total_paid: totalPaid,
       })
       if (error && error.code !== '23505') {
         console.error('[razorpay-webhook] credit_wallet failed:', error.message)

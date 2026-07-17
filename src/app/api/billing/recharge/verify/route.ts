@@ -1,33 +1,37 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
-import { verifyRazorpayPaymentSignature } from '@/lib/billing/razorpay-client'
+import { fetchRazorpayPayment, verifyRazorpayPaymentSignature } from '@/lib/billing/razorpay-client'
 import { supabaseAdmin } from '@/lib/billing/admin-client'
 
 interface PostBody {
   razorpay_order_id?: string
   razorpay_payment_id?: string
   razorpay_signature?: string
-  amount?: number
 }
 
 /** POST /api/billing/recharge/verify — called by the client immediately
  *  after Razorpay Checkout's success callback. Verifies the payment
- *  signature and credits the wallet. The webhook
- *  (/api/webhooks/razorpay) independently does the same credit as a
- *  fallback if this call is missed (tab closed, network drop) — the
- *  unique index on razorpay_payment_id makes crediting twice a no-op. */
+ *  signature, then re-fetches the payment from Razorpay directly to
+ *  get the authoritative captured amount and the base/GST split
+ *  stashed in its notes at order-creation time (never trusts a
+ *  client-supplied amount — a tampered client could otherwise credit
+ *  itself more than it paid). The webhook (/api/webhooks/razorpay)
+ *  independently does the same credit as a fallback if this call is
+ *  missed (tab closed, network drop) — the unique index on
+ *  razorpay_payment_id makes crediting twice a no-op. */
 export async function POST(request: Request) {
   try {
     const { accountId } = await requireRole('admin')
 
     const body = (await request.json().catch(() => null)) as PostBody | null
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, amount } = body ?? {}
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || typeof amount !== 'number') {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body ?? {}
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
       return NextResponse.json({ error: 'Missing payment verification fields' }, { status: 400 })
     }
 
+    const keyId = process.env.RAZORPAY_KEY_ID
     const keySecret = process.env.RAZORPAY_KEY_SECRET
-    if (!keySecret) {
+    if (!keyId || !keySecret) {
       return NextResponse.json({ error: 'Razorpay is not configured on this server.' }, { status: 500 })
     }
 
@@ -41,12 +45,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Payment signature verification failed' }, { status: 400 })
     }
 
+    const payment = await fetchRazorpayPayment({ keyId, keySecret, paymentId: razorpay_payment_id })
+    if (payment.orderId !== razorpay_order_id) {
+      return NextResponse.json({ error: 'Payment does not match order' }, { status: 400 })
+    }
+    if (payment.status !== 'captured') {
+      return NextResponse.json({ error: 'Payment has not been captured' }, { status: 400 })
+    }
+    if (payment.notes.account_id !== accountId) {
+      return NextResponse.json({ error: 'Payment does not belong to this account' }, { status: 403 })
+    }
+
+    const baseAmount = Number(payment.notes.base_amount)
+    const gstAmt = Number(payment.notes.gst_amount ?? 0)
+    if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+      return NextResponse.json({ error: 'Payment is missing its amount breakdown' }, { status: 500 })
+    }
+
     const admin = supabaseAdmin()
     const { data, error } = await admin.rpc('credit_wallet', {
       p_account_id: accountId,
-      p_amount: amount,
+      p_amount: baseAmount,
       p_razorpay_payment_id: razorpay_payment_id,
       p_razorpay_order_id: razorpay_order_id,
+      p_gst_amount: gstAmt,
+      p_total_paid: payment.amount / 100,
     })
 
     if (error) {

@@ -38,13 +38,17 @@ export interface RazorpayOrder {
  *  in whole rupees; Razorpay's API wants paise (integer, ×100).
  *  `accountId` is stashed in `notes` so the webhook — which only ever
  *  sees the Razorpay order/payment entities, not our own request
- *  context — knows which account's wallet to credit. */
+ *  context — knows which account's wallet to credit. Extra `notes`
+ *  (e.g. the base/GST split) are merged in and get copied onto the
+ *  resulting payment entity by Razorpay, so verify/webhook can read
+ *  them back without trusting anything client-supplied. */
 export async function createRazorpayOrder(args: {
   keyId: string;
   keySecret: string;
   amountRupees: number;
   receipt: string;
   accountId: string;
+  notes?: Record<string, string>;
 }): Promise<RazorpayOrder> {
   const response = await fetch(`${RAZORPAY_API_BASE}/orders`, {
     method: 'POST',
@@ -57,7 +61,7 @@ export async function createRazorpayOrder(args: {
       currency: 'INR',
       receipt: args.receipt,
       payment_capture: 1,
-      notes: { account_id: args.accountId, purpose: 'wallet_recharge' },
+      notes: { account_id: args.accountId, purpose: 'wallet_recharge', ...args.notes },
     }),
   });
   if (!response.ok) {
@@ -66,6 +70,39 @@ export async function createRazorpayOrder(args: {
   }
   const data = await response.json();
   return { id: data.id, amount: data.amount, currency: data.currency };
+}
+
+export interface RazorpayPayment {
+  id: string;
+  orderId: string | null;
+  amount: number;
+  status: string;
+  notes: Record<string, string>;
+}
+
+/** Fetches a payment straight from Razorpay by id — the authoritative
+ *  source for what was actually captured, used by the verify route
+ *  instead of trusting client-supplied amount/notes. */
+export async function fetchRazorpayPayment(args: {
+  keyId: string;
+  keySecret: string;
+  paymentId: string;
+}): Promise<RazorpayPayment> {
+  const response = await fetch(`${RAZORPAY_API_BASE}/payments/${args.paymentId}`, {
+    headers: { Authorization: basicAuthHeader(args.keyId, args.keySecret) },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Razorpay payment lookup failed: ${response.status} ${text}`);
+  }
+  const data = await response.json();
+  return {
+    id: data.id,
+    orderId: data.order_id ?? null,
+    amount: data.amount,
+    status: data.status,
+    notes: (data.notes as Record<string, string>) ?? {},
+  };
 }
 
 export interface RazorpaySubscription {

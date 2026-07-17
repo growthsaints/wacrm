@@ -21,6 +21,20 @@ export type ConversationCategory = keyof typeof CONVERSATION_RATES;
 
 export const MIN_RECHARGE_AMOUNT = 1500;
 
+// Razorpay has no built-in GST field, so it's applied manually here on
+// top of the base amount before creating the order — the base amount
+// is what actually lands in wallet_balance, GST is tracked separately
+// in wallet_transactions for accounting only.
+export const GST_RATE = 0.18;
+
+export function gstAmount(baseAmount: number): number {
+  return Math.round(baseAmount * GST_RATE * 100) / 100;
+}
+
+export function totalWithGst(baseAmount: number): number {
+  return Math.round((baseAmount + gstAmount(baseAmount)) * 100) / 100;
+}
+
 /**
  * Maps a message_templates.category value ('Marketing' | 'Utility' |
  * 'Authentication', per template-sync.ts's normalizeCategory) to a

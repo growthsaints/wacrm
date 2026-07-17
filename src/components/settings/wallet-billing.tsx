@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { SettingsPanelHead } from './settings-panel-head';
+import { gstAmount, totalWithGst } from '@/lib/billing/rates';
 
 declare global {
   interface Window {
@@ -44,12 +45,15 @@ interface WalletTransaction {
   amount: number;
   conversation_category: 'marketing' | 'utility' | 'authentication' | 'service' | null;
   balance_after: number;
+  gst_amount: number;
+  total_paid: number | null;
   created_at: string;
 }
 
 interface WalletData {
   balance: number;
   minRechargeAmount: number;
+  gstRate: number;
   rates: Record<string, number>;
   transactions: WalletTransaction[];
 }
@@ -210,7 +214,7 @@ export function WalletBilling() {
           const verifyRes = await fetch('/api/billing/recharge/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...response, amount: rupees }),
+            body: JSON.stringify(response),
           });
           const verifyJson = await verifyRes.json();
           if (verifyRes.ok) {
@@ -418,10 +422,17 @@ export function WalletBilling() {
                       {new Date(tx.created_at).toLocaleString()}
                     </span>
                   </div>
-                  <span className={tx.amount >= 0 ? 'text-emerald-600' : 'text-foreground'}>
-                    {tx.amount >= 0 ? '+' : ''}
-                    {formatInr(tx.amount)}
-                  </span>
+                  <div className="text-right">
+                    <span className={tx.amount >= 0 ? 'text-emerald-600' : 'text-foreground'}>
+                      {tx.amount >= 0 ? '+' : ''}
+                      {formatInr(tx.amount)}
+                    </span>
+                    {tx.type === 'recharge' && tx.gst_amount > 0 && (
+                      <p className="text-[11px] text-muted-foreground">
+                        incl. {formatInr(tx.gst_amount)} GST — paid {formatInr(tx.total_paid ?? tx.amount + tx.gst_amount)}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -434,7 +445,7 @@ export function WalletBilling() {
           <DialogHeader>
             <DialogTitle>Recharge wallet</DialogTitle>
             <DialogDescription>
-              Minimum recharge amount is {formatInr(data?.minRechargeAmount ?? 1500)}.
+              Minimum recharge amount is {formatInr(data?.minRechargeAmount ?? 1500)}. 18% GST is added at checkout.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2">
@@ -447,6 +458,22 @@ export function WalletBilling() {
               onChange={(e) => setAmount(e.target.value)}
             />
           </div>
+          {Number.isFinite(Number(amount)) && Number(amount) > 0 && (
+            <div className="space-y-1 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+              <div className="flex justify-between text-muted-foreground">
+                <span>Wallet credit</span>
+                <span>{formatInr(Number(amount))}</span>
+              </div>
+              <div className="flex justify-between text-muted-foreground">
+                <span>GST ({((data?.gstRate ?? 0.18) * 100).toFixed(0)}%)</span>
+                <span>{formatInr(gstAmount(Number(amount)))}</span>
+              </div>
+              <div className="flex justify-between border-t border-border pt-1 font-medium text-foreground">
+                <span>Total payable</span>
+                <span>{formatInr(totalWithGst(Number(amount)))}</span>
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setRechargeOpen(false)} disabled={paying}>
               Cancel

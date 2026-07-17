@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server'
 import { requireRole, toErrorResponse } from '@/lib/auth/account'
 import { createRazorpayOrder } from '@/lib/billing/razorpay-client'
-import { MIN_RECHARGE_AMOUNT } from '@/lib/billing/rates'
+import { MIN_RECHARGE_AMOUNT, gstAmount, totalWithGst } from '@/lib/billing/rates'
 
 interface PostBody {
   amount?: number
 }
 
 /** POST /api/billing/recharge — creates a Razorpay order for a wallet
- *  top-up. The frontend opens Razorpay Checkout with the returned
+ *  top-up. Razorpay has no native GST field, so 18% GST is added here
+ *  on top of the requested amount before the order is created; only
+ *  the base amount is ever credited to wallet_balance (see verify/
+ *  route.ts and the webhook), the GST portion is tracked purely for
+ *  accounting. The frontend opens Razorpay Checkout with the returned
  *  order id; on success it calls /api/billing/recharge/verify, and the
  *  webhook (/api/webhooks/razorpay) is the authoritative fallback. */
 export async function POST(request: Request) {
@@ -33,15 +37,22 @@ export async function POST(request: Request) {
       )
     }
 
+    const gst = gstAmount(amount)
+    const totalPayable = totalWithGst(amount)
+
     // Razorpay caps `receipt` at 40 chars — a full UUID + timestamp
     // blows past that, so use only the account id's first 8 chars
     // (this is just our own reference string, not looked up by it).
     const order = await createRazorpayOrder({
       keyId,
       keySecret,
-      amountRupees: amount,
+      amountRupees: totalPayable,
       receipt: `wr_${accountId.slice(0, 8)}_${Date.now()}`,
       accountId,
+      notes: {
+        base_amount: amount.toFixed(2),
+        gst_amount: gst.toFixed(2),
+      },
     })
 
     return NextResponse.json({
@@ -49,6 +60,9 @@ export async function POST(request: Request) {
       amount: order.amount,
       currency: order.currency,
       keyId,
+      baseAmount: amount,
+      gstAmount: gst,
+      totalAmount: totalPayable,
     })
   } catch (err) {
     return toErrorResponse(err)
