@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -77,10 +78,20 @@ export function Step1ChooseTemplate({ selectedTemplate, onSelect, onNext, onBack
       </div>
 
       {templates.length === 0 ? (
-        <div className="flex h-48 flex-col items-center justify-center rounded-xl border border-border bg-card/50">
-          <FileText className="mb-2 h-8 w-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">{t('chooseTemplate.noTemplates')}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{t('chooseTemplate.createFirst')}</p>
+        <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card/50">
+          <FileText className="h-8 w-8 text-muted-foreground" />
+          <div className="text-center">
+            <p className="text-sm text-muted-foreground">{t('chooseTemplate.noTemplates')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t('chooseTemplate.createFirst')}</p>
+          </div>
+          <Button
+            render={<Link href="/settings?tab=templates" />}
+            variant="outline"
+            size="sm"
+          >
+            {t('chooseTemplate.createTemplateButton')}
+            <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
