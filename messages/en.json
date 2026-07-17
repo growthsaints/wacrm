@@ -1528,10 +1528,14 @@
       "headerSamplePlaceholder": "Sample value for {{1}} (required for Meta review)",
       
       "uploadImage": "Upload image",
+      "uploadVideo": "Upload video",
+      "uploadDocument": "Upload document",
       "uploadHint": "JPEG or PNG, ≤5 MB",
+      "uploadHintVideo": "MP4 or 3GPP, ≤16 MB",
+      "uploadHintDocument": "PDF, ≤16 MB",
       "mediaUrlPlaceholder": "https://… (or paste a public {format} link)",
       "imageHint": "Upload a JPEG/PNG (≤5 MB, ≥800×418 px recommended) or paste a public HTTPS link — we upload it to Meta for review automatically.",
-      "mediaHint": "Must be a publicly accessible HTTPS link. Meta fetches it once during review, so it needs to stay live for ~24 hrs.",
+      "mediaHint": "Use the upload button above for files within our limits — we host it and fill this link in for you. For a larger file (Meta allows up to the size below), upload it anywhere that gives you a direct, publicly-accessible HTTPS link (e.g. Google Drive with \"Anyone with the link\" sharing, Dropbox, or your own website) and paste that link here instead. Either way, it must stay live for ~24 hrs while Meta reviews the template.",
       "videoHint": " Recommended: MP4 / 3GPP, ≤16 MB, ≤60 seconds.",
       "documentHint": " Recommended: PDF, ≤100 MB.",
       
@@ -1583,9 +1587,9 @@
       "toastSyncError": "Failed to sync templates",
       "toastDeleteSuccess": "Template deleted",
       "toastDeleteError": "Failed to delete template",
-      "toastInvalidImage": "Header image must be a JPEG or PNG.",
-      "toastImageTooLarge": "Image is {size} MB — Meta's limit is 5 MB.",
-      "toastUploadSuccess": "Image uploaded.",
+      "toastInvalidFile": "That file isn't a supported format for a {format} header ({types}).",
+      "toastFileTooLarge": "File is {size} MB — the limit for a {format} header here is {limit} MB. Paste a link instead for a larger file.",
+      "toastUploadSuccess": "{format} uploaded.",
       "toastUploadFailed": "Upload failed."
     },
     "roles": {

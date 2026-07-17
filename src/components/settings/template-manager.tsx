@@ -57,6 +57,18 @@ const CATEGORIES = ['Marketing', 'Utility', 'Authentication'] as const;
 type HeaderFormat = 'none' | 'text' | 'image' | 'video' | 'document';
 const HEADER_FORMATS: HeaderFormat[] = ['none', 'text', 'image', 'video', 'document'];
 
+type HeaderMediaFormat = 'image' | 'video' | 'document';
+
+// Matches Meta's accepted header-media formats per type. Sizes are
+// enforced separately via MEDIA_MAX_BYTES_BY_KIND (our bucket's cap,
+// which is lower than Meta's own limit for video/document — see that
+// constant's comment).
+const HEADER_MEDIA_ACCEPT: Record<HeaderMediaFormat, { mimeTypes: string[]; accept: string }> = {
+  image: { mimeTypes: ['image/jpeg', 'image/png'], accept: 'image/jpeg,image/png' },
+  video: { mimeTypes: ['video/mp4', 'video/3gpp'], accept: 'video/mp4,video/3gpp' },
+  document: { mimeTypes: ['application/pdf'], accept: 'application/pdf' },
+};
+
 const categoryColors: Record<string, string> = {
   Marketing: 'bg-purple-600/20 text-purple-400 border-purple-600/30',
   Utility: 'bg-blue-600/20 text-blue-400 border-blue-600/30',
@@ -458,14 +470,26 @@ export function TemplateManager() {
   const headerNeedsMedia =
     form.header_format !== 'none' && form.header_format !== 'text';
 
-  async function handleHeaderImageFile(file: File) {
-    if (!['image/jpeg', 'image/png'].includes(file.type)) {
-      toast.error(t('toastInvalidImage'));
+  async function handleHeaderMediaFile(file: File) {
+    const kind = form.header_format as HeaderMediaFormat;
+    const { mimeTypes } = HEADER_MEDIA_ACCEPT[kind];
+    if (!mimeTypes.includes(file.type)) {
+      toast.error(
+        t('toastInvalidFile', {
+          format: kind,
+          types: mimeTypes.map((m) => m.split('/')[1]).join(' / '),
+        }),
+      );
       return;
     }
-    if (file.size > MEDIA_MAX_BYTES_BY_KIND.image) {
+    const maxBytes = MEDIA_MAX_BYTES_BY_KIND[kind];
+    if (file.size > maxBytes) {
       toast.error(
-        t('toastImageTooLarge', { size: (file.size / 1024 / 1024).toFixed(1) }),
+        t('toastFileTooLarge', {
+          size: (file.size / 1024 / 1024).toFixed(1),
+          format: kind,
+          limit: (maxBytes / 1024 / 1024).toFixed(0),
+        }),
       );
       return;
     }
@@ -473,7 +497,7 @@ export function TemplateManager() {
     try {
       const { publicUrl } = await uploadAccountMedia('chat-media', file);
       setForm((f) => ({ ...f, header_media_url: publicUrl }));
-      toast.success(t('toastUploadSuccess'));
+      toast.success(t('toastUploadSuccess', { format: kind }));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('toastUploadFailed'));
     } finally {
@@ -801,16 +825,18 @@ export function TemplateManager() {
 
               {headerNeedsMedia && (
                 <div className="space-y-2 mt-2">
-                  {form.header_format === 'image' && (
+                  {(form.header_format === 'image' ||
+                    form.header_format === 'video' ||
+                    form.header_format === 'document') && (
                     <div className="flex items-center gap-2">
                       <input
                         ref={headerFileRef}
                         type="file"
-                        accept="image/jpeg,image/png"
+                        accept={HEADER_MEDIA_ACCEPT[form.header_format].accept}
                         className="hidden"
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f) void handleHeaderImageFile(f);
+                          if (f) void handleHeaderMediaFile(f);
                           e.target.value = '';
                         }}
                       />
@@ -826,10 +852,18 @@ export function TemplateManager() {
                         ) : (
                           <Upload className="h-3.5 w-3.5" />
                         )}
-                        {t('uploadImage')}
+                        {form.header_format === 'image'
+                          ? t('uploadImage')
+                          : form.header_format === 'video'
+                            ? t('uploadVideo')
+                            : t('uploadDocument')}
                       </Button>
                       <span className="text-[11px] text-muted-foreground">
-                        {t('uploadHint')}
+                        {form.header_format === 'image'
+                          ? t('uploadHint')
+                          : form.header_format === 'video'
+                            ? t('uploadHintVideo')
+                            : t('uploadHintDocument')}
                       </span>
                     </div>
                   )}
