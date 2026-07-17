@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
 import {
+  AlertTriangle,
   Ban,
   CheckCircle2,
   Loader2,
@@ -23,26 +24,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { computeHealthStatus, type WhatsAppHealthStatus } from '@/lib/whatsapp/embedded-signup';
+import { computeHealthStatus, describeEmbeddedSignupError, type WhatsAppHealthStatus } from '@/lib/whatsapp/embedded-signup';
+import { dailyCapForTier, formatMessagingLimit } from '@/lib/whatsapp/messaging-limit';
+import { createClient } from '@/lib/supabase/client';
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
 import { ConnectWhatsAppButton } from './connect-whatsapp-button';
-
-// Meta's tier values (TIER_250, TIER_2K, TIER_10K, TIER_100K,
-// TIER_UNLIMITED) — see Meta's Messaging Limits doc. Only TIER_250 is
-// below the first scaling path, so that's the only one that gets the
-// "increase your limit" hint.
-const MESSAGING_LIMIT_LABEL: Record<string, string> = {
-  TIER_250: '250 / day',
-  TIER_2K: '2,000 / day',
-  TIER_10K: '10,000 / day',
-  TIER_100K: '100,000 / day',
-  TIER_UNLIMITED: 'Unlimited',
-};
-
-function formatMessagingLimit(tier: string | null | undefined): string {
-  if (!tier) return '—';
-  return MESSAGING_LIMIT_LABEL[tier] ?? tier;
-}
 
 function fmtDateTime(iso: string | null | undefined): string | null {
   if (!iso) return null;
@@ -98,9 +84,11 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
  */
 export function WhatsAppManagement({
   config,
+  accountId,
   onChanged,
 }: {
   config: WhatsAppConfigType | null;
+  accountId: string | null;
   onChanged: () => void;
 }) {
   const t = useTranslations('Settings.whatsappManagement');
@@ -108,6 +96,7 @@ export function WhatsAppManagement({
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [usedToday, setUsedToday] = useState<number | null>(null);
 
   const health = computeHealthStatus({
     hasConfig: !!config,
@@ -115,6 +104,28 @@ export function WhatsAppManagement({
     qualityRating: config?.quality_rating ?? null,
     lastRegistrationError: config?.last_registration_error ?? null,
   });
+
+  const dailyCap = dailyCapForTier(config?.messaging_limit_tier);
+
+  // Live "used today" count for the daily-quota guard (see
+  // src/lib/whatsapp/daily-quota.ts, which enforces the same number
+  // at broadcast send time) — informational only, not editable here.
+  useEffect(() => {
+    if (!accountId || dailyCap === null) {
+      setUsedToday(null);
+      return;
+    }
+    let cancelled = false;
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    createClient()
+      .rpc('count_recent_business_initiated_contacts', { p_account_id: accountId, p_since: since })
+      .then(({ data, error }: { data: number | null; error: unknown }) => {
+        if (!cancelled && !error) setUsedToday(data ?? 0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, dailyCap]);
 
   async function handleRefresh() {
     setRefreshing(true);
@@ -206,6 +217,18 @@ export function WhatsAppManagement({
         <HealthBadge status={health} t={t} />
       </div>
 
+      {/* The connect flow's own toast explaining an action_needed state
+          (e.g. a PIN mismatch) only shows once, right after the attempt,
+          then vanishes — so anyone who navigates away and comes back
+          just sees the "Action needed" badge with no idea why. This
+          banner keeps the same explanation visible until it's resolved. */}
+      {health === 'action_needed' && config.last_registration_error && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <p>{describeEmbeddedSignupError(config.last_registration_error)}</p>
+        </div>
+      )}
+
       <div className="divide-y divide-border rounded-lg border border-border px-4">
         <InfoRow label={t('businessName')} value={config.business_name ?? '—'} />
         <InfoRow label={t('displayName')} value={config.display_name ?? '—'} />
@@ -229,6 +252,12 @@ export function WhatsAppManagement({
           value={t(`quality.${qualityKey}` as string)}
         />
         <InfoRow label={t('messagingLimit')} value={formatMessagingLimit(config.messaging_limit_tier)} />
+        {dailyCap !== null && (
+          <InfoRow
+            label={t('usedToday')}
+            value={usedToday === null ? '—' : `${usedToday.toLocaleString()} / ${dailyCap.toLocaleString()}`}
+          />
+        )}
         <InfoRow label={t('verifiedStatus')} value={config.code_verification_status ?? '—'} />
         <InfoRow label={t('lastSync')} value={fmtDateTime(config.last_synced_at) ?? t('never')} />
       </div>
