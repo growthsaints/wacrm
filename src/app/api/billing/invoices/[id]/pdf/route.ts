@@ -11,7 +11,7 @@ export const runtime = 'nodejs'
  *  just 404s. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('owner')
     const { id } = await params
 
     const { data: invoice, error } = await supabase

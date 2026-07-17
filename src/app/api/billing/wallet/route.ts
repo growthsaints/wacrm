@@ -6,7 +6,7 @@ import { MIN_RECHARGE_AMOUNT, CONVERSATION_RATES, GST_RATE } from '@/lib/billing
  *  and the rate card, for the Settings → Billing page. */
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('owner')
 
     const { data: account, error: accountError } = await supabase
       .from('accounts')

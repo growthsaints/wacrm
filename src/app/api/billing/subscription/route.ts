@@ -40,7 +40,7 @@ const PLAN_ENV_VAR: Record<SelfServePlan, string> = {
  */
 export async function POST(request: Request) {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('owner')
 
     const body = (await request.json().catch(() => null)) as PostBody | null
     const plan = body?.plan

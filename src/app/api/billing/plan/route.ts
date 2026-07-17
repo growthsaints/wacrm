@@ -35,7 +35,7 @@ async function planAmountRupees(planId: string | undefined, keyId: string | unde
  *  value (avoids a DB migration for what's purely a pricing tier). */
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('owner')
 
     const { data, error } = await supabase
       .from('accounts')

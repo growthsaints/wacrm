@@ -17,7 +17,7 @@ interface PostBody {
  *  webhook (/api/webhooks/razorpay) is the authoritative fallback. */
 export async function POST(request: Request) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requireRole('owner')
 
     const body = (await request.json().catch(() => null)) as PostBody | null
     const amount = body?.amount

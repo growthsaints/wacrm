@@ -22,7 +22,7 @@ interface PostBody {
  *  razorpay_payment_id makes crediting twice a no-op. */
 export async function POST(request: Request) {
   try {
-    const { accountId } = await requireRole('admin')
+    const { accountId } = await requireRole('owner')
 
     const body = (await request.json().catch(() => null)) as PostBody | null
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body ?? {}

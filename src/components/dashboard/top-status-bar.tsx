@@ -3,8 +3,9 @@
 // ============================================================
 // TopStatusBar — AiSensy-style WhatsApp/plan status, centered in the
 // header row between the page title and the theme toggle/avatar.
-// Admin+ only — an agent/viewer can't act on either button, so
-// there's nothing for them to do with it.
+// Owner only — this is billing/plan info, which team members (admin
+// included) shouldn't see per the same rule applied to the dashboard's
+// quota card and wallet card.
 // ============================================================
 
 import { useEffect, useState } from 'react';

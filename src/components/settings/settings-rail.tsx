@@ -27,13 +27,16 @@ export function SettingsRail({
   onSelect,
   hints,
   isAdmin = true,
+  isOwner = true,
   canAccessTemplates = true,
 }: {
   active: SettingsSection;
   onSelect: (section: SettingsSection) => void;
   hints?: Partial<Record<SettingsSection, ReactNode>>;
-  /** Hides `adminOnly` sections (e.g. Billing) for non-admin members. */
+  /** Hides `adminOnly` sections for non-admin members. */
   isAdmin?: boolean;
+  /** Hides `ownerOnly` sections (e.g. Billing) for non-owner members. */
+  isOwner?: boolean;
   /** Hides Templates for an 'agent' without the 'templates' grant. */
   canAccessTemplates?: boolean;
 }) {
@@ -66,6 +69,7 @@ export function SettingsRail({
           (s) =>
             SECTION_META[s].group === group &&
             (isAdmin || !SECTION_META[s].adminOnly) &&
+            (isOwner || !SECTION_META[s].ownerOnly) &&
             (s !== 'templates' || canAccessTemplates),
         );
         return (

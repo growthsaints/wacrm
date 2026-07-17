@@ -30,6 +30,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { SettingsPanelHead } from './settings-panel-head';
 import { gstAmount, totalWithGst } from '@/lib/billing/rates';
+import { useAuth } from '@/hooks/use-auth';
 
 declare global {
   interface Window {
@@ -109,6 +110,7 @@ function formatDate(iso: string | null): string {
 }
 
 export function WalletBilling() {
+  const { isOwner } = useAuth();
   const searchParams = useSearchParams();
   const [data, setData] = useState<WalletData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -282,6 +284,11 @@ export function WalletBilling() {
       </div>
     );
   }
+
+  // Defense in depth — the settings page already redirects a non-owner
+  // deep-linking straight to ?tab=billing, and the rail hides the tab
+  // entirely, but this component has no gate of its own otherwise.
+  if (!isOwner) return null;
 
   return (
     <section className="space-y-6">

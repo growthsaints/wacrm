@@ -6,7 +6,7 @@ import { requireRole, toErrorResponse } from '@/lib/auth/account'
  *  /api/billing/invoices/[id]/pdf. */
 export async function GET() {
   try {
-    const { supabase, accountId } = await requireRole('admin')
+    const { supabase, accountId } = await requireRole('owner')
 
     const { data, error } = await supabase
       .from('invoices')
