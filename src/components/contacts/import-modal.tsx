@@ -42,6 +42,26 @@ import { useTranslations } from 'next-intl';
 const DEFAULT_TAG_COLOR = '#3b82f6';
 const PREVIEW_LIMIT = 5;
 
+// Mirrors the exact headers parseContactCsv() recognizes (phone
+// required; name/email/company/tags optional, tags comma/semicolon
+// separated within a quoted cell) — a real file to edit beats reading
+// the column list off the description text above it.
+const SAMPLE_CSV = [
+  'phone,name,email,company,tags',
+  '+919876543210,Priya Sharma,priya@example.com,Sharma Textiles,"VIP,Lead"',
+  '+14155552671,John Smith,john@example.com,Acme Corp,Customer',
+].join('\n');
+
+function downloadSampleCsv() {
+  const blob = new Blob([SAMPLE_CSV], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'contacts-sample.csv';
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function truncateFilename(name: string, max = 48): string {
   if (name.length <= max) return name;
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
@@ -410,6 +430,13 @@ export function ImportModal({
                 })
               }}
             />
+            <button
+              type="button"
+              onClick={downloadSampleCsv}
+              className="w-fit text-xs font-medium text-primary underline-offset-2 hover:underline"
+            >
+              {t('downloadSample')}
+            </button>
           </DialogHeader>
 
           <div

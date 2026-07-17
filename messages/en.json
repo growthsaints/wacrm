@@ -501,6 +501,7 @@
     "importModal": {
       "title": "Import Contacts",
       "desc": "Upload a CSV with a required <phoneCode>phone</phoneCode> column. Optional: <nameCode>name</nameCode>, <emailCode>email</emailCode>, <companyCode>company</companyCode>, <tagsCode>tags</tagsCode> (comma-separated; quote multi-tag cells).",
+      "downloadSample": "Download sample CSV",
       "uploadDropzone": "Click to choose a CSV file",
       "uploadHint": ".csv up to your browser limit",
       "rowsReady": "{count} row ready",
