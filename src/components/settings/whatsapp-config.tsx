@@ -400,6 +400,7 @@ export function WhatsAppConfig() {
 
       <WhatsAppManagement
         config={config}
+        accountId={accountId}
         onChanged={() => accountId && fetchConfig(accountId)}
       />
 

@@ -31,6 +31,7 @@ import type { MessageTemplate } from '@/types';
 import { findOrCreateContact } from '@/lib/api/v1/contacts';
 import { categoryFromTemplate } from '@/lib/billing/rates';
 import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet';
+import { ensureDailyBroadcastQuota, DailyQuotaError } from '@/lib/whatsapp/daily-quota';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -278,6 +279,21 @@ export async function deliverBroadcast(
       await ensureWalletBalance(db, plan.accountId, billingCategory);
     } catch (err) {
       const message = err instanceof WalletError ? err.message : 'Wallet check failed';
+      await db
+        .from('broadcast_recipients')
+        .update({ status: 'failed', error_message: message })
+        .eq('id', recipient.recipientRowId);
+      continue;
+    }
+
+    // Same per-recipient reasoning as the wallet check above — stops
+    // sending the moment the account hits its Meta messaging-limit
+    // tier's daily cap, rather than plowing through the rest of the
+    // batch and risking Meta throttling/flagging the number.
+    try {
+      await ensureDailyBroadcastQuota(db, plan.accountId);
+    } catch (err) {
+      const message = err instanceof DailyQuotaError ? err.message : 'Daily quota check failed';
       await db
         .from('broadcast_recipients')
         .update({ status: 'failed', error_message: message })

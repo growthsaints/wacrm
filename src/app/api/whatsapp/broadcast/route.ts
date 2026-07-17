@@ -17,6 +17,7 @@ import {
 } from '@/lib/rate-limit'
 import { categoryFromTemplate } from '@/lib/billing/rates'
 import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet'
+import { ensureDailyBroadcastQuota, DailyQuotaError } from '@/lib/whatsapp/daily-quota'
 
 interface BroadcastResult {
   phone: string
@@ -182,6 +183,19 @@ export async function POST(request: Request) {
         await ensureWalletBalance(supabase, accountId, billingCategory)
       } catch (err) {
         const message = err instanceof WalletError ? err.message : 'Wallet check failed'
+        results.push({ phone: recipient.phone, status: 'failed', error: message })
+        failedCount++
+        continue
+      }
+
+      // Same per-recipient reasoning as the wallet check above — stops
+      // sending the moment the account hits its Meta messaging-limit
+      // tier's daily cap, rather than plowing through the rest of the
+      // batch and risking Meta throttling/flagging the number.
+      try {
+        await ensureDailyBroadcastQuota(supabase, accountId)
+      } catch (err) {
+        const message = err instanceof DailyQuotaError ? err.message : 'Daily quota check failed'
         results.push({ phone: recipient.phone, status: 'failed', error: message })
         failedCount++
         continue

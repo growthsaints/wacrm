@@ -1737,6 +1737,7 @@
       "connectionStatus": "Connection status",
       "qualityRating": "Quality rating",
       "messagingLimit": "Messaging limit",
+      "usedToday": "Used today (broadcasts)",
       "verifiedStatus": "Verified status",
       "lastSync": "Last sync",
       "healthStatus": "Health",
