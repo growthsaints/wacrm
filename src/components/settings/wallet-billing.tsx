@@ -61,6 +61,9 @@ interface WalletData {
 type PlanType = 'none' | 'managed' | 'self_serve_monthly' | 'self_serve_quarterly';
 type PlanStatus = 'inactive' | 'active' | 'cancelled';
 
+type MonthlyTier = 'basic' | 'pro' | null;
+type SelfServePlan = 'monthly' | 'monthly_pro' | 'quarterly';
+
 interface PlanData {
   planType: PlanType;
   planStatus: PlanStatus;
@@ -68,7 +71,9 @@ interface PlanData {
   managedRenewalsUsed: number;
   managedRenewalsMax: number;
   monthlyAmount: number;
+  monthlyProAmount: number;
   quarterlyAmount: number;
+  monthlyTier: MonthlyTier;
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -103,7 +108,7 @@ export function WalletBilling() {
 
   const [plan, setPlan] = useState<PlanData | null>(null);
   const [planLoading, setPlanLoading] = useState(true);
-  const [subscribing, setSubscribing] = useState<'monthly' | 'quarterly' | null>(null);
+  const [subscribing, setSubscribing] = useState<SelfServePlan | null>(null);
   const [choosingPlan, setChoosingPlan] = useState(false);
 
   const load = useCallback(async () => {
@@ -133,7 +138,7 @@ export function WalletBilling() {
   }, [load, loadPlan]);
 
   const handleSubscribe = useCallback(
-    async (selected: 'monthly' | 'quarterly') => {
+    async (selected: SelfServePlan) => {
       if (!sdkReady || !window.Razorpay) {
         toast.error('Payment SDK is still loading — try again in a moment');
         return;
@@ -156,7 +161,12 @@ export function WalletBilling() {
           key: json.keyId,
           subscription_id: json.subscriptionId,
           name: 'Growth Saints CRM',
-          description: selected === 'monthly' ? 'Self-serve Monthly plan' : 'Self-serve Quarterly plan',
+          description:
+            selected === 'monthly'
+              ? 'Self-serve Monthly plan'
+              : selected === 'monthly_pro'
+                ? 'Self-serve Monthly Pro plan'
+                : 'Self-serve Quarterly plan',
           handler: () => {
             toast.success('Subscription started — it will show as Active once payment is confirmed.');
             void loadPlan();
@@ -267,7 +277,8 @@ export function WalletBilling() {
                 <h3 className="text-sm font-medium text-foreground">Your plan</h3>
                 <p className="text-xs text-muted-foreground">
                   {plan.planType === 'managed' && 'Managed — provisioned by Growth Saints'}
-                  {plan.planType === 'self_serve_monthly' && `Self-serve Monthly — ${formatInr(plan.monthlyAmount)}/month`}
+                  {plan.planType === 'self_serve_monthly' &&
+                    `Self-serve Monthly${plan.monthlyTier === 'pro' ? ' Pro' : ''} — ${formatInr(plan.monthlyTier === 'pro' ? plan.monthlyProAmount : plan.monthlyAmount)}/month`}
                   {plan.planType === 'self_serve_quarterly' && `Self-serve Quarterly — ${formatInr(plan.quarterlyAmount)}/quarter (${formatInr(plan.quarterlyAmount / 3)}/mo)`}
                   {plan.planType === 'none' && 'No plan yet — choose one below'}
                 </p>
@@ -306,7 +317,13 @@ export function WalletBilling() {
                       size="sm"
                       disabled={subscribing !== null || !sdkReady}
                       onClick={() =>
-                        handleSubscribe(plan.planType === 'self_serve_monthly' ? 'monthly' : 'quarterly')
+                        handleSubscribe(
+                          plan.planType === 'self_serve_monthly'
+                            ? plan.monthlyTier === 'pro'
+                              ? 'monthly_pro'
+                              : 'monthly'
+                            : 'quarterly',
+                        )
                       }
                     >
                       {subscribing ? <Loader2 className="size-4 animate-spin" /> : null}
@@ -335,7 +352,7 @@ export function WalletBilling() {
                     ← Back
                   </button>
                 )}
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border border-border p-4">
                     <p className="text-sm font-semibold text-foreground">Monthly</p>
                     <p className="text-lg font-semibold text-foreground">{formatInr(plan.monthlyAmount)}<span className="text-xs font-normal text-muted-foreground">/month</span></p>
@@ -346,6 +363,19 @@ export function WalletBilling() {
                       onClick={() => handleSubscribe('monthly')}
                     >
                       {subscribing === 'monthly' ? <Loader2 className="size-4 animate-spin" /> : null}
+                      Subscribe
+                    </Button>
+                  </div>
+                  <div className="rounded-lg border border-border p-4">
+                    <p className="text-sm font-semibold text-foreground">Monthly Pro</p>
+                    <p className="text-lg font-semibold text-foreground">{formatInr(plan.monthlyProAmount)}<span className="text-xs font-normal text-muted-foreground">/month</span></p>
+                    <Button
+                      className="mt-3 w-full"
+                      size="sm"
+                      disabled={subscribing !== null || !sdkReady}
+                      onClick={() => handleSubscribe('monthly_pro')}
+                    >
+                      {subscribing === 'monthly_pro' ? <Loader2 className="size-4 animate-spin" /> : null}
                       Subscribe
                     </Button>
                   </div>
