@@ -1332,6 +1332,46 @@
         "end": {
           "label": "End",
           "blurb": "Ends the flow"
+        },
+        "send_template": {
+          "label": "Send template",
+          "blurb": "Sends an approved WhatsApp template"
+        },
+        "send_whatsapp_flow": {
+          "label": "Send WhatsApp Flow",
+          "blurb": "Launches an official WhatsApp Flow"
+        },
+        "branch": {
+          "label": "Branch",
+          "blurb": "Routes to one of several paths by value"
+        },
+        "assign_agent": {
+          "label": "Assign agent",
+          "blurb": "Assigns the conversation to an agent (bot keeps running)"
+        },
+        "create_contact": {
+          "label": "Create contact",
+          "blurb": "Creates a new contact from captured data"
+        },
+        "update_contact": {
+          "label": "Update contact",
+          "blurb": "Writes name / email / company"
+        },
+        "update_custom_field": {
+          "label": "Update custom field",
+          "blurb": "Writes a custom field value"
+        },
+        "delay": {
+          "label": "Delay",
+          "blurb": "Waits before continuing"
+        },
+        "webhook": {
+          "label": "Webhook",
+          "blurb": "Fires a one-way outbound notification"
+        },
+        "http_fetch": {
+          "label": "HTTP request",
+          "blurb": "Calls an API and captures the response"
         }
       }
     },

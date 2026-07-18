@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Script from 'next/script';
 import { toast } from 'sonner';
 import { useTranslations } from 'next-intl';
@@ -8,6 +8,11 @@ import { Loader2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 import { Button } from '@/components/ui/button';
+import {
+  isFacebookSdkReady,
+  markFacebookSdkReady,
+  subscribeFacebookSdkReady,
+} from '@/lib/whatsapp/facebook-sdk';
 
 // AiSensy-style celebration burst for a newly-live WABA — purely
 // cosmetic, fires once right after the success toast.
@@ -81,7 +86,12 @@ export function ConnectWhatsAppButton({
   size?: React.ComponentProps<typeof Button>['size'];
 }) {
   const t = useTranslations('Settings.whatsappManagement');
-  const [sdkReady, setSdkReady] = useState(false);
+  // Shared across every mounted instance of this button (see
+  // src/lib/whatsapp/facebook-sdk.ts) — Next.js dedupes the actual
+  // <script src> load across instances, but only one instance's own
+  // onLoad reliably fires, so a purely local sdkReady state left the
+  // others permanently disabled.
+  const sdkReady = useSyncExternalStore(subscribeFacebookSdkReady, isFacebookSdkReady, () => false);
   const [connecting, setConnecting] = useState(false);
 
   const appId = process.env.NEXT_PUBLIC_META_APP_ID;
@@ -296,7 +306,7 @@ export function ConnectWhatsAppButton({
         onLoad={() => {
           window.fbAsyncInit = () => {
             window.FB?.init({ appId: appId!, autoLogAppEvents: true, xfbml: true, version: META_JS_SDK_VERSION });
-            setSdkReady(true);
+            markFacebookSdkReady();
           };
           // The SDK calls fbAsyncInit itself once loaded from the
           // script's own bootstrap — but since we attached the script
