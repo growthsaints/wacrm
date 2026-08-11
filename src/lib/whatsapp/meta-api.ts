@@ -785,71 +785,17 @@ export async function submitMessageTemplate(
 // Template Library — Meta's pre-approved template content
 // (Utility/Authentication copy that skips manual App Review).
 // Spec: "Template Library | Developer Documentation".
+//
+// Meta documents a dedicated browse/search endpoint
+// (`GET /message_template_library`), but on real (non-demo) WABAs it
+// returns an empty result set even for content confirmed to exist via
+// WhatsApp Manager's own UI — verified against production after
+// ruling out wrong-edge-name, wrong-API-version, and unquoted-search
+// causes one at a time. So there's no browseTemplateLibrary() here —
+// only the documented-and-working "create by exact name" call below.
+// The UI has the user find the template's name in WhatsApp Manager
+// first.
 // ============================================================
-
-export interface TemplateLibraryBrowseArgs {
-  wabaId: string
-  accessToken: string
-  search?: string
-  topic?: string
-  usecase?: string
-  industry?: string
-  language?: string
-  name?: string
-}
-
-/**
- * A single catalog entry from `GET /<WABA_ID>/message_template_library`.
- * Meta's field set for this endpoint isn't as rigidly documented as
- * the regular templates endpoint, so beyond the fields we know we rely
- * on, everything else is passed through untyped for the preview UI to
- * read defensively.
- */
-export interface TemplateLibraryItem {
-  name: string
-  language?: string
-  category?: string
-  topic?: string
-  usecase?: string
-  industry?: string
-  [key: string]: unknown
-}
-
-/**
- * Browse Meta's Template Library, scoped to a WABA. All filters are
- * optional and passed straight through as Meta's own query params.
- */
-export async function browseTemplateLibrary(
-  args: TemplateLibraryBrowseArgs,
-): Promise<TemplateLibraryItem[]> {
-  const { wabaId, accessToken, search, topic, usecase, industry, language, name } = args
-  const params = new URLSearchParams()
-  // Meta's own worked example wraps the search value in literal double
-  // quotes (`search="payments"`) — an unquoted value silently matches
-  // nothing.
-  if (search) params.set('search', `"${search}"`)
-  if (topic) params.set('topic', topic)
-  if (usecase) params.set('usecase', usecase)
-  if (industry) params.set('industry', industry)
-  if (language) params.set('language', language)
-  if (name) params.set('name', name)
-  const qs = params.toString()
-  // Meta's docs describe a dedicated `message_template_library` edge,
-  // but that edge doesn't actually exist on the Graph API (confirmed
-  // live via a "(#100) Tried accessing nonexisting field" error on
-  // both v21.0 and v26.0) — the docs' own worked example instead hits
-  // the regular `message_templates` edge with a `search` param, which
-  // is what we do here.
-  const url = `${META_API_BASE_LIBRARY}/${wabaId}/message_templates${qs ? `?${qs}` : ''}`
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!response.ok) {
-    await throwMetaError(response, `Meta API error: ${response.status}`)
-  }
-  const data = await response.json()
-  return Array.isArray(data?.data) ? (data.data as TemplateLibraryItem[]) : []
-}
 
 export interface LibraryButtonInput {
   type:

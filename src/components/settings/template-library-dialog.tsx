@@ -1,27 +1,20 @@
 'use client';
 
 /**
- * Browse + create from Meta's Template Library — pre-approved
- * Utility/Authentication content that skips manual App Review and
- * comes back APPROVED immediately.
+ * Browse + create from Meta's Template Library.
  *
- * Two-step flow inside one dialog:
- *   1. Browse — filter Meta's catalog (search/topic/usecase/industry/
- *      language) and pick an entry.
- *   2. Configure — give it a local name (Meta requires a name distinct
- *      from the library entry's own name), confirm language/category,
- *      and fill in any button inputs the entry requires (a URL button
- *      needs a base_url, a phone button needs a number, etc).
- *
- * Meta's field set for the browse endpoint isn't documented as
- * rigidly as the regular templates endpoint, so item content is read
- * defensively (several fallback shapes) and a raw-JSON toggle is
- * offered so a user isn't blocked by a field we didn't anticipate.
+ * Meta documents a live browse/search API for this catalog, but it
+ * returns an empty result set on real WABAs even for content
+ * confirmed to exist via WhatsApp Manager's own UI (verified against
+ * production). So the "browse" step here reads from a small,
+ * hand-verified local catalog (see template-library-catalog.ts)
+ * instead of calling Meta live — the CREATE step still hits Meta's
+ * real, documented, working endpoint.
  */
 
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Search, ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Search, ArrowLeft } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -44,52 +37,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { validateTemplateName } from '@/lib/whatsapp/template-validators';
+import {
+  TEMPLATE_LIBRARY_CATALOG,
+  type TemplateLibraryCatalogEntry,
+} from '@/lib/whatsapp/template-library-catalog';
 import type { MessageTemplate } from '@/types';
-
-const TOPICS = ['ACCOUNT_UPDATE', 'CUSTOMER_FEEDBACK', 'ORDER_MANAGEMENT', 'PAYMENTS'] as const;
-const USECASES = [
-  'ACCOUNT_CREATION_CONFIRMATION',
-  'AUTO_PAY_REMINDER',
-  'DELIVERY_CONFIRMATION',
-  'DELIVERY_FAILED',
-  'DELIVERY_UPDATE',
-  'FEEDBACK_SURVEY',
-  'FRAUD_ALERT',
-  'LOW_BALANCE_WARNING',
-  'ORDER_ACTION_NEEDED',
-  'ORDER_CONFIRMATION',
-  'ORDER_DELAY',
-  'ORDER_OR_TRANSACTION_CANCEL',
-  'ORDER_PICK_UP',
-  'PAYMENT_ACTION_REQUIRED',
-  'PAYMENT_CONFIRMATION',
-  'PAYMENT_DUE_REMINDER',
-  'PAYMENT_OVERDUE',
-  'PAYMENT_REJECT_FAIL',
-  'PAYMENT_SCHEDULED',
-  'RECEIPT_ATTACHMENT',
-  'RETURN_CONFIRMATION',
-  'STATEMENT_AVAILABLE',
-  'TRANSACTION_ALERT',
-] as const;
-const INDUSTRIES = ['E_COMMERCE', 'FINANCIAL_SERVICES'] as const;
-const CATEGORIES = ['UTILITY', 'AUTHENTICATION', 'MARKETING'] as const;
-
-/** Loosely-typed catalog entry — see file header re: undocumented shape. */
-interface LibraryItem {
-  name: string;
-  language?: string;
-  category?: string;
-  topic?: string;
-  usecase?: string;
-  industry?: string;
-  [key: string]: unknown;
-}
-
-interface LibraryButtonDescriptor {
-  type: string;
-  text?: string;
-}
 
 function humanize(name: string): string {
   return name
@@ -99,53 +51,14 @@ function humanize(name: string): string {
     .join(' ');
 }
 
-function findComponentText(item: LibraryItem, type: string): string | undefined {
-  const components = Array.isArray(item.components) ? (item.components as Record<string, unknown>[]) : [];
-  const comp = components.find((c) => c?.type === type);
-  return typeof comp?.text === 'string' ? comp.text : undefined;
-}
+const TOPICS = Array.from(new Set(TEMPLATE_LIBRARY_CATALOG.map((e) => e.topic))).sort();
+const USECASES = Array.from(new Set(TEMPLATE_LIBRARY_CATALOG.map((e) => e.usecase))).sort();
+const INDUSTRIES = Array.from(new Set(TEMPLATE_LIBRARY_CATALOG.map((e) => e.industry))).sort();
+const CATEGORIES = ['UTILITY', 'AUTHENTICATION', 'MARKETING'] as const;
 
-function getBodyPreview(item: LibraryItem): string | undefined {
-  return (
-    findComponentText(item, 'BODY') ||
-    (typeof item.body_text === 'string' ? item.body_text : undefined) ||
-    (typeof item.body === 'string' ? item.body : undefined)
-  );
-}
-
-function getHeaderPreview(item: LibraryItem): string | undefined {
-  return (
-    findComponentText(item, 'HEADER') ||
-    (typeof item.header_text === 'string' ? item.header_text : undefined) ||
-    (typeof item.header === 'string' ? item.header : undefined)
-  );
-}
-
-function getFooterPreview(item: LibraryItem): string | undefined {
-  return (
-    findComponentText(item, 'FOOTER') ||
-    (typeof item.footer_text === 'string' ? item.footer_text : undefined) ||
-    (typeof item.footer === 'string' ? item.footer : undefined)
-  );
-}
-
-function getButtonDescriptors(item: LibraryItem): LibraryButtonDescriptor[] {
-  if (Array.isArray(item.buttons)) {
-    return (item.buttons as Record<string, unknown>[])
-      .filter((b) => typeof b?.type === 'string')
-      .map((b) => ({ type: b.type as string, text: typeof b.text === 'string' ? b.text : undefined }));
-  }
-  const components = Array.isArray(item.components) ? (item.components as Record<string, unknown>[]) : [];
-  const buttonsComp = components.find((c) => c?.type === 'BUTTONS');
-  const raw = Array.isArray(buttonsComp?.buttons) ? (buttonsComp!.buttons as Record<string, unknown>[]) : [];
-  return raw
-    .filter((b) => typeof b?.type === 'string')
-    .map((b) => ({ type: b.type as string, text: typeof b.text === 'string' ? b.text : undefined }));
-}
-
-/** Editable state for a single button that needs input to create the template. */
+/** Editable state for a single button input Meta needs to fill in the library template. */
 interface ButtonInputForm {
-  type: string;
+  type: 'URL' | 'PHONE_NUMBER' | 'OTP';
   baseUrl?: string;
   urlSuffixExample?: string;
   phoneNumber?: string;
@@ -153,12 +66,14 @@ interface ButtonInputForm {
   zeroTapTermsAccepted?: boolean;
 }
 
-function buildButtonInputForms(descriptors: LibraryButtonDescriptor[]): ButtonInputForm[] {
-  return descriptors
-    .filter((d) => d.type === 'URL' || d.type === 'PHONE_NUMBER' || d.type === 'OTP')
-    .map((d) => ({
-      type: d.type,
-      otpType: d.type === 'OTP' ? 'COPY_CODE' : undefined,
+function buildButtonInputForms(entry: TemplateLibraryCatalogEntry): ButtonInputForm[] {
+  return (entry.buttons ?? [])
+    .filter((b) => b.type === 'URL' || b.type === 'PHONE_NUMBER' || b.type === 'OTP')
+    .map((b) => ({
+      type: b.type as 'URL' | 'PHONE_NUMBER' | 'OTP',
+      baseUrl: b.type === 'URL' ? b.url ?? '' : undefined,
+      phoneNumber: b.type === 'PHONE_NUMBER' ? b.phoneNumber ?? '' : undefined,
+      otpType: b.type === 'OTP' ? 'COPY_CODE' : undefined,
     }));
 }
 
@@ -172,71 +87,49 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
   const t = useTranslations('Settings.templates.library');
 
   const [search, setSearch] = useState('');
-  const [topic, setTopic] = useState<string>('');
-  const [usecase, setUsecase] = useState<string>('');
-  const [industry, setIndustry] = useState<string>('');
-  const [browsing, setBrowsing] = useState(false);
-  const [items, setItems] = useState<LibraryItem[]>([]);
-  const [searched, setSearched] = useState(false);
+  const [topic, setTopic] = useState('');
+  const [usecase, setUsecase] = useState('');
+  const [industry, setIndustry] = useState('');
 
-  const [selected, setSelected] = useState<LibraryItem | null>(null);
-  const [showRaw, setShowRaw] = useState(false);
+  const [selected, setSelected] = useState<TemplateLibraryCatalogEntry | null>(null);
   const [name, setName] = useState('');
   const [language, setLanguage] = useState('en_US');
   const [category, setCategory] = useState<string>('UTILITY');
   const [buttonInputs, setButtonInputs] = useState<ButtonInputForm[]>([]);
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    if (!open) {
-      // Reset everything on close so re-opening starts fresh.
-      setSelected(null);
-      setItems([]);
-      setSearched(false);
-      setSearch('');
-      setTopic('');
-      setUsecase('');
-      setIndustry('');
-      setShowRaw(false);
-    }
-  }, [open]);
+  const results = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return TEMPLATE_LIBRARY_CATALOG.filter((e) => {
+      if (topic && e.topic !== topic) return false;
+      if (usecase && e.usecase !== usecase) return false;
+      if (industry && e.industry !== industry) return false;
+      if (q) {
+        const haystack = `${e.name} ${e.header ?? ''} ${e.body} ${e.footer ?? ''}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [search, topic, usecase, industry]);
 
-  async function runBrowse() {
-    // The browse call is really the account's own `message_templates`
-    // edge with library-specific filters layered on — calling it with
-    // none of them set just returns the account's already-created
-    // templates, not Meta's library catalog. Require at least one.
-    if (!search.trim() && !topic && !usecase && !industry) {
-      toast.error(t('toastFilterRequired'));
-      return;
-    }
-    setBrowsing(true);
-    try {
-      const params = new URLSearchParams();
-      if (search.trim()) params.set('search', search.trim());
-      if (topic) params.set('topic', topic);
-      if (usecase) params.set('usecase', usecase);
-      if (industry) params.set('industry', industry);
-      const res = await fetch(`/api/whatsapp/templates/library?${params.toString()}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `Browse failed (HTTP ${res.status})`);
-      setItems(Array.isArray(data.items) ? data.items : []);
-      setSearched(true);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('toastBrowseFailed'));
-    } finally {
-      setBrowsing(false);
-    }
+  function reset() {
+    setSearch('');
+    setTopic('');
+    setUsecase('');
+    setIndustry('');
+    setSelected(null);
+    setName('');
+    setLanguage('en_US');
+    setCategory('UTILITY');
+    setButtonInputs([]);
   }
 
-  function selectItem(item: LibraryItem) {
-    setSelected(item);
+  function selectEntry(entry: TemplateLibraryCatalogEntry) {
+    setSelected(entry);
     setName('');
-    setLanguage(item.language || 'en_US');
-    const cat = (item.category || 'UTILITY').toUpperCase();
-    setCategory(CATEGORIES.includes(cat as typeof CATEGORIES[number]) ? cat : 'UTILITY');
-    setButtonInputs(buildButtonInputForms(getButtonDescriptors(item)));
-    setShowRaw(false);
+    setLanguage(entry.language);
+    setCategory(entry.category);
+    setButtonInputs(buildButtonInputForms(entry));
   }
 
   function updateButtonInput(index: number, patch: Partial<ButtonInputForm>) {
@@ -311,6 +204,7 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
       if (!res.ok) throw new Error(data?.error || `Create failed (HTTP ${res.status})`);
       toast.success(t('toastCreateSuccess'));
       if (data.template) onCreated(data.template as MessageTemplate);
+      reset();
       onOpenChange(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('toastCreateFailed'));
@@ -320,11 +214,17 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+        if (!next) reset();
+      }}
+    >
       <DialogContent className="bg-popover border-border sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-popover-foreground">
-            {selected ? t('configureTitle') : t('browseTitle')}
+            {selected ? t('configureTitle') : t('browseTitleDialog')}
           </DialogTitle>
           <DialogDescription className="text-muted-foreground">
             {selected ? t('configureDesc') : t('browseDesc')}
@@ -338,9 +238,6 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
                 placeholder={t('searchPlaceholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') void runBrowse();
-                }}
                 className="bg-muted border-border text-foreground placeholder:text-muted-foreground sm:col-span-2"
               />
               <Select value={topic || '__all'} onValueChange={(v) => setTopic(!v || v === '__all' ? '' : v)}>
@@ -388,52 +285,41 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
                   ))}
                 </SelectContent>
               </Select>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void runBrowse()}
-                disabled={browsing}
-                className="border-border"
-              >
-                {browsing ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                {t('search')}
-              </Button>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Search className="size-3.5 shrink-0" />
+                {t('resultsCount', { count: results.length, total: TEMPLATE_LIBRARY_CATALOG.length })}
+              </div>
             </div>
 
             <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-              {browsing ? (
-                <div className="flex items-center justify-center py-10">
-                  <Loader2 className="size-6 animate-spin text-primary" />
-                </div>
-              ) : items.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">
-                  {searched ? t('noResults') : t('searchPrompt')}
-                </p>
+              {results.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">{t('noResults')}</p>
               ) : (
-                items.map((item, i) => {
-                  const body = getBodyPreview(item);
-                  return (
-                    <button
-                      key={`${item.name}-${i}`}
-                      type="button"
-                      onClick={() => selectItem(item)}
-                      className="w-full text-left rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/60 transition-colors"
-                    >
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        <span className="font-medium text-foreground text-sm">{humanize(item.name)}</span>
-                        {item.category && <Badge className="text-[10px]">{item.category}</Badge>}
-                        {item.topic && <Badge className="text-[10px]" variant="outline">{humanize(item.topic)}</Badge>}
-                        {item.usecase && <Badge className="text-[10px]" variant="outline">{humanize(item.usecase)}</Badge>}
-                        {item.language && (
-                          <span className="text-[10px] text-muted-foreground uppercase">{item.language}</span>
-                        )}
-                      </div>
-                      {body && <p className="text-xs text-muted-foreground line-clamp-2">{body}</p>}
-                    </button>
-                  );
-                })
+                results.map((entry) => (
+                  <button
+                    key={entry.name}
+                    type="button"
+                    onClick={() => selectEntry(entry)}
+                    className="w-full text-left rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/60 transition-colors"
+                  >
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <span className="font-medium text-foreground text-sm">{humanize(entry.name)}</span>
+                      <Badge className="text-[10px]">{entry.category}</Badge>
+                      <Badge className="text-[10px]" variant="outline">{humanize(entry.topic)}</Badge>
+                      <span className="text-[10px] text-muted-foreground uppercase">{entry.language}</span>
+                    </div>
+                    {entry.header && (
+                      <p className="text-xs font-medium text-foreground">{entry.header}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-line">{entry.body}</p>
+                  </button>
+                ))
               )}
             </div>
+
+            <p className="text-[11px] text-muted-foreground border-t border-border pt-2">
+              {t('catalogDisclaimer', { count: TEMPLATE_LIBRARY_CATALOG.length })}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -449,37 +335,23 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
             </Button>
 
             <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-1">
-              {getHeaderPreview(selected) && (
-                <p className="text-sm font-semibold text-foreground">{getHeaderPreview(selected)}</p>
+              {selected.header && (
+                <p className="text-sm font-semibold text-foreground">{selected.header}</p>
               )}
-              {getBodyPreview(selected) && (
-                <p className="text-sm text-foreground whitespace-pre-wrap">{getBodyPreview(selected)}</p>
+              <p className="text-sm text-foreground whitespace-pre-wrap">{selected.body}</p>
+              {selected.footer && (
+                <p className="text-xs text-muted-foreground italic">{selected.footer}</p>
               )}
-              {getFooterPreview(selected) && (
-                <p className="text-xs text-muted-foreground italic">{getFooterPreview(selected)}</p>
-              )}
-              {getButtonDescriptors(selected).length > 0 && (
+              {selected.buttons && selected.buttons.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {getButtonDescriptors(selected).map((b, i) => (
+                  {selected.buttons.map((b, i) => (
                     <Badge key={i} variant="outline" className="text-[10px]">
-                      {b.text || b.type}
+                      {b.text}
                     </Badge>
                   ))}
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => setShowRaw((v) => !v)}
-                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground pt-1"
-              >
-                {showRaw ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                {t('rawDetails')}
-              </button>
-              {showRaw && (
-                <pre className="text-[10px] text-muted-foreground bg-background/60 rounded p-2 overflow-x-auto max-h-40">
-                  {JSON.stringify(selected, null, 2)}
-                </pre>
-              )}
+              <p className="text-[10px] text-muted-foreground font-mono pt-1">{selected.name}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
