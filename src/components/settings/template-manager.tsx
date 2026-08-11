@@ -12,6 +12,7 @@ import {
   Pencil,
   RotateCcw,
   Upload,
+  BookOpen,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -27,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { useTranslations } from 'next-intl';
 import { Card, CardContent } from '@/components/ui/card';
 import { SettingsPanelHead } from './settings-panel-head';
+import { TemplateLibraryDialog } from './template-library-dialog';
 import {
   Dialog,
   DialogContent,
@@ -167,6 +169,7 @@ export function TemplateManager() {
   const [loading, setLoading] = useState(true);
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [libraryDialogOpen, setLibraryDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [form, setForm] = useState<TemplateFormData>(emptyForm);
@@ -701,12 +704,28 @@ export function TemplateManager() {
               <RefreshCw className={`size-4 ${syncing ? 'animate-spin' : ''}`} />
               {syncing ? t('syncing') : t('syncFromMeta')}
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => setLibraryDialogOpen(true)}
+              title={t('library.browseTitle')}
+            >
+              <BookOpen className="size-4" />
+              {t('library.browseButton')}
+            </Button>
             <Button onClick={openCreate}>
               <Plus className="size-4" />
               {t('newTemplate')}
             </Button>
           </div>
         }
+      />
+
+      <TemplateLibraryDialog
+        open={libraryDialogOpen}
+        onOpenChange={setLibraryDialogOpen}
+        onCreated={(template) => {
+          setTemplates((prev) => [template, ...prev.filter((tpl) => tpl.id !== template.id)]);
+        }}
       />
 
       {templates.length === 0 ? (

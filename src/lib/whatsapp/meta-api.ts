@@ -11,6 +11,16 @@
 
 const META_API_VERSION = 'v21.0'
 const META_API_BASE = `https://graph.facebook.com/${META_API_VERSION}`
+/**
+ * Template Library is a newer Graph API surface than the rest of this
+ * file targets — Meta's own docs example the browse/create calls
+ * against v26.0, and v21.0 (this file's default) returns `(#100)
+ * Tried accessing nonexisting field (message_template_library)`.
+ * Scoped to just those two calls so every other Meta integration here
+ * (sends, template submit, webhooks) stays pinned to the
+ * already-verified v21.0.
+ */
+const META_API_BASE_LIBRARY = `https://graph.facebook.com/v26.0`
 
 export interface MetaSendResult {
   messageId: string
@@ -767,6 +777,171 @@ export async function submitMessageTemplate(
   return {
     id: String(data.id),
     status: typeof data.status === 'string' ? data.status : 'PENDING',
+    category: typeof data.category === 'string' ? data.category : undefined,
+  }
+}
+
+// ============================================================
+// Template Library — Meta's pre-approved template content
+// (Utility/Authentication copy that skips manual App Review).
+// Spec: "Template Library | Developer Documentation".
+// ============================================================
+
+export interface TemplateLibraryBrowseArgs {
+  wabaId: string
+  accessToken: string
+  search?: string
+  topic?: string
+  usecase?: string
+  industry?: string
+  language?: string
+  name?: string
+}
+
+/**
+ * A single catalog entry from `GET /<WABA_ID>/message_template_library`.
+ * Meta's field set for this endpoint isn't as rigidly documented as
+ * the regular templates endpoint, so beyond the fields we know we rely
+ * on, everything else is passed through untyped for the preview UI to
+ * read defensively.
+ */
+export interface TemplateLibraryItem {
+  name: string
+  language?: string
+  category?: string
+  topic?: string
+  usecase?: string
+  industry?: string
+  [key: string]: unknown
+}
+
+/**
+ * Browse Meta's Template Library, scoped to a WABA. All filters are
+ * optional and passed straight through as Meta's own query params.
+ */
+export async function browseTemplateLibrary(
+  args: TemplateLibraryBrowseArgs,
+): Promise<TemplateLibraryItem[]> {
+  const { wabaId, accessToken, search, topic, usecase, industry, language, name } = args
+  const params = new URLSearchParams()
+  // Meta's own worked example wraps the search value in literal double
+  // quotes (`search="payments"`) — an unquoted value silently matches
+  // nothing.
+  if (search) params.set('search', `"${search}"`)
+  if (topic) params.set('topic', topic)
+  if (usecase) params.set('usecase', usecase)
+  if (industry) params.set('industry', industry)
+  if (language) params.set('language', language)
+  if (name) params.set('name', name)
+  const qs = params.toString()
+  // Meta's docs describe a dedicated `message_template_library` edge,
+  // but that edge doesn't actually exist on the Graph API (confirmed
+  // live via a "(#100) Tried accessing nonexisting field" error on
+  // both v21.0 and v26.0) — the docs' own worked example instead hits
+  // the regular `message_templates` edge with a `search` param, which
+  // is what we do here.
+  const url = `${META_API_BASE_LIBRARY}/${wabaId}/message_templates${qs ? `?${qs}` : ''}`
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  return Array.isArray(data?.data) ? (data.data as TemplateLibraryItem[]) : []
+}
+
+export interface LibraryButtonInput {
+  type:
+    | 'QUICK_REPLY'
+    | 'URL'
+    | 'PHONE_NUMBER'
+    | 'OTP'
+    | 'MPM'
+    | 'CATALOG'
+    | 'FLOW'
+    | 'VOICE_CALL'
+    | 'APP'
+  url?: { base_url: string; url_suffix_example?: string }
+  phone_number?: string
+  otp_type?: 'COPY_CODE' | 'ONE_TAP' | 'ZERO_TAP'
+  zero_tap_terms_accepted?: boolean
+  supported_apps?: { package_name: string; signature_hash: string }[]
+}
+
+export interface LibraryBodyInputs {
+  add_contact_number?: boolean
+  add_learn_more_link?: boolean
+  add_security_recommendation?: boolean
+  add_track_package_link?: boolean
+  code_expiration_minutes?: number
+}
+
+export interface SubmitLibraryTemplateArgs {
+  wabaId: string
+  accessToken: string
+  name: string
+  category: MetaTemplateSubmitPayload['category']
+  language: string
+  libraryTemplateName: string
+  buttonInputs?: LibraryButtonInput[]
+  bodyInputs?: LibraryBodyInputs
+}
+
+/**
+ * Create a template from Meta's Template Library. Same endpoint as a
+ * from-scratch submission, but Meta supplies the header/body/footer
+ * content — we only pass the library entry's name plus button/body
+ * customization. Comes back APPROVED immediately (no review queue).
+ *
+ * `library_template_button_inputs` must be sent as a STRINGIFIED JSON
+ * array, not a native nested array — Meta's documented request shape
+ * for this one field is a string, unlike every other JSON body field.
+ */
+export async function submitLibraryTemplate(
+  args: SubmitLibraryTemplateArgs,
+): Promise<SubmitMessageTemplateResult> {
+  const {
+    wabaId,
+    accessToken,
+    name,
+    category,
+    language,
+    libraryTemplateName,
+    buttonInputs,
+    bodyInputs,
+  } = args
+  const body: Record<string, unknown> = {
+    name,
+    category,
+    language,
+    library_template_name: libraryTemplateName,
+  }
+  if (buttonInputs && buttonInputs.length > 0) {
+    body.library_template_button_inputs = JSON.stringify(buttonInputs)
+  }
+  if (bodyInputs && Object.keys(bodyInputs).length > 0) {
+    body.library_template_body_inputs = bodyInputs
+  }
+  const url = `${META_API_BASE_LIBRARY}/${wabaId}/message_templates`
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = await response.json()
+  if (!data?.id) {
+    throw new Error('Meta accepted the library template but returned no id.')
+  }
+  return {
+    id: String(data.id),
+    status: typeof data.status === 'string' ? data.status : 'APPROVED',
     category: typeof data.category === 'string' ? data.category : undefined,
   }
 }
