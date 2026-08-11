@@ -121,6 +121,14 @@ export function ConversationList({
       const { data, error } = await supabase
         .from("conversations")
         .select(CONVERSATION_SELECT)
+        // Business-initiated threads (broadcast/automation/manual template
+        // sends) don't clutter the list until the contact actually replies
+        // — see migration 064. A conversation's first-ever reply still
+        // surfaces immediately: the realtime message-INSERT handler in
+        // the Inbox page hydrates any conversation id it doesn't
+        // recognise yet via an unfiltered per-id fetch, independent of
+        // this bulk query.
+        .eq("has_customer_message", true)
         .order("last_message_at", { ascending: false });
 
       if (cancelled) return;
@@ -593,7 +601,16 @@ function ConversationItem({
       {/* Content */}
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="flex min-w-0 items-center gap-1 truncate text-sm font-medium text-foreground">
+          <span
+            className={cn(
+              "flex min-w-0 items-center gap-1 truncate text-sm text-foreground",
+              // Unread rows read heavier — same bold-name convention
+              // WhatsApp/every chat app uses so a new message is
+              // noticeable at a glance, not just a small number badge
+              // easy to miss while scanning the list.
+              conversation.unread_count > 0 ? "font-semibold" : "font-medium",
+            )}
+          >
             {conversation.is_pinned && (
               <Pin className="h-3 w-3 shrink-0 fill-current text-muted-foreground" />
             )}
@@ -628,7 +645,14 @@ function ConversationItem({
           </div>
         </div>
         <div className="mt-0.5 flex items-center justify-between gap-2">
-          <p className="truncate text-xs text-muted-foreground">
+          <p
+            className={cn(
+              "truncate text-xs",
+              conversation.unread_count > 0
+                ? "font-medium text-foreground"
+                : "text-muted-foreground",
+            )}
+          >
             {conversation.last_message_text || t("noMessagesYet")}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">

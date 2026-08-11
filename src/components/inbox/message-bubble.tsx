@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { cn } from "@/lib/utils";
-import type { Message, MessageReaction } from "@/types";
+import type { Message, MessageReaction, TemplateButton } from "@/types";
 import {
   Clock,
   Check,
@@ -14,6 +14,9 @@ import {
   ImageOff,
   CornerDownLeft,
   Sparkles,
+  Phone,
+  Reply,
+  SquareArrowOutUpRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import { ReplyQuote } from "./reply-quote";
@@ -28,6 +31,40 @@ interface MessageBubbleProps {
   reactions?: MessageReaction[];
   currentUserId?: string;
   onToggleReaction?: (emoji: string) => void;
+  /** The sent template's buttons, resolved by the parent from
+   *  `message_templates` — a `content_type: 'template'` message row
+   *  only stores `template_name`, not the button config itself. */
+  templateButtons?: TemplateButton[];
+  /** The sent template's header kind, resolved the same way as
+   *  `templateButtons` — tells the bubble how to render `media_url`
+   *  (image/video/document) when the template has a media header. */
+  templateHeaderType?: "image" | "video" | "document";
+}
+
+const buttonIcon: Record<TemplateButton["type"], React.ElementType> = {
+  URL: SquareArrowOutUpRight,
+  PHONE_NUMBER: Phone,
+  COPY_CODE: FileText,
+  QUICK_REPLY: Reply,
+};
+
+function TemplateButtonsList({ buttons }: { buttons: TemplateButton[] }) {
+  return (
+    <div className="-mx-3 -mb-2 mt-2">
+      {buttons.map((btn, i) => {
+        const Icon = buttonIcon[btn.type];
+        return (
+          <div
+            key={i}
+            className="flex items-center justify-center gap-1.5 border-t border-current/10 px-3 py-1.5 text-[12px] font-medium"
+          >
+            <Icon className="h-3 w-3 shrink-0" />
+            <span className="truncate">{btn.text}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function StatusIcon({ status }: { status: Message["status"] }) {
@@ -119,7 +156,17 @@ function MediaImage({ url, alt }: { url: string; alt: string }) {
   );
 }
 
-function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof useTranslations> }) {
+function MessageContent({
+  message,
+  t,
+  templateButtons,
+  templateHeaderType,
+}: {
+  message: Message;
+  t: ReturnType<typeof useTranslations>;
+  templateButtons?: TemplateButton[];
+  templateHeaderType?: "image" | "video" | "document";
+}) {
   switch (message.content_type) {
     case "text":
       return (
@@ -200,10 +247,40 @@ function MessageContent({ message, t }: { message: Message, t: ReturnType<typeof
             <LayoutTemplate className="h-3 w-3" />
             {t("template")}
           </span>
+          {templateHeaderType === "image" &&
+            (message.media_url ? (
+              <MediaImage url={message.media_url} alt="Template header" />
+            ) : (
+              <MediaUnavailable label={t("photo")} t={t} />
+            ))}
+          {templateHeaderType === "video" &&
+            (message.media_url ? (
+              <video
+                src={message.media_url}
+                controls
+                className="max-h-64 max-w-60 rounded-lg"
+              />
+            ) : (
+              <MediaUnavailable label={t("video")} t={t} />
+            ))}
+          {templateHeaderType === "document" && message.media_url && (
+            <a
+              href={message.media_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-sm hover:bg-muted"
+            >
+              <FileText className="h-5 w-5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{t("document")}</span>
+            </a>
+          )}
           {message.content_text && (
             <p className="mt-1 whitespace-pre-wrap break-words text-sm">
               {message.content_text}
             </p>
+          )}
+          {templateButtons && templateButtons.length > 0 && (
+            <TemplateButtonsList buttons={templateButtons} />
           )}
         </div>
       );
@@ -264,6 +341,8 @@ export function MessageBubble({
   reactions,
   currentUserId,
   onToggleReaction,
+  templateButtons,
+  templateHeaderType,
 }: MessageBubbleProps) {
   const t = useTranslations("Inbox.bubble");
 
@@ -294,7 +373,12 @@ export function MessageBubble({
             onPrimary={isAgent}
           />
         )}
-        <MessageContent message={message} t={t} />
+        <MessageContent
+          message={message}
+          t={t}
+          templateButtons={templateButtons}
+          templateHeaderType={templateHeaderType}
+        />
         <div
           className={cn(
             "mt-1 flex items-center gap-1",

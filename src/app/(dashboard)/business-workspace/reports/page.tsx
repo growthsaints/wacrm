@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Loader2, MessageSquareText } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -55,18 +57,27 @@ export default function ReportsPage() {
           One consolidated report per period — customer, lead, performance,
           and activity numbers together rather than six separate reports.
         </p>
-        <Select value={period} onValueChange={(v) => setPeriod((v as ReportPeriod) ?? "weekly")}>
-          <SelectTrigger className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {PERIODS.map((p) => (
-              <SelectItem key={p.value} value={p.value}>
-                {p.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/business-workspace/reports/message-history"
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            <MessageSquareText className="size-3.5" />
+            Message History
+          </Link>
+          <Select value={period} onValueChange={(v) => setPeriod((v as ReportPeriod) ?? "weekly")}>
+            <SelectTrigger className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PERIODS.map((p) => (
+                <SelectItem key={p.value} value={p.value}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {loading || !report ? (

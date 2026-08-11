@@ -6,6 +6,8 @@ import {
   useCallback,
   useEffect,
   KeyboardEvent,
+  ClipboardEvent,
+  DragEvent,
 } from "react";
 import {
   Send,
@@ -100,6 +102,21 @@ const PICKER_ACCEPT: Record<"image" | "video" | "document", string> = {
     "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain",
 };
 
+/**
+ * Paste/drop have no "which attach button" context the picker inputs
+ * get for free, so the kind is inferred from the file's own MIME type
+ * — checked against the exact same allow-list as PICKER_ACCEPT so a
+ * pasted/dropped file is held to the same standard as one chosen
+ * through the picker, rather than reaching stageUpload's Storage-level
+ * rejection with a less clear error.
+ */
+function kindFromMimeType(mimeType: string): ComposerMediaKind | null {
+  if (PICKER_ACCEPT.image.split(",").includes(mimeType)) return "image";
+  if (PICKER_ACCEPT.video.split(",").includes(mimeType)) return "video";
+  if (PICKER_ACCEPT.document.split(",").includes(mimeType)) return "document";
+  return null;
+}
+
 interface MediaDraft {
   kind: ComposerMediaKind;
   mediaUrl: string;
@@ -175,6 +192,11 @@ export function MessageComposer({
     if (!path) return;
     void deleteAccountMedia(CHAT_MEDIA_BUCKET, path).catch(() => {});
   }, []);
+
+  // Drag-and-drop visual feedback only — the actual file handling is
+  // handleExternalFile, shared with paste.
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragDepthRef = useRef(0);
 
   // Voice recording state. The recorder encodes Ogg/Opus in-browser
   // (opus-recorder) so there's no server-side transcode.
@@ -418,6 +440,68 @@ export function MessageComposer({
     [stageUpload],
   );
 
+  // Shared by paste (clipboard image/file) and drag-and-drop — same
+  // staging path the attach-menu pickers use, just with the kind
+  // inferred from the file's own MIME type instead of "which button
+  // was clicked."
+  const handleExternalFile = useCallback(
+    (file: File) => {
+      if (inputsDisabled || busy) return;
+      const kind = kindFromMimeType(file.type);
+      if (!kind) {
+        toast.error(
+          file.type
+            ? `Unsupported file type: ${file.type}`
+            : "Unsupported file type.",
+        );
+        return;
+      }
+      void stageUpload(kind, file);
+    },
+    [inputsDisabled, busy, stageUpload],
+  );
+
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLTextAreaElement>) => {
+      const file = Array.from(e.clipboardData.items)
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile())
+        .find((f): f is File => f !== null);
+      if (!file) return; // plain text paste — let the default behavior run
+      e.preventDefault();
+      handleExternalFile(file);
+    },
+    [handleExternalFile],
+  );
+
+  const handleDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      dragDepthRef.current = 0;
+      setIsDraggingOver(false);
+      const file = e.dataTransfer.files[0];
+      if (file) handleExternalFile(file);
+    },
+    [handleExternalFile],
+  );
+
+  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
+    // Required for onDrop to fire at all — browsers reject a drop on
+    // an element that never called preventDefault on dragover.
+    e.preventDefault();
+  }, []);
+
+  const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    dragDepthRef.current += 1;
+    setIsDraggingOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDraggingOver(false);
+  }, []);
+
   // ---- Voice recording (client-side Ogg/Opus, no server transcode) ---
 
   // The encoded Ogg/Opus file from opus-recorder → upload as an audio
@@ -536,7 +620,20 @@ export function MessageComposer({
   // ---- Render --------------------------------------------------------
 
   return (
-    <div className="border-t border-border bg-card p-3">
+    <div
+      className="relative border-t border-border bg-card p-3"
+      onDragEnter={inputsDisabled ? undefined : handleDragEnter}
+      onDragOver={inputsDisabled ? undefined : handleDragOver}
+      onDragLeave={inputsDisabled ? undefined : handleDragLeave}
+      onDrop={inputsDisabled ? undefined : handleDrop}
+    >
+      {isDraggingOver && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md border-2 border-dashed border-primary bg-primary/10">
+          <p className="text-sm font-medium text-primary">
+            {t("dropFileHere")}
+          </p>
+        </div>
+      )}
       {replyTo && (
         <div className="mb-2">
           <ReplyQuote
@@ -731,6 +828,7 @@ export function MessageComposer({
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               readOnly
                 ? t("readOnlyPlaceholder")

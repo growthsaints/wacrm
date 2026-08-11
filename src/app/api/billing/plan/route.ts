@@ -9,6 +9,11 @@ const FALLBACK_MONTHLY_RUPEES = 1416
 const FALLBACK_MONTHLY_PRO_RUPEES = 1770
 const FALLBACK_QUARTERLY_RUPEES = 3540
 
+// Grace period before the "please subscribe" banner appears for an
+// account that has never paid and was never comped by a Super Admin
+// (plan_free_granted) — see the trialExpired computation below.
+const TRIAL_DAYS = 14
+
 async function planAmountRupees(planId: string | undefined, keyId: string | undefined, keySecret: string | undefined, fallback: number): Promise<number> {
   if (!planId || !keyId || !keySecret) return fallback
   try {
@@ -40,13 +45,23 @@ export async function GET() {
     const { data, error } = await supabase
       .from('accounts')
       .select(
-        'plan_type, plan_status, plan_expires_at, managed_renewals_used, managed_renewals_max, razorpay_plan_id',
+        'created_at, plan_type, plan_status, plan_expires_at, plan_free_granted, managed_renewals_used, managed_renewals_max, razorpay_plan_id',
       )
       .eq('id', accountId)
       .single()
     if (error || !data) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
+
+    // Banner-only nag (see TrialBanner) — never blocks access. Active
+    // once a paid plan is confirmed (plan_status active, not expired)
+    // or a Super Admin has explicitly comped the account
+    // (plan_free_granted); otherwise flips on TRIAL_DAYS after signup.
+    const planExpired = data.plan_expires_at ? new Date(data.plan_expires_at).getTime() < Date.now() : false
+    const hasActivePaidPlan = data.plan_status === 'active' && !planExpired
+    const trialWindowPassed =
+      Date.now() - new Date(data.created_at).getTime() > TRIAL_DAYS * 24 * 60 * 60 * 1000
+    const trialExpired = !hasActivePaidPlan && !data.plan_free_granted && trialWindowPassed
 
     const keyId = process.env.RAZORPAY_KEY_ID
     const keySecret = process.env.RAZORPAY_KEY_SECRET
@@ -67,6 +82,7 @@ export async function GET() {
       planType: data.plan_type,
       planStatus: data.plan_status,
       planExpiresAt: data.plan_expires_at,
+      trialExpired,
       managedRenewalsUsed: data.managed_renewals_used,
       managedRenewalsMax: data.managed_renewals_max,
       monthlyAmount,

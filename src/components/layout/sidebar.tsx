@@ -254,7 +254,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 pathname === item.href ||
                 (item.href !== "/dashboard" && pathname.startsWith(item.href));
 
-              const showUnreadDot =
+              const showUnreadBadge =
                 item.href === "/inbox" && totalUnread > 0 && !isActive;
 
               // Unlike the inbox dot, the notifications count stays visible
@@ -289,13 +289,12 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                           className="hidden lg:block lg:absolute lg:-top-0.5 lg:-right-0.5 lg:h-1.5 lg:w-1.5 lg:rounded-full lg:bg-amber-400"
                         />
                       )}
-                      {showUnreadDot && (
+                      {showUnreadBadge && (
                         <span
                           aria-hidden
-                          className="absolute -top-0.5 -right-0.5 flex h-2 w-2 lg:h-1.5 lg:w-1.5"
+                          className="absolute -top-1.5 -right-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground lg:-top-1 lg:-right-1.5 lg:h-3.5 lg:min-w-3.5 lg:px-0.5 lg:text-[8px]"
                         >
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                          <span className="relative inline-flex h-full w-full rounded-full bg-primary" />
+                          {totalUnread > 99 ? "99+" : totalUnread}
                         </span>
                       )}
                       {showNotificationBadge && (

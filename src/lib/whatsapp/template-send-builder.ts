@@ -90,6 +90,19 @@ type MetaSendParameter =
   | { type: 'coupon_code'; coupon_code: string }
   | { type: 'payload'; payload: string };
 
+/**
+ * Renders `{{N}}` placeholders with their resolved values for display
+ * purposes — e.g. saving a readable copy of a sent template into the
+ * `messages` table. Not used for the Meta send payload itself (see
+ * `buildBodyComponent` for that).
+ */
+export function renderTemplateBodyText(bodyText: string, values: string[]): string {
+  return bodyText.replace(/\{\{(\d+)\}\}/g, (_, raw) => {
+    const idx = Number(raw) - 1;
+    return values[idx] ?? `{{${raw}}}`;
+  });
+}
+
 function buildHeaderComponent(
   template: MessageTemplate,
   params: SendTimeParams,

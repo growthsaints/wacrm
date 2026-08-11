@@ -161,6 +161,7 @@ export function ImportModal({
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{
     imported: number;
+    updated: number;
     skipped: number;
     failed: number;
     tagsAssigned: number;
@@ -239,6 +240,7 @@ export function ImportModal({
         throw new Error('Your profile is not linked to an account.');
 
       let imported = 0;
+      let updated = 0;
       let skipped = 0;
       let failed = 0;
 
@@ -246,31 +248,40 @@ export function ImportModal({
       const { unique, duplicates: inFileDupes } = dedupeByPhone(parsedRows);
       skipped += inFileDupes;
 
-      // 2) Skip numbers already in this account. One read of the
-      //    generated `phone_normalized` column (migration 022) → Set.
+      // 2) Split into genuinely-new rows vs. rows matching a contact
+      //    already in this account (re-importing the same list with
+      //    updated details should refresh that contact, not silently
+      //    skip it — one read of the generated `phone_normalized`
+      //    column, migration 022, keyed to the existing row's id so the
+      //    update path below knows which row to touch).
       const { data: existingRows } = await supabase
         .from('contacts')
-        .select('phone_normalized')
+        .select('id, phone_normalized')
         .eq('account_id', accountId);
-      const existing = new Set(
-        (existingRows ?? [])
-          .map(
-            (r) => (r as { phone_normalized: string | null }).phone_normalized
-          )
-          .filter((p): p is string => !!p)
-      );
+      const existingIdByPhone = new Map<string, string>();
+      for (const r of (existingRows ?? []) as {
+        id: string;
+        phone_normalized: string | null;
+      }[]) {
+        if (r.phone_normalized) existingIdByPhone.set(r.phone_normalized, r.id);
+      }
 
-      const toInsert = unique.filter((row) => {
-        if (existing.has(normalizeKey(row.phone))) {
-          skipped++;
-          return false;
+      const toInsert: ParsedContactRow[] = [];
+      const toUpdate: { id: string; row: ParsedContactRow }[] = [];
+      for (const row of unique) {
+        const existingId = existingIdByPhone.get(normalizeKey(row.phone));
+        if (existingId) {
+          toUpdate.push({ id: existingId, row });
+        } else {
+          toInsert.push(row);
         }
-        return true;
-      });
+      }
 
       // 3) Resolve tag names → ids (admin+ may auto-create missing tags).
       //    Skip the round-trip when the import carries no tag names.
-      const allTagNames = toInsert.flatMap((row) => row.tagNames);
+      const allTagNames = [...toInsert, ...toUpdate.map((u) => u.row)].flatMap(
+        (row) => row.tagNames
+      );
       let tagIdByKey = new Map<string, string>();
       let skippedNames: string[] = [];
       if (allTagNames.length > 0) {
@@ -283,6 +294,33 @@ export function ImportModal({
       }
 
       const tagAssignments: ContactTagAssignment[] = [];
+
+      // 3b) Update rows that matched an existing contact by phone.
+      //     Only overwrite a field when the CSV actually supplied a
+      //     value — an empty cell must never blank out data the
+      //     contact already has. Tags are additive (assignImportedContactTags
+      //     upserts with ignoreDuplicates), never removed.
+      for (const { id, row } of toUpdate) {
+        const patch: Record<string, string> = {};
+        if (row.name?.trim()) patch.name = row.name.trim();
+        if (row.email?.trim()) patch.email = row.email.trim();
+        if (row.company?.trim()) patch.company = row.company.trim();
+
+        if (Object.keys(patch).length > 0) {
+          const { error } = await supabase
+            .from('contacts')
+            .update(patch)
+            .eq('id', id);
+          if (error) {
+            failed++;
+            continue;
+          }
+        }
+        updated++;
+        if (row.tagNames.length > 0) {
+          tagAssignments.push({ contactId: id, tagNames: row.tagNames });
+        }
+      }
 
       // 4) Batch insert the genuinely-new rows in chunks of 50. The DB
       //    unique index is the backstop: a 23505 (race, or a format
@@ -362,9 +400,14 @@ export function ImportModal({
         toast.warning(t('toastTagsWarning'));
       }
 
-      setResult({ imported, skipped, failed, tagsAssigned });
+      setResult({ imported, updated, skipped, failed, tagsAssigned });
       if (imported > 0) {
         toast.success(t('toastImported', { count: imported }));
+      }
+      if (updated > 0) {
+        toast.success(t('toastUpdated', { count: updated }));
+      }
+      if (imported > 0 || updated > 0) {
         onImported();
       }
       if (tagsAssigned > 0) {
@@ -600,6 +643,12 @@ export function ImportModal({
                   <div className="text-primary flex items-center gap-1.5 text-sm">
                     <CheckCircle className="size-4 shrink-0" />
                     {t('resultImported', { count: result.imported })}
+                  </div>
+                )}
+                {result.updated > 0 && (
+                  <div className="flex items-center gap-1.5 text-sm text-blue-400">
+                    <CheckCircle className="size-4 shrink-0" />
+                    {t('resultUpdated', { count: result.updated })}
                   </div>
                 )}
                 {result.tagsAssigned > 0 && (

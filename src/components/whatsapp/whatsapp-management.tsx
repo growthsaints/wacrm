@@ -28,6 +28,8 @@ import { computeHealthStatus, describeEmbeddedSignupError, type WhatsAppHealthSt
 import { dailyCapForTier, formatMessagingLimit } from '@/lib/whatsapp/messaging-limit';
 import { createClient } from '@/lib/supabase/client';
 import type { WhatsAppConfig as WhatsAppConfigType } from '@/types';
+import { useAuth } from '@/hooks/use-auth';
+import { useWhatsAppAccountAlert } from '@/hooks/use-whatsapp-account-alert';
 import { ConnectWhatsAppButton } from './connect-whatsapp-button';
 
 function fmtDateTime(iso: string | null | undefined): string | null {
@@ -92,6 +94,8 @@ export function WhatsAppManagement({
   onChanged: () => void;
 }) {
   const t = useTranslations('Settings.whatsappManagement');
+  const { canEditSettings } = useAuth();
+  const accountAlert = useWhatsAppAccountAlert(canEditSettings);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -216,6 +220,24 @@ export function WhatsAppManagement({
         </div>
         <HealthBadge status={health} t={t} />
       </div>
+
+      {/* A flagged Meta account-level webhook event (account_review_update,
+          account_alerts, phone_number_quality_update, etc. whose raw
+          payload matched a ban/restrict/disable-shaped keyword) — see
+          useWhatsAppAccountAlert for why this doesn't assert a specific
+          ban/restriction. Independent of `health`: Meta can flag an
+          account-level event without the phone's own quality_rating or
+          registration state changing at all. */}
+      {accountAlert && (
+        <div className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          <p>
+            {t('accountAlertDesc', {
+              date: new Date(accountAlert.created_at).toLocaleDateString(),
+            })}
+          </p>
+        </div>
+      )}
 
       {/* The connect flow's own toast explaining an action_needed state
           (e.g. a PIN mismatch) only shows once, right after the attempt,

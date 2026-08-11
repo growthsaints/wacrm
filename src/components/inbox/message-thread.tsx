@@ -17,6 +17,7 @@ import type {
   MessageTemplate,
   Profile,
   InteractiveMessagePayload,
+  TemplateButton,
 } from "@/types";
 import {
   MessageSquare,
@@ -732,6 +733,67 @@ export function MessageThread({
     return map;
   }, [reactions]);
 
+  // A `content_type: 'template'` message row only stores `template_name`
+  // (not the button config that was actually sent), so buttons render by
+  // looking the name up against `message_templates` — one batched query
+  // per distinct name in the visible thread rather than per message.
+  const templateNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const m of messages) {
+      if (m.content_type === "template" && m.template_name) names.add(m.template_name);
+    }
+    return [...names];
+  }, [messages]);
+
+  const [templateButtonsByName, setTemplateButtonsByName] = useState<
+    Map<string, TemplateButton[]>
+  >(new Map());
+  const [templateHeaderTypeByName, setTemplateHeaderTypeByName] = useState<
+    Map<string, "image" | "video" | "document">
+  >(new Map());
+
+  useEffect(() => {
+    if (!accountId || templateNames.length === 0) {
+      setTemplateButtonsByName(new Map());
+      setTemplateHeaderTypeByName(new Map());
+      return;
+    }
+    const supabase = createClient();
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("message_templates")
+        .select("name, buttons, header_type")
+        .eq("account_id", accountId)
+        .in("name", templateNames);
+
+      if (cancelled || error || !data) return;
+
+      const buttonsMap = new Map<string, TemplateButton[]>();
+      const headerTypeMap = new Map<string, "image" | "video" | "document">();
+      for (const row of data) {
+        if (row.buttons && row.buttons.length > 0 && !buttonsMap.has(row.name)) {
+          buttonsMap.set(row.name, row.buttons as TemplateButton[]);
+        }
+        if (
+          (row.header_type === "image" ||
+            row.header_type === "video" ||
+            row.header_type === "document") &&
+          !headerTypeMap.has(row.name)
+        ) {
+          headerTypeMap.set(row.name, row.header_type);
+        }
+      }
+      setTemplateButtonsByName(buttonsMap);
+      setTemplateHeaderTypeByName(headerTypeMap);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, templateNames]);
+
   const contactDisplayName = contact?.name || contact?.phone || "Customer";
 
   // Author label for a quoted message: "You" when we sent the parent,
@@ -1125,6 +1187,16 @@ export function MessageThread({
                           reactions={msgReactions}
                           currentUserId={user?.id}
                           onToggleReaction={handlePillToggle}
+                          templateButtons={
+                            msg.template_name
+                              ? templateButtonsByName.get(msg.template_name)
+                              : undefined
+                          }
+                          templateHeaderType={
+                            msg.template_name
+                              ? templateHeaderTypeByName.get(msg.template_name)
+                              : undefined
+                          }
                         />
                       </MessageActions>
                     );

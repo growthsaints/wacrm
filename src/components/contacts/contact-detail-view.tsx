@@ -24,6 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Phone,
@@ -80,6 +81,7 @@ export function ContactDetailView({
   const [editEmail, setEditEmail] = useState('');
   const [editCompany, setEditCompany] = useState('');
   const [savingDetails, setSavingDetails] = useState(false);
+  const [savingOptOut, setSavingOptOut] = useState(false);
 
   // Tags tab
   const [allTags, setAllTags] = useState<Tag[]>([]);
@@ -258,6 +260,31 @@ export function ContactDetailView({
       onUpdated();
     }
     setSavingDetails(false);
+  }
+
+  async function toggleMarketingOptOut(nextOptedOut: boolean) {
+    if (!contactId) return;
+    setSavingOptOut(true);
+    const { error } = await supabase
+      .from('contacts')
+      .update({
+        marketing_opt_out: nextOptedOut,
+        opted_out_at: nextOptedOut ? new Date().toISOString() : null,
+      })
+      .eq('id', contactId);
+
+    if (error) {
+      toast.error(t('toastUpdateFailed'));
+    } else {
+      setContact((prev) =>
+        prev ? { ...prev, marketing_opt_out: nextOptedOut } : prev
+      );
+      toast.success(
+        nextOptedOut ? t('optedOutOfMarketing') : t('optedInToMarketing')
+      );
+      onUpdated();
+    }
+    setSavingOptOut(false);
   }
 
   async function toggleTag(tagId: string) {
@@ -582,6 +609,22 @@ export function ContactDetailView({
                     )}
                     {t('saveChangesBtn')}
                   </Button>
+
+                  <div className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/50 p-3">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium text-foreground">
+                        {t('optedOutLabel')}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {t('optedOutHint')}
+                      </p>
+                    </div>
+                    <Switch
+                      checked={!!contact?.marketing_opt_out}
+                      disabled={savingOptOut}
+                      onCheckedChange={(checked) => toggleMarketingOptOut(!!checked)}
+                    />
+                  </div>
                 </div>
               </TabsContent>
 

@@ -3,6 +3,7 @@ import { requireFeature, toErrorResponse } from '@/lib/auth/account'
 import { sendTemplateMessage } from '@/lib/whatsapp/meta-api'
 import { decrypt } from '@/lib/whatsapp/encryption'
 import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder'
+import { renderTemplateBodyText } from '@/lib/whatsapp/template-send-builder'
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard'
 import {
   sanitizePhoneForMeta,
@@ -50,6 +51,11 @@ interface BroadcastResult {
  */
 interface NewRecipient {
   phone: string
+  /** Contact row id — when present, the sent template is also saved
+   *  into that contact's conversation thread (see the messages insert
+   *  below). Absent for the legacy `phone_numbers` shape, which has no
+   *  contact context to attach a thread message to. */
+  contactId?: string
   /** Body variable values, one per {{N}}. Legacy field. */
   params?: string[]
   /**
@@ -59,6 +65,105 @@ interface NewRecipient {
    * sendTemplateMessage for the merge rules.
    */
   messageParams?: SendTimeParams
+}
+
+/**
+ * Same lookup-oldest-first-then-create pattern as the inbound
+ * webhook's findOrCreateConversation (see
+ * src/app/api/whatsapp/webhook/route.ts) — kept as a separate copy
+ * rather than a shared import because that one is written against the
+ * service-role client, while broadcasts run under the caller's
+ * RLS-scoped session client.
+ */
+async function findOrCreateConversationForBroadcast(
+  db: Awaited<ReturnType<typeof requireFeature>>['supabase'],
+  accountId: string,
+  userId: string,
+  contactId: string,
+): Promise<string | null> {
+  const { data: existingRows, error: findError } = await db
+    .from('conversations')
+    .select('id')
+    .eq('account_id', accountId)
+    .eq('contact_id', contactId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+
+  if (findError) {
+    console.error('[broadcast] error finding conversation:', findError)
+    return null
+  }
+  if (existingRows && existingRows.length > 0) {
+    return existingRows[0].id as string
+  }
+
+  const { data: newConv, error: createError } = await db
+    .from('conversations')
+    .insert({ account_id: accountId, user_id: userId, contact_id: contactId })
+    .select('id')
+    .single()
+
+  if (createError) {
+    // Lost a race with a concurrent insert (e.g. two batches of the
+    // same broadcast hitting the same contact) — re-resolve the
+    // winning row instead of dropping the message.
+    const { data: raced } = await db
+      .from('conversations')
+      .select('id')
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+    if (raced && raced.length > 0) return raced[0].id as string
+    console.error('[broadcast] error creating conversation:', createError)
+    return null
+  }
+
+  return newConv.id as string
+}
+
+/**
+ * Saves the sent template into the contact's conversation thread, same
+ * shape as a manual template send (see send-message.ts) — best-effort:
+ * the message already reached Meta, so a failure here is logged rather
+ * than thrown.
+ */
+async function recordBroadcastMessage(
+  db: Awaited<ReturnType<typeof requireFeature>>['supabase'],
+  accountId: string,
+  userId: string,
+  contactId: string,
+  templateName: string,
+  whatsappMessageId: string,
+  bodyText: string | null,
+  headerMediaUrl: string | null,
+): Promise<void> {
+  const conversationId = await findOrCreateConversationForBroadcast(db, accountId, userId, contactId)
+  if (!conversationId) return
+
+  const { error: msgError } = await db.from('messages').insert({
+    conversation_id: conversationId,
+    sender_type: 'agent',
+    content_type: 'template',
+    content_text: bodyText,
+    media_url: headerMediaUrl,
+    template_name: templateName,
+    message_id: whatsappMessageId,
+    status: 'sent',
+  })
+  if (msgError) {
+    console.error('[broadcast] error saving message to thread:', msgError)
+    return
+  }
+
+  await db
+    .from('conversations')
+    .update({
+      last_message_text: bodyText || `[${templateName}]`,
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', conversationId)
 }
 
 export async function POST(request: Request) {
@@ -236,6 +341,29 @@ export async function POST(request: Request) {
 
       if (sentMessageId) {
         await chargeWalletForSend(supabase, accountId, billingCategory)
+        if (recipient.contactId) {
+          const bodyValues = recipient.messageParams?.body ?? recipient.params ?? []
+          const bodyText = templateRow
+            ? renderTemplateBodyText(templateRow.body_text, bodyValues)
+            : null
+          const isMediaHeaderTemplate =
+            templateRow?.header_type === 'image' ||
+            templateRow?.header_type === 'video' ||
+            templateRow?.header_type === 'document'
+          const headerMediaUrl = isMediaHeaderTemplate
+            ? recipient.messageParams?.headerMediaUrl ?? templateRow?.header_media_url ?? null
+            : null
+          await recordBroadcastMessage(
+            supabase,
+            accountId,
+            userId,
+            recipient.contactId,
+            template_name,
+            sentMessageId,
+            bodyText,
+            headerMediaUrl,
+          )
+        }
         results.push({
           phone: recipient.phone,
           status: 'sent',

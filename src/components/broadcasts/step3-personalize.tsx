@@ -1,7 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
+import {
+  uploadAccountMedia,
+  MEDIA_MAX_BYTES_BY_KIND,
+} from '@/lib/storage/upload-media';
 import { Contact, CustomField, MessageTemplate } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Eye, ImageIcon, Loader2, Upload } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 type VariableType = 'static' | 'field' | 'custom_field';
@@ -49,6 +54,14 @@ type MediaHeaderType = (typeof MEDIA_HEADER_TYPES)[number];
 function isMediaHeaderType(value: unknown): value is MediaHeaderType {
   return MEDIA_HEADER_TYPES.includes(value as MediaHeaderType);
 }
+
+// Matches Meta's accepted header-media formats per type — same mapping
+// as the template editor's upload button (settings/template-manager.tsx).
+const HEADER_MEDIA_ACCEPT: Record<MediaHeaderType, { mimeTypes: string[]; accept: string }> = {
+  image: { mimeTypes: ['image/jpeg', 'image/png'], accept: 'image/jpeg,image/png' },
+  video: { mimeTypes: ['video/mp4', 'video/3gpp'], accept: 'video/mp4,video/3gpp' },
+  document: { mimeTypes: ['application/pdf'], accept: 'application/pdf' },
+};
 
 function isValidHttpUrl(value: string): boolean {
   try {
@@ -98,6 +111,10 @@ export function Step3Personalize({
     Map<string, string>
   >(new Map());
   const [loadingPreview, setLoadingPreview] = useState(true);
+  const [uploadingHeader, setUploadingHeader] = useState(false);
+  const [uploadingCardIndex, setUploadingCardIndex] = useState<number | null>(null);
+  const headerFileRef = useRef<HTMLInputElement>(null);
+  const cardFileRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   // Load user's custom fields + a representative contact for the
   // live preview. Fall back to sample data if no contacts exist yet.
@@ -174,6 +191,47 @@ export function Step3Personalize({
     if (!isValidHttpUrl(value)) return 'invalid';
     return null;
   }, [mediaHeaderType, headerMediaUrl]);
+
+  /**
+   * Uploads straight from the sender's device (same mechanism as the
+   * template editor's upload button) and fills the URL field with the
+   * result — so a broadcast can ship with fresh per-send media instead
+   * of only ever reusing the template's original approval sample.
+   */
+  async function handleHeaderMediaFile(file: File) {
+    if (!mediaHeaderType) return;
+    const { mimeTypes } = HEADER_MEDIA_ACCEPT[mediaHeaderType];
+    if (!mimeTypes.includes(file.type)) {
+      toast.error(
+        t('personalize.toastInvalidFile', {
+          format: mediaHeaderType,
+          types: mimeTypes.map((m) => m.split('/')[1]).join(' / '),
+        }),
+      );
+      return;
+    }
+    const maxBytes = MEDIA_MAX_BYTES_BY_KIND[mediaHeaderType];
+    if (file.size > maxBytes) {
+      toast.error(
+        t('personalize.toastFileTooLarge', {
+          size: (file.size / 1024 / 1024).toFixed(1),
+          format: mediaHeaderType,
+          limit: (maxBytes / 1024 / 1024).toFixed(0),
+        }),
+      );
+      return;
+    }
+    setUploadingHeader(true);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      onHeaderMediaUrlChange(publicUrl);
+      toast.success(t('personalize.toastUploadSuccess', { format: mediaHeaderType }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('personalize.toastUploadFailed'));
+    } finally {
+      setUploadingHeader(false);
+    }
+  }
 
   /**
    * A placeholder is "unmapped" if the user hasn't picked either a
@@ -263,6 +321,44 @@ export function Step3Personalize({
     });
   }
 
+  /** Per-card counterpart to handleHeaderMediaFile above. */
+  async function handleCardMediaFile(cardIndex: number, file: File) {
+    const card = cards[cardIndex];
+    if (!card) return;
+    const kind = card.header_format;
+    const { mimeTypes } = HEADER_MEDIA_ACCEPT[kind];
+    if (!mimeTypes.includes(file.type)) {
+      toast.error(
+        t('personalize.toastInvalidFile', {
+          format: kind,
+          types: mimeTypes.map((m) => m.split('/')[1]).join(' / '),
+        }),
+      );
+      return;
+    }
+    const maxBytes = MEDIA_MAX_BYTES_BY_KIND[kind];
+    if (file.size > maxBytes) {
+      toast.error(
+        t('personalize.toastFileTooLarge', {
+          size: (file.size / 1024 / 1024).toFixed(1),
+          format: kind,
+          limit: (maxBytes / 1024 / 1024).toFixed(0),
+        }),
+      );
+      return;
+    }
+    setUploadingCardIndex(cardIndex);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      onCardHeaderMediaUrlChange(cardIndex, publicUrl);
+      toast.success(t('personalize.toastUploadSuccess', { format: kind }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('personalize.toastUploadFailed'));
+    } finally {
+      setUploadingCardIndex(null);
+    }
+  }
+
   /**
    * Substitute placeholders using the first real contact where
    * possible. Placeholders keyed by "{{N}}" map to variable key "N".
@@ -325,6 +421,44 @@ export function Step3Personalize({
             <p className="text-sm font-medium text-foreground">{t('personalize.headerImage')}</p>
             <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium uppercase text-primary">
               {mediaHeaderType}
+            </span>
+          </div>
+          <div className="mb-2 flex items-center gap-2">
+            <input
+              ref={headerFileRef}
+              type="file"
+              accept={HEADER_MEDIA_ACCEPT[mediaHeaderType].accept}
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleHeaderMediaFile(f);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={uploadingHeader}
+              onClick={() => headerFileRef.current?.click()}
+            >
+              {uploadingHeader ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Upload className="h-3.5 w-3.5" />
+              )}
+              {mediaHeaderType === 'image'
+                ? t('personalize.uploadImage')
+                : mediaHeaderType === 'video'
+                  ? t('personalize.uploadVideo')
+                  : t('personalize.uploadDocument')}
+            </Button>
+            <span className="text-[11px] text-muted-foreground">
+              {mediaHeaderType === 'image'
+                ? t('personalize.uploadHint')
+                : mediaHeaderType === 'video'
+                  ? t('personalize.uploadHintVideo')
+                  : t('personalize.uploadHintDocument')}
             </span>
           </div>
           <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
@@ -489,6 +623,42 @@ export function Step3Personalize({
               </div>
 
               <div>
+                <div className="mb-2 flex items-center gap-2">
+                  <input
+                    ref={(el) => {
+                      cardFileRefs.current[ci] = el;
+                    }}
+                    type="file"
+                    accept={HEADER_MEDIA_ACCEPT[card.header_format].accept}
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleCardMediaFile(ci, f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={uploadingCardIndex === ci}
+                    onClick={() => cardFileRefs.current[ci]?.click()}
+                  >
+                    {uploadingCardIndex === ci ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Upload className="h-3.5 w-3.5" />
+                    )}
+                    {card.header_format === 'image'
+                      ? t('personalize.uploadImage')
+                      : t('personalize.uploadVideo')}
+                  </Button>
+                  <span className="text-[11px] text-muted-foreground">
+                    {card.header_format === 'image'
+                      ? t('personalize.uploadHint')
+                      : t('personalize.uploadHintVideo')}
+                  </span>
+                </div>
                 <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                   {t('personalize.imageUrl')}
                 </label>

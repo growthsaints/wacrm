@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/badge';
 import { useTranslations } from 'next-intl';
 import { Card, CardContent } from '@/components/ui/card';
 import { SettingsPanelHead } from './settings-panel-head';
+import { TemplatePreview } from './template-preview';
 import { TemplateLibraryDialog } from './template-library-dialog';
 import {
   Dialog,
@@ -183,6 +184,10 @@ export function TemplateManager() {
   // doesn't take the template off Meta as well as locally.
   const [templateToDelete, setTemplateToDelete] =
     useState<MessageTemplate | null>(null);
+  // Read-only full-content preview, opened by clicking a template
+  // card. Distinct from the edit dialog so Pending/Rejected templates
+  // (which have no Edit action) can still be inspected in full.
+  const [viewingTemplate, setViewingTemplate] = useState<MessageTemplate | null>(null);
   // Header-image upload (issue #230). Uploads to the account-scoped
   // chat-media bucket and stores the public URL in header_media_url; the
   // submit route turns that into a Meta Resumable-Upload handle.
@@ -324,6 +329,10 @@ export function TemplateManager() {
       })),
     });
     setDialogOpen(true);
+  }
+
+  function openView(template: MessageTemplate) {
+    setViewingTemplate(template);
   }
 
   function openCreate() {
@@ -745,7 +754,18 @@ export function TemplateManager() {
             return (
               <Card key={template.id}>
                 <CardContent className="flex items-start justify-between pt-4">
-                  <div className="space-y-2 min-w-0 flex-1">
+                  <div
+                    className="space-y-2 min-w-0 flex-1 cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openView(template)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openView(template);
+                      }
+                    }}
+                  >
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-medium text-foreground">{template.name}</h3>
                       <Badge
@@ -861,7 +881,7 @@ export function TemplateManager() {
           }
         }}
       >
-        <DialogContent className="bg-popover border-border sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-popover border-border sm:max-w-2xl lg:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-popover-foreground">
               {editingId ? t('dialogEditTitle') : t('dialogNewTitle')}
@@ -880,6 +900,7 @@ export function TemplateManager() {
             </div>
           )}
 
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_260px]">
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label className="text-muted-foreground">{t('templateName')}</Label>
@@ -1536,6 +1557,23 @@ export function TemplateManager() {
             )}
           </div>
 
+          <div className="lg:sticky lg:top-0 lg:self-start">
+            <TemplatePreview
+              form={{
+                header_format: form.header_format,
+                header_content: form.header_content,
+                header_media_url: form.header_media_url,
+                header_sample: form.header_sample,
+                body_text: form.body_text,
+                body_samples: form.body_samples,
+                footer_text: form.footer_text,
+                buttons: form.buttons,
+                cards: form.cards,
+              }}
+            />
+          </div>
+          </div>
+
           <DialogFooter className="bg-popover border-border">
             <Button
               variant="outline"
@@ -1604,6 +1642,82 @@ export function TemplateManager() {
               ) : (
                 t('delete')
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Read-only full-content view — opened by clicking any template
+          card. Exists separately from the edit dialog so Pending/
+          Draft templates (no Edit action available) can still be
+          inspected in full instead of only the truncated card preview. */}
+      <Dialog
+        open={viewingTemplate !== null}
+        onOpenChange={(open) => {
+          if (!open) setViewingTemplate(null);
+        }}
+      >
+        <DialogContent className="bg-popover border-border sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-popover-foreground flex items-center gap-2 flex-wrap">
+              {viewingTemplate?.name}
+              {viewingTemplate && (
+                <>
+                  <Badge className={`text-xs border ${categoryColors[viewingTemplate.category] || ''}`}>
+                    {viewingTemplate.category}
+                  </Badge>
+                  <Badge
+                    className={`text-xs border ${templateStatusConfig[viewingTemplate.status || 'DRAFT'].classes}`}
+                  >
+                    {templateStatusConfig[viewingTemplate.status || 'DRAFT'].label}
+                  </Badge>
+                </>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-muted-foreground">
+              {viewingTemplate?.language}
+            </DialogDescription>
+          </DialogHeader>
+
+          {viewingTemplate && (
+            <div className="space-y-4">
+              {(viewingTemplate.rejection_reason || viewingTemplate.submission_error) && (
+                <div className="flex items-start gap-1.5 text-xs text-red-400 bg-red-950/20 border border-red-900/40 rounded px-2 py-1.5">
+                  <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    {viewingTemplate.rejection_reason || viewingTemplate.submission_error}
+                  </span>
+                </div>
+              )}
+              <TemplatePreview
+                form={{
+                  header_format: (viewingTemplate.header_type ?? 'none') as HeaderFormat,
+                  header_content: viewingTemplate.header_content ?? '',
+                  header_media_url: viewingTemplate.header_media_url ?? '',
+                  header_sample: viewingTemplate.sample_values?.header?.[0] ?? '',
+                  body_text: viewingTemplate.body_text,
+                  body_samples: viewingTemplate.sample_values?.body ?? [],
+                  footer_text: viewingTemplate.footer_text ?? '',
+                  buttons: viewingTemplate.buttons ?? [],
+                  cards: (viewingTemplate.cards ?? []).map((card) => ({
+                    header_format: card.header_format,
+                    header_media_url: card.header_media_url ?? '',
+                    body_text: card.body_text,
+                    body_samples: card.sample_values?.body ?? [],
+                    buttons: card.buttons ?? [],
+                  })),
+                }}
+              />
+            </div>
+          )}
+
+          <DialogFooter className="bg-popover border-border">
+            <Button
+              variant="outline"
+              onClick={() => setViewingTemplate(null)}
+              className="border-border text-muted-foreground hover:bg-muted"
+            >
+              {t('cancel')}
             </Button>
           </DialogFooter>
         </DialogContent>

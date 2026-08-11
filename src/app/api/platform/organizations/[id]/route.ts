@@ -27,7 +27,9 @@ export async function GET(
 
     const { data: account, error: acctErr } = await supabase
       .from("accounts")
-      .select("id, name, status, created_at, default_currency")
+      .select(
+        "id, name, status, created_at, default_currency, plan_type, plan_status, plan_expires_at, plan_free_granted, wallet_balance",
+      )
       .eq("id", id)
       .maybeSingle();
 
@@ -59,6 +61,7 @@ export async function GET(
       messagesCount,
       messagesThisMonthCount,
       broadcastsCount,
+      whatsappEventsRes,
     ] = await Promise.all([
       supabase
         .from("profiles")
@@ -100,6 +103,20 @@ export async function GET(
         .from("broadcasts")
         .select("id", { count: "exact", head: true })
         .eq("account_id", id),
+      // Flagged, unresolved account-level webhook events (see
+      // logAccountLevelEvent in /api/whatsapp/webhook) — surfaced here
+      // for every plan type, unlike /needs-attention which only lists
+      // 'managed' accounts (that endpoint is the Super Admin queue for
+      // client re-provisioning specifically; this is "does THIS
+      // account, whatever its plan, have something flagged").
+      admin
+        .from("whatsapp_account_events")
+        .select("id, field, raw_value, created_at")
+        .eq("account_id", id)
+        .eq("flagged", true)
+        .eq("resolved", false)
+        .order("created_at", { ascending: false })
+        .limit(10),
     ]);
 
     // Daily broadcast quota (see src/lib/whatsapp/daily-quota.ts, which
@@ -124,6 +141,13 @@ export async function GET(
         createdAt: account.created_at,
         defaultCurrency: account.default_currency,
       },
+      billing: {
+        planType: account.plan_type,
+        planStatus: account.plan_status,
+        planExpiresAt: account.plan_expires_at,
+        planFreeGranted: account.plan_free_granted,
+        walletBalance: Number(account.wallet_balance ?? 0),
+      },
       members: membersRes.data ?? [],
       whatsapp: whatsappRes.data
         ? {
@@ -137,6 +161,12 @@ export async function GET(
         dailyCap,
         usedToday,
       },
+      whatsappAlerts: (whatsappEventsRes.data ?? []).map((e) => ({
+        id: e.id,
+        field: e.field,
+        rawValue: e.raw_value,
+        createdAt: e.created_at,
+      })),
       usage: {
         members: (membersRes.data ?? []).length,
         contacts: contactsCount.count ?? 0,
@@ -168,22 +198,106 @@ export async function PATCH(
 
     const { id } = await params;
     const body = (await request.json().catch(() => null)) as
-      | { status?: unknown }
+      | {
+          status?: unknown;
+          makeFree?: unknown;
+          revokeFree?: unknown;
+          walletBalance?: unknown;
+          resolveWhatsappAlerts?: unknown;
+        }
       | null;
-    const status = body?.status;
 
-    if (status !== "active" && status !== "suspended") {
+    // Marks this account's flagged, unresolved account-level webhook
+    // events (see logAccountLevelEvent in /api/whatsapp/webhook) as
+    // resolved — clears the WhatsAppAccountAlertBanner the account
+    // owner sees. Separate table/action from the `accounts` row update
+    // below, so it's handled and returned on its own rather than
+    // folded into `update`.
+    if (body?.resolveWhatsappAlerts === true) {
+      const { error: resolveErr } = await ctx.supabase
+        .from("whatsapp_account_events")
+        .update({ resolved: true })
+        .eq("account_id", id)
+        .eq("flagged", true)
+        .eq("resolved", false);
+
+      if (resolveErr) {
+        console.error(
+          "[PATCH /api/platform/organizations/[id]] resolve whatsapp alerts error:",
+          resolveErr,
+        );
+        return NextResponse.json(
+          { error: "Failed to resolve WhatsApp alerts" },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({ resolved: true });
+    }
+
+    const update: Record<string, unknown> = {};
+
+    if (body?.status !== undefined) {
+      if (body.status !== "active" && body.status !== "suspended") {
+        return NextResponse.json(
+          { error: "'status' must be 'active' or 'suspended'" },
+          { status: 400 },
+        );
+      }
+      update.status = body.status;
+    }
+
+    // Super Admin override — drops the account back to the default
+    // no-cost plan (same state a brand-new signup starts in), clearing
+    // any managed/self-serve subscription and its expiry so no billing
+    // gate blocks the account going forward.
+    if (body?.makeFree === true) {
+      update.plan_type = "none";
+      update.plan_status = "inactive";
+      update.plan_expires_at = null;
+      update.razorpay_subscription_id = null;
+      update.razorpay_plan_id = null;
+      // Distinguishes "Super Admin explicitly comped this account"
+      // from "never subscribed" — both are plan_type 'none', but only
+      // this one should be exempt from the trial-expiry banner (see
+      // /api/billing/plan).
+      update.plan_free_granted = true;
+    }
+
+    // Undoes the grant above — the account falls back to "never
+    // subscribed" and becomes subject to the trial-expiry banner again
+    // (immediately, if its 14-day window already passed). Doesn't
+    // touch plan_type/status — this only ever clears a grant made via
+    // makeFree, it isn't a substitute for suspending a paid plan.
+    if (body?.revokeFree === true) {
+      update.plan_free_granted = false;
+    }
+
+    if (body?.walletBalance !== undefined) {
+      const balance = Number(body.walletBalance);
+      if (!Number.isFinite(balance) || balance < 0) {
+        return NextResponse.json(
+          { error: "'walletBalance' must be a non-negative number" },
+          { status: 400 },
+        );
+      }
+      update.wallet_balance = balance;
+    }
+
+    if (Object.keys(update).length === 0) {
       return NextResponse.json(
-        { error: "'status' must be 'active' or 'suspended'" },
+        { error: "Nothing to update — provide 'status', 'makeFree', and/or 'walletBalance'" },
         { status: 400 },
       );
     }
 
     const { data, error } = await ctx.supabase
       .from("accounts")
-      .update({ status })
+      .update(update)
       .eq("id", id)
-      .select("id, name, status")
+      .select(
+        "id, name, status, plan_type, plan_status, plan_expires_at, plan_free_granted, wallet_balance",
+      )
       .maybeSingle();
 
     if (error) {
@@ -197,7 +311,16 @@ export async function PATCH(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ organization: data });
+    return NextResponse.json({
+      organization: data,
+      billing: {
+        planType: data.plan_type,
+        planStatus: data.plan_status,
+        planExpiresAt: data.plan_expires_at,
+        planFreeGranted: data.plan_free_granted,
+        walletBalance: Number(data.wallet_balance ?? 0),
+      },
+    });
   } catch (err) {
     return toErrorResponse(err);
   }

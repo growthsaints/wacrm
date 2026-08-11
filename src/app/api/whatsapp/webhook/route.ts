@@ -57,6 +57,16 @@ interface WhatsAppMessage {
     button_reply?: { id: string; title: string }
     list_reply?: { id: string; title: string; description?: string }
   }
+  /**
+   * Set when the customer taps a QUICK_REPLY button on a TEMPLATE we
+   * sent (broadcast, automation, or manual template send) — a distinct
+   * `type` from `interactive` above, which only covers buttons/lists
+   * sent via the Cloud API's own interactive-message type. `text` is
+   * the button's visible label; `payload` is the id automations/Flows
+   * match on (defaults to the label itself if the button has no custom
+   * payload override).
+   */
+  button?: { text: string; payload: string }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
 }
@@ -582,6 +592,36 @@ async function flagBroadcastReplyIfAny(accountId: string, contactId: string) {
   }
 }
 
+// Case-insensitive, whole-message match (not a substring match) so a
+// customer saying "please stop calling" mid-sentence doesn't trip an
+// opt-out — only an explicit STOP/UNSUBSCRIBE reply does, matching how
+// SMS/WhatsApp opt-out keywords are conventionally handled.
+const OPT_OUT_KEYWORDS = /^(stop|unsubscribe)$/i
+
+/**
+ * Marks a contact as opted out of marketing/broadcast messages when
+ * their inbound text is exactly an opt-out keyword. Best-effort —
+ * swallows its own errors so a lookup/update failure never blocks the
+ * rest of inbound message processing.
+ */
+async function handleOptOutKeyword(
+  contentText: string | null,
+  contactId: string
+): Promise<void> {
+  if (!contentText || !OPT_OUT_KEYWORDS.test(contentText.trim())) return
+  try {
+    const { error } = await supabaseAdmin()
+      .from('contacts')
+      .update({ marketing_opt_out: true, opted_out_at: new Date().toISOString() })
+      .eq('id', contactId)
+    if (error) {
+      console.error('[webhook] opt-out update failed:', error.message)
+    }
+  } catch (err) {
+    console.error('handleOptOutKeyword failed:', err)
+  }
+}
+
 /**
  * Resolve a Meta-side message_id into the matching internal UUID, scoped
  * to one conversation. Returns null when we never received the parent
@@ -768,8 +808,10 @@ async function processMessage(
   const contentType = ALLOWED_CONTENT_TYPES.has(message.type)
     ? message.type
     : message.type === 'sticker'
-      ? 'image'   // stickers are images
-      : 'text'    // reaction, unknown → text fallback
+      ? 'image'       // stickers are images
+      : message.type === 'button'
+        ? 'interactive' // template quick-reply tap — same bubble treatment as an interactive tap
+        : 'text'      // reaction, unknown → text fallback
 
   // Determine whether this is the contact's very first inbound message
   // BEFORE we insert, so the count is accurate. Covers the case where
@@ -822,6 +864,12 @@ async function processMessage(
   // so the broadcast's `replied_count` advances (via the aggregate
   // trigger installed in migration 003).
   await flagBroadcastReplyIfAny(accountId, contactRecord.id)
+
+  // Marketing opt-out via reply keyword — checked on every inbound
+  // text message, not just replies to a broadcast, since a contact
+  // can send STOP at any point in the conversation. Best-effort: a
+  // failure here shouldn't affect the rest of message processing.
+  await handleOptOutKeyword(contentText, contactRecord.id)
 
   // ============================================================
   // Flow runner dispatch.
@@ -1077,6 +1125,23 @@ async function parseMessageContent(
         }
       }
       return { ...empty, contentText: '[Interactive reply]' }
+    }
+
+    case 'button': {
+      // Reply to a template's QUICK_REPLY button — same intent as an
+      // `interactive` button tap above, just a different Meta payload
+      // shape. Mapped to content_type 'interactive' by the caller so the
+      // inbox bubble renders it as a tap, and interactiveReplyId is set
+      // so Automations'/Flows' interactive_reply trigger fires exactly
+      // like it does for our own composer/flow-sent buttons.
+      if (message.button) {
+        return {
+          ...empty,
+          contentText: message.button.text || message.button.payload || null,
+          interactiveReplyId: message.button.payload || null,
+        }
+      }
+      return { ...empty, contentText: '[Button reply]' }
     }
 
     default:

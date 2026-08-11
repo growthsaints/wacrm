@@ -119,6 +119,14 @@ export interface Contact {
    * yet — always null until that engine ships. Migration 039.
    */
   lead_score?: number | null;
+  /**
+   * True once the contact has opted out of marketing/broadcast
+   * messages — either by replying STOP/UNSUBSCRIBE on WhatsApp, or via
+   * a manual toggle. Broadcast audience resolution always excludes
+   * these contacts. Migration 062.
+   */
+  marketing_opt_out?: boolean;
+  opted_out_at?: string | null;
   created_at: string;
   updated_at: string;
   /** Hydrated by queries that embed `contact_tags(tags(*))` (e.g. the
@@ -201,6 +209,14 @@ export interface Conversation {
   ai_autoreply_disabled?: boolean;
   ai_reply_count?: number;
   ai_handoff_summary?: string | null;
+  /**
+   * False until the contact has sent at least one message in this
+   * thread; stays true forever after (migration 064). Lets the Inbox
+   * list hide business-initiated threads (broadcast/automation/manual
+   * template sends to a contact who's never texted in) until they
+   * actually reply, instead of flooding the list with one-way sends.
+   */
+  has_customer_message?: boolean;
 }
 
 /**

@@ -5,9 +5,11 @@ import { createClient } from "@/lib/supabase/client";
 import type { Conversation } from "@/types";
 
 /**
- * Count of conversations with at least one unread inbound message for
- * the current user. Used by the sidebar to surface a green dot on the
- * Inbox nav entry when the user is elsewhere in the app.
+ * Total unread *message* count across every conversation for the
+ * current user (sum of each conversation's `unread_count`, not just
+ * how many conversations have at least one) — used by the sidebar to
+ * show an actual number on the Inbox nav entry when the user is
+ * elsewhere in the app, the same way the Notifications entry does.
  *
  * Lives on its own realtime channel (distinct from the inbox page's
  * "inbox-realtime") so both can coexist without sharing state.
@@ -36,7 +38,7 @@ export function useTotalUnread(): number {
       for (const row of data as { id: string; unread_count: number }[]) {
         const n = row.unread_count ?? 0;
         map.set(row.id, n);
-        if (n > 0) sum += 1;
+        sum += n;
       }
       countsRef.current = map;
       setTotal(sum);
@@ -58,7 +60,7 @@ export function useTotalUnread(): number {
           }
           // Recompute — cheap, conversations per user stay small.
           let sum = 0;
-          for (const n of map.values()) if (n > 0) sum += 1;
+          for (const n of map.values()) sum += n;
           setTotal(sum);
         },
       )

@@ -6,7 +6,10 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { PresenceHeartbeat } from "@/components/presence/presence-heartbeat";
+import { NotificationSoundListener } from "@/components/presence/notification-sound-listener";
 import { ImpersonationBanner } from "@/components/platform/impersonation-banner";
+import { TrialBanner } from "@/components/dashboard/trial-banner";
+import { WhatsAppAccountAlertBanner } from "@/components/whatsapp/whatsapp-account-alert-banner";
 import { SupportChatWidget } from "@/components/support/support-chat-widget";
 
 // Auth-gated dashboard shell. Extracted from the layout so the layout
@@ -52,10 +55,13 @@ function DashboardShellInner({
       {impersonatingAccountName ? (
         <ImpersonationBanner accountName={impersonatingAccountName} />
       ) : null}
+      <TrialBanner />
+      <WhatsAppAccountAlertBanner />
       <div className="flex flex-1 overflow-hidden">
         {/* Reports this tab's online/away presence once we know a user is
             signed in. Headless — renders nothing. */}
         <PresenceHeartbeat />
+        <NotificationSoundListener />
         <Sidebar open={sidebarOpen} onClose={closeSidebar} />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header onOpenSidebar={() => setSidebarOpen(true)} />

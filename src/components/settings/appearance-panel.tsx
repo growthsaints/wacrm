@@ -1,12 +1,18 @@
 "use client";
 
-import { Check, Moon, Palette, SunMoon, Sun } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Check, Moon, Palette, SunMoon, Sun } from "lucide-react";
 
 import { useTheme } from "@/hooks/use-theme";
 import { MODES, THEMES, type Mode, type ThemeId } from "@/lib/themes";
+import {
+  NOTIFICATION_SOUND_STORAGE_KEY,
+  setNotificationSoundEnabled,
+} from "@/lib/notification-sound";
 import { cn } from "@/lib/utils";
 import { useTranslations } from "next-intl";
 import { SettingsPanelHead } from "./settings-panel-head";
+import { Switch } from "@/components/ui/switch";
 
 /**
  * Appearance panel — light/dark mode + accent-color picker.
@@ -23,6 +29,26 @@ import { SettingsPanelHead } from "./settings-panel-head";
 export function AppearancePanel() {
   const { theme, setTheme, mode, setMode } = useTheme();
   const t = useTranslations("Settings.appearance");
+
+  // Defaults to `true` (matches isNotificationSoundEnabled's default) and
+  // is reconciled from localStorage after mount — same reasoning as the
+  // theme/mode hooks: reading localStorage synchronously in the
+  // initializer would risk a server/client render mismatch.
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(NOTIFICATION_SOUND_STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reconciling from localStorage post-mount, same pattern used elsewhere in Settings (deal-form.tsx, custom-fields-manager.tsx)
+      if (stored !== null) setSoundEnabled(stored !== "false");
+    } catch {
+      // localStorage can throw in private-browsing / sandboxed contexts.
+    }
+  }, []);
+
+  function handleSoundToggle(next: boolean) {
+    setSoundEnabled(next);
+    setNotificationSoundEnabled(next);
+  }
 
   return (
     <section className="max-w-3xl animate-in fade-in-50 duration-200">
@@ -71,6 +97,25 @@ export function AppearancePanel() {
               onPick={() => setTheme(tObj.id)}
             />
           ))}
+        </div>
+      </div>
+
+      <div className="mt-8 space-y-4">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Bell className="size-4 text-muted-foreground" />
+          {t("notifications")}
+        </h3>
+
+        <div className="flex max-w-md items-center justify-between gap-4 rounded-lg border border-border bg-card p-4">
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              {t("notificationSound")}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t("notificationSoundDesc")}
+            </p>
+          </div>
+          <Switch checked={soundEnabled} onCheckedChange={handleSoundToggle} />
         </div>
       </div>
     </section>

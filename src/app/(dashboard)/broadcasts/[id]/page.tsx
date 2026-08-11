@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Broadcast, BroadcastRecipient, RecipientStatus } from '@/types';
+import { useBroadcastSending } from '@/hooks/use-broadcast-sending';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -32,6 +33,7 @@ import {
   Download,
   ChevronDown,
   Trash2,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -158,38 +160,54 @@ export default function BroadcastDetailPage() {
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const { resumeBroadcast, isProcessing: isResuming } = useBroadcastSending();
+
+  const fetchData = useCallback(async () => {
+    try {
+      const supabase = createClient();
+
+      const { data: bc, error: bcError } = await supabase
+        .from('broadcasts')
+        .select('*')
+        .eq('id', broadcastId)
+        .single();
+
+      if (bcError) throw bcError;
+      setBroadcast(bc);
+
+      const { data: recs, error: recsError } = await supabase
+        .from('broadcast_recipients')
+        .select('*, contact:contacts(*)')
+        .eq('broadcast_id', broadcastId)
+        .order('created_at', { ascending: false });
+
+      if (recsError) throw recsError;
+      setRecipients(recs ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('notFound'));
+    } finally {
+      setLoading(false);
+    }
+  }, [broadcastId, t]);
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const supabase = createClient();
-
-        const { data: bc, error: bcError } = await supabase
-          .from('broadcasts')
-          .select('*')
-          .eq('id', broadcastId)
-          .single();
-
-        if (bcError) throw bcError;
-        setBroadcast(bc);
-
-        const { data: recs, error: recsError } = await supabase
-          .from('broadcast_recipients')
-          .select('*, contact:contacts(*)')
-          .eq('broadcast_id', broadcastId)
-          .order('created_at', { ascending: false });
-
-        if (recsError) throw recsError;
-        setRecipients(recs ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : t('notFound'));
-      } finally {
-        setLoading(false);
-      }
-    }
-
     fetchData();
-  }, [broadcastId]);
+  }, [fetchData]);
+
+  async function handleResume() {
+    try {
+      await resumeBroadcast(broadcastId);
+      toast.success(t('toastResumeComplete'));
+    } catch (err) {
+      toast.error(
+        t('toastResumeFailed', {
+          error: err instanceof Error ? err.message : 'Unknown error',
+        }),
+      );
+    } finally {
+      await fetchData();
+    }
+  }
 
   const filteredRecipients = useMemo(
     () =>
@@ -197,6 +215,15 @@ export default function BroadcastDetailPage() {
         ? recipients
         : recipients.filter((r) => r.status === statusFilter),
     [recipients, statusFilter],
+  );
+
+  // Sending runs client-side in whatever tab launched it (see the note
+  // on resumeBroadcast) — closing/refreshing/navigating away mid-send
+  // leaves the rest of the list stuck here forever with nothing else to
+  // pick it back up. Surfaced only when it's actually happened.
+  const pendingCount = useMemo(
+    () => recipients.filter((r) => r.status === 'pending').length,
+    [recipients],
   );
 
   function handleExport() {
@@ -304,6 +331,21 @@ export default function BroadcastDetailPage() {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-2">
+        {pendingCount > 0 ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleResume}
+            disabled={isResuming}
+            title={t('resumeHover')}
+            className="border-border text-muted-foreground hover:bg-muted disabled:opacity-40"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isResuming ? 'animate-spin' : ''}`} />
+            {isResuming ? t('resuming') : t('resendPending', { count: pendingCount })}
+          </Button>
+        ) : null}
+
         {/* Delete — inline-confirm pattern matches the pipeline-settings
             "Delete Pipeline" flow. Mid-send broadcasts can't be deleted
             because orphaning in-flight Meta messages would leave the
@@ -346,6 +388,7 @@ export default function BroadcastDetailPage() {
             {t('delete')}
           </Button>
         )}
+        </div>
       </div>
 
       {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}

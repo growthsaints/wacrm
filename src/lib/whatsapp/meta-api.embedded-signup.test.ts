@@ -28,10 +28,14 @@ describe('exchangeEmbeddedSignupCode', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  it('GETs /oauth/access_token with client_id, client_secret, and code', async () => {
-    fetchMock.mockResolvedValueOnce(
-      okResponse({ access_token: 'long-lived-token', token_type: 'bearer', expires_in: 5184000 }),
-    );
+  it('GETs /oauth/access_token with client_id, client_secret, and code, then exchanges for a long-lived token', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        okResponse({ access_token: 'short-lived-token', token_type: 'bearer', expires_in: 3600 }),
+      )
+      .mockResolvedValueOnce(
+        okResponse({ access_token: 'long-lived-token', token_type: 'bearer', expires_in: 5184000 }),
+      );
     const result = await exchangeEmbeddedSignupCode({
       appId: 'APP_1',
       appSecret: 'SECRET',
@@ -42,11 +46,33 @@ describe('exchangeEmbeddedSignupCode', () => {
       tokenType: 'bearer',
       expiresIn: 5184000,
     });
-    const [url] = fetchMock.mock.calls[0];
-    expect(url).toContain('/oauth/access_token');
-    expect(url).toContain('client_id=APP_1');
-    expect(url).toContain('client_secret=SECRET');
-    expect(url).toContain('code=auth-code');
+    const [firstUrl] = fetchMock.mock.calls[0];
+    expect(firstUrl).toContain('/oauth/access_token');
+    expect(firstUrl).toContain('client_id=APP_1');
+    expect(firstUrl).toContain('client_secret=SECRET');
+    expect(firstUrl).toContain('code=auth-code');
+
+    const [secondUrl] = fetchMock.mock.calls[1];
+    expect(secondUrl).toContain('grant_type=fb_exchange_token');
+    expect(secondUrl).toContain('fb_exchange_token=short-lived-token');
+  });
+
+  it('falls back to the short-lived token if the fb_exchange_token hop fails', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        okResponse({ access_token: 'short-lived-token', token_type: 'bearer', expires_in: 3600 }),
+      )
+      .mockResolvedValueOnce(errorResponse(400, { error: { message: 'boom' } }));
+    const result = await exchangeEmbeddedSignupCode({
+      appId: 'APP_1',
+      appSecret: 'SECRET',
+      code: 'auth-code',
+    });
+    expect(result).toEqual({
+      accessToken: 'short-lived-token',
+      tokenType: 'bearer',
+      expiresIn: 3600,
+    });
   });
 
   it('throws with the expired-code message surfaced verbatim', async () => {

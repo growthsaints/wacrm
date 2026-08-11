@@ -125,6 +125,14 @@ export interface ExchangeEmbeddedSignupCodeResult {
  * Errors surfaced verbatim so the completion route can distinguish
  * "code expired/already used" from other failures — the code is
  * single-use and only valid for a few minutes.
+ *
+ * The initial `code` → token exchange doesn't reliably return a
+ * long-lived (~60 day) token for every app config — some apps get
+ * back a short-lived one (observed expiring in under a day), which
+ * silently breaks the connection once it lapses. So this always
+ * performs a second `fb_exchange_token` hop, which is the one Meta
+ * endpoint documented to guarantee a long-lived token back — same
+ * appId/appSecret, no extra user interaction needed.
  */
 export async function exchangeEmbeddedSignupCode(
   args: ExchangeEmbeddedSignupCodeArgs,
@@ -147,10 +155,45 @@ export async function exchangeEmbeddedSignupCode(
   if (!data.access_token) {
     throw new Error('Meta token exchange did not return an access token.')
   }
+
+  const longLivedParams = new URLSearchParams({
+    grant_type: 'fb_exchange_token',
+    client_id: appId,
+    client_secret: appSecret,
+    fb_exchange_token: data.access_token,
+  })
+  const longLivedResponse = await fetch(
+    `${META_API_BASE}/oauth/access_token?${longLivedParams.toString()}`,
+  )
+  if (!longLivedResponse.ok) {
+    // Fall back to whatever the first hop returned rather than
+    // failing the whole signup over this — a short-lived token that
+    // works today beats no connection at all.
+    console.warn(
+      '[meta-api] fb_exchange_token long-lived exchange failed, using short-lived token',
+    )
+    return {
+      accessToken: data.access_token,
+      tokenType: data.token_type ?? 'bearer',
+      expiresIn: data.expires_in,
+    }
+  }
+  const longLivedData = (await longLivedResponse.json()) as {
+    access_token?: string
+    token_type?: string
+    expires_in?: number
+  }
+  if (!longLivedData.access_token) {
+    return {
+      accessToken: data.access_token,
+      tokenType: data.token_type ?? 'bearer',
+      expiresIn: data.expires_in,
+    }
+  }
   return {
-    accessToken: data.access_token,
-    tokenType: data.token_type ?? 'bearer',
-    expiresIn: data.expires_in,
+    accessToken: longLivedData.access_token,
+    tokenType: longLivedData.token_type ?? 'bearer',
+    expiresIn: longLivedData.expires_in,
   }
 }
 

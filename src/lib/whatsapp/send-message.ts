@@ -44,6 +44,7 @@ import {
 } from '@/lib/whatsapp/phone-utils';
 import type { MessageTemplate } from '@/types';
 import { isMessageTemplate } from '@/lib/whatsapp/template-row-guard';
+import type { SendTimeParams } from '@/lib/whatsapp/template-send-builder';
 import { categoryFromTemplate } from '@/lib/billing/rates';
 import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet';
 
@@ -465,6 +466,21 @@ export async function sendMessageToConversation(
   const interactiveBody =
     messageType === 'interactive' ? interactivePayload!.body : null;
 
+  // A template with an IMAGE/VIDEO/DOCUMENT header sends its media via
+  // `buildSendComponents` above, but that path never touches `mediaUrl`
+  // (which is only populated for actual image/video/document/audio
+  // message types) — so without this, the header media the recipient
+  // saw would never appear in our own copy of the thread.
+  const isMediaHeaderTemplate =
+    templateRow?.header_type === 'image' ||
+    templateRow?.header_type === 'video' ||
+    templateRow?.header_type === 'document';
+  const headerMediaUrl = isMediaHeaderTemplate
+    ? (templateMessageParams as SendTimeParams | undefined)?.headerMediaUrl ??
+      templateRow?.header_media_url ??
+      null
+    : null;
+
   const { data: messageRecord, error: msgError } = await db
     .from('messages')
     .insert({
@@ -472,7 +488,7 @@ export async function sendMessageToConversation(
       sender_type: 'agent',
       content_type: messageType,
       content_text: interactiveBody ?? contentText ?? null,
-      media_url: mediaUrl || null,
+      media_url: mediaUrl || headerMediaUrl || null,
       template_name: templateName || null,
       interactive_payload:
         messageType === 'interactive' ? interactivePayload : null,

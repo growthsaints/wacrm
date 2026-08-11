@@ -16,6 +16,7 @@ import { ContactSidebar } from "@/components/inbox/contact-sidebar";
 import { toast } from "sonner";
 import { WifiOff } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { playNewMessageSound, playInChatMessageSound } from "@/lib/notification-sound";
 
 // Remembers the agent's show/hide choice for the desktop contact panel
 // across reloads and sessions (device-scoped, like the theme prefs).
@@ -154,6 +155,12 @@ export default function InboxPage() {
               : c,
           );
         }
+        // Not yet in the list — mirrors conversation-list.tsx's bulk
+        // query filter: a business-initiated conversation (broadcast/
+        // automation/manual template send) only surfaces once the
+        // customer has actually replied. Every hydrate call site relies
+        // on this single check rather than each guarding it separately.
+        if (!fetched.has_customer_message) return prev;
         return [fetched, ...prev];
       });
     } finally {
@@ -207,6 +214,18 @@ export default function InboxPage() {
       const newMsg = event.new;
 
       if (event.eventType === "INSERT") {
+        // Notification sound — only for genuine inbound customer
+        // messages, not our own agent/bot sends echoing back through
+        // realtime. Soft tone if the agent already has this exact
+        // conversation open, louder chime otherwise.
+        if (newMsg.sender_type === "customer") {
+          if (activeConversation?.id === newMsg.conversation_id) {
+            playInChatMessageSound();
+          } else {
+            playNewMessageSound();
+          }
+        }
+
         // Add to messages if it belongs to active conversation
         if (
           activeConversation &&
@@ -244,14 +263,22 @@ export default function InboxPage() {
                 : c,
             ),
           );
-        } else {
-          // First time we're seeing this conv: the conv-INSERT event
-          // hasn't landed yet, or was missed. Hydrate from the DB so
-          // the row surfaces with its `contact` joined; the conv-UPDATE
-          // event the webhook emits right after the message INSERT will
-          // converge state when it arrives.
+        } else if (newMsg.sender_type === "customer") {
+          // First time we're seeing this conv, and it's a genuine
+          // customer message: the conv-INSERT event hasn't landed yet,
+          // or was missed. Hydrate from the DB so the row surfaces with
+          // its `contact` joined; the conv-UPDATE event the webhook
+          // emits right after the message INSERT will converge state
+          // when it arrives.
           hydrateConversation(newMsg.conversation_id);
         }
+        // else: an agent/bot message (broadcast, automation, manual
+        // template send) just opened a conversation we haven't loaded
+        // yet — leave it out of the list. Business-initiated
+        // conversations only surface once the customer actually
+        // replies (see conversation-list.tsx's has_customer_message
+        // filter this mirrors); hydrating here unconditionally used to
+        // bypass that filter and flood the inbox during a broadcast.
       }
 
       if (event.eventType === "UPDATE") {
@@ -279,11 +306,20 @@ export default function InboxPage() {
         // (realtime payloads never include joins). Skip both if we
         // already have the row — that shouldn't happen normally, but
         // out-of-order delivery would have us prepending a duplicate.
+        //
+        // A conversation always starts with has_customer_message: false
+        // (set true later by the DB trigger once a customer message
+        // actually lands) — mirrors conversation-list.tsx's bulk-query
+        // filter so a business-initiated conversation (broadcast/
+        // automation/manual template send) doesn't flash into the list
+        // the instant it's created, only once the customer replies.
         if (!knownConvIdsRef.current.has(conv.id)) {
-          setConversations((prev) => {
-            if (prev.some((c) => c.id === conv.id)) return prev;
-            return [conv, ...prev];
-          });
+          if (conv.has_customer_message) {
+            setConversations((prev) => {
+              if (prev.some((c) => c.id === conv.id)) return prev;
+              return [conv, ...prev];
+            });
+          }
           hydrateConversation(conv.id);
         }
       }

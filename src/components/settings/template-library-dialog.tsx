@@ -51,9 +51,15 @@ function humanize(name: string): string {
     .join(' ');
 }
 
+const CATEGORY_COUNTS = TEMPLATE_LIBRARY_CATALOG.reduce<Record<string, number>>((acc, e) => {
+  acc[e.category] = (acc[e.category] ?? 0) + 1;
+  return acc;
+}, {});
 const TOPICS = Array.from(new Set(TEMPLATE_LIBRARY_CATALOG.map((e) => e.topic))).sort();
 const USECASES = Array.from(new Set(TEMPLATE_LIBRARY_CATALOG.map((e) => e.usecase))).sort();
-const INDUSTRIES = Array.from(new Set(TEMPLATE_LIBRARY_CATALOG.map((e) => e.industry))).sort();
+const INDUSTRIES = Array.from(
+  new Set(TEMPLATE_LIBRARY_CATALOG.flatMap((e) => e.industries)),
+).sort();
 const CATEGORIES = ['UTILITY', 'AUTHENTICATION', 'MARKETING'] as const;
 
 /** Editable state for a single button input Meta needs to fill in the library template. */
@@ -87,6 +93,7 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
   const t = useTranslations('Settings.templates.library');
 
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [topic, setTopic] = useState('');
   const [usecase, setUsecase] = useState('');
   const [industry, setIndustry] = useState('');
@@ -101,19 +108,21 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
   const results = useMemo(() => {
     const q = search.trim().toLowerCase();
     return TEMPLATE_LIBRARY_CATALOG.filter((e) => {
+      if (categoryFilter && e.category !== categoryFilter) return false;
       if (topic && e.topic !== topic) return false;
       if (usecase && e.usecase !== usecase) return false;
-      if (industry && e.industry !== industry) return false;
+      if (industry && !e.industries.includes(industry)) return false;
       if (q) {
         const haystack = `${e.name} ${e.header ?? ''} ${e.body} ${e.footer ?? ''}`.toLowerCase();
         if (!haystack.includes(q)) return false;
       }
       return true;
     });
-  }, [search, topic, usecase, industry]);
+  }, [search, categoryFilter, topic, usecase, industry]);
 
   function reset() {
     setSearch('');
+    setCategoryFilter('');
     setTopic('');
     setUsecase('');
     setIndustry('');
@@ -221,7 +230,11 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
         if (!next) reset();
       }}
     >
-      <DialogContent className="bg-popover border-border sm:max-w-2xl lg:max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent
+        className={`bg-popover border-border max-h-[90vh] overflow-y-auto ${
+          selected ? 'sm:max-w-2xl lg:max-w-3xl' : 'sm:max-w-3xl xl:max-w-5xl'
+        }`}
+      >
         <DialogHeader>
           <DialogTitle className="text-popover-foreground">
             {selected ? t('configureTitle') : t('browseTitleDialog')}
@@ -233,12 +246,42 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
 
         {!selected ? (
           <div className="space-y-4">
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant={categoryFilter === '' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCategoryFilter('')}
+                className={categoryFilter === '' ? '' : 'border-border bg-transparent text-muted-foreground hover:bg-muted'}
+              >
+                {t('allCategories')} ({TEMPLATE_LIBRARY_CATALOG.length})
+              </Button>
+              <Button
+                type="button"
+                variant={categoryFilter === 'UTILITY' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCategoryFilter('UTILITY')}
+                className={categoryFilter === 'UTILITY' ? '' : 'border-border bg-transparent text-muted-foreground hover:bg-muted'}
+              >
+                Utility ({CATEGORY_COUNTS.UTILITY ?? 0})
+              </Button>
+              <Button
+                type="button"
+                variant={categoryFilter === 'AUTHENTICATION' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setCategoryFilter('AUTHENTICATION')}
+                className={categoryFilter === 'AUTHENTICATION' ? '' : 'border-border bg-transparent text-muted-foreground hover:bg-muted'}
+              >
+                Authentication ({CATEGORY_COUNTS.AUTHENTICATION ?? 0})
+              </Button>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               <Input
                 placeholder={t('searchPlaceholder')}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="bg-muted border-border text-foreground placeholder:text-muted-foreground sm:col-span-2"
+                className="bg-muted border-border text-foreground placeholder:text-muted-foreground sm:col-span-2 lg:col-span-4"
               />
               <Select value={topic || '__all'} onValueChange={(v) => setTopic(!v || v === '__all' ? '' : v)}>
                 <SelectTrigger className="w-full bg-muted border-border text-foreground">
@@ -291,31 +334,31 @@ export function TemplateLibraryDialog({ open, onOpenChange, onCreated }: Templat
               </div>
             </div>
 
-            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-              {results.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-8">{t('noResults')}</p>
-              ) : (
-                results.map((entry) => (
+            {results.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">{t('noResults')}</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[55vh] overflow-y-auto pr-1">
+                {results.map((entry) => (
                   <button
                     key={entry.name}
                     type="button"
                     onClick={() => selectEntry(entry)}
-                    className="w-full text-left rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/60 transition-colors"
+                    className="w-full text-left rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/60 transition-colors flex flex-col"
                   >
-                    <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="font-medium text-foreground text-sm">{humanize(entry.name)}</span>
+                    <div className="flex items-center gap-1.5 flex-wrap mb-1">
                       <Badge className="text-[10px]">{entry.category}</Badge>
                       <Badge className="text-[10px]" variant="outline">{humanize(entry.topic)}</Badge>
                       <span className="text-[10px] text-muted-foreground uppercase">{entry.language}</span>
                     </div>
-                    {entry.header && (
-                      <p className="text-xs font-medium text-foreground">{entry.header}</p>
-                    )}
-                    <p className="text-xs text-muted-foreground line-clamp-2 whitespace-pre-line">{entry.body}</p>
+                    <p className="text-xs font-medium text-foreground">
+                      {entry.header || humanize(entry.name)}
+                    </p>
+                    <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-line flex-1">{entry.body}</p>
+                    <p className="text-[10px] text-muted-foreground font-mono mt-1.5 truncate">{entry.name}</p>
                   </button>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
 
             <p className="text-[11px] text-muted-foreground border-t border-border pt-2">
               {t('catalogDisclaimer', { count: TEMPLATE_LIBRARY_CATALOG.length })}
