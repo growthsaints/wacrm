@@ -57,6 +57,16 @@ interface InteractiveBuilderProps {
   onChange: (payload: InteractiveMessagePayload) => void;
   /** Show the live WhatsApp-style preview beside the form. Default true. */
   showPreview?: boolean;
+  /**
+   * Stack the form and preview vertically instead of side-by-side at the
+   * `md` breakpoint. `md:flex-row` reacts to the viewport, not this
+   * component's own container — inside a narrow fixed-width host (e.g.
+   * the ~320px automation step card) a wide desktop viewport still
+   * triggers the row layout, and the preview's `shrink-0` 280px column
+   * then squeezes the form down to a few px, wrapping every word onto
+   * its own line. Set this when the host is narrower than ~500px.
+   */
+  stacked?: boolean;
 }
 
 /**
@@ -70,6 +80,7 @@ export function InteractiveBuilder({
   value,
   onChange,
   showPreview = true,
+  stacked = false,
 }: InteractiveBuilderProps) {
   const [advanced, setAdvanced] = useState(false);
   const validation = validateInteractivePayload(value);
@@ -88,7 +99,7 @@ export function InteractiveBuilder({
   };
 
   return (
-    <div className="flex flex-col gap-4 md:flex-row">
+    <div className={cn("flex flex-col gap-4", !stacked && "md:flex-row")}>
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {/* Kind toggle */}
         <div className="flex gap-2">
@@ -161,7 +172,7 @@ export function InteractiveBuilder({
       </div>
 
       {showPreview && (
-        <div className="flex shrink-0 flex-col gap-1.5 md:w-[280px]">
+        <div className={cn("flex flex-col gap-1.5", stacked ? "w-full" : "shrink-0 md:w-[280px]")}>
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             Preview
           </span>
