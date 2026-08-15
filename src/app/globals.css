@@ -471,12 +471,17 @@ html[data-theme="marigold"] [data-slot="button"].bg-secondary:active {
 /* "Chip" surfaces — a static (non-hover) `bg-muted` paired with a
  * rounded-* radius is this codebase's pattern for a small filled
  * badge/tile inside a larger panel (contact-sidebar's Status/Assigned
- * Agent chips, stat tiles, etc.) — most visible on the Inbox page,
- * which doesn't use <Card> at all (its 3-pane layout is deliberately
- * flush like WhatsApp Web, so the panels themselves correctly stay
- * un-embossed; only chips *inside* them read as raised here).
+ * Agent chips, stat tiles, avatar circles, tag pills, etc.) — most
+ * visible on the Inbox page, which doesn't use <Card> at all (its
+ * 3-pane layout is deliberately flush like WhatsApp Web, so the
+ * panels themselves correctly stay un-embossed; only chips *inside*
+ * them read as raised here).
  * `hover:bg-muted` compiles to a different, unrelated class, so this
  * only ever matches an always-on muted fill, never a hover state.
+ * `rounded-full` is included for avatar circles and tag pills — the
+ * only other rounded-full + bg-muted combination in the codebase is
+ * tiny (h-2 w-2) status dots, and those use a dynamic status colour
+ * class instead of a static bg-muted, so they never match this.
  *
  * Verified via a standalone reproduction (identical markup, both
  * inside and outside an overflow:auto viewport) that the shadow
@@ -487,10 +492,25 @@ html[data-theme="marigold"] [data-slot="button"].bg-secondary:active {
  * card/button-level values a chip this small doesn't have room for. */
 html[data-theme="marigold"] .bg-muted.rounded-lg,
 html[data-theme="marigold"] .bg-muted.rounded-xl,
-html[data-theme="marigold"] .bg-muted.rounded-md {
+html[data-theme="marigold"] .bg-muted.rounded-md,
+html[data-theme="marigold"] .bg-muted.rounded-full,
+html[data-theme="marigold"] .bg-muted.rounded-2xl,
+html[data-theme="marigold"] .bg-muted.rounded-3xl {
   box-shadow:
     -4px -4px 9px rgba(255, 253, 247, 0.95),
     5px 5px 13px rgba(160, 110, 50, 0.55);
+}
+
+/* Search / text inputs (`data-slot="input"` — see components/ui/
+ * input.tsx) always carry a rounded-xl + solid fill even though a
+ * caller often overrides the fill colour (e.g. the Inbox search bar's
+ * bg-muted), so they're targeted directly by slot rather than by
+ * class combination — more robust than tracking every caller's exact
+ * background utility. */
+html[data-theme="marigold"] [data-slot="input"] {
+  box-shadow:
+    inset -2px -2px 5px rgba(160, 110, 50, 0.18),
+    inset 2px 2px 5px rgba(160, 110, 50, 0.12);
 }
 
 /* The inbox chat wallpaper (message-thread.tsx's DOODLE_BG_CLASSES) is
