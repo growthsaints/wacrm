@@ -476,13 +476,21 @@ html[data-theme="marigold"] [data-slot="button"].bg-secondary:active {
  * flush like WhatsApp Web, so the panels themselves correctly stay
  * un-embossed; only chips *inside* them read as raised here).
  * `hover:bg-muted` compiles to a different, unrelated class, so this
- * only ever matches an always-on muted fill, never a hover state. */
+ * only ever matches an always-on muted fill, never a hover state.
+ *
+ * Verified via a standalone reproduction (identical markup, both
+ * inside and outside an overflow:auto viewport) that the shadow
+ * itself renders and isn't clipped — the -2px/5px, 0.3-alpha version
+ * below was just too subtle to read at this element's real ~130px
+ * size, especially after screenshot/chat compression. Tripled the
+ * offset and blur, and raised the dark-side alpha, instead of the
+ * card/button-level values a chip this small doesn't have room for. */
 html[data-theme="marigold"] .bg-muted.rounded-lg,
 html[data-theme="marigold"] .bg-muted.rounded-xl,
 html[data-theme="marigold"] .bg-muted.rounded-md {
   box-shadow:
-    -2px -2px 5px rgba(255, 253, 247, 0.8),
-    3px 3px 8px rgba(180, 128, 60, 0.3);
+    -4px -4px 9px rgba(255, 253, 247, 0.95),
+    5px 5px 13px rgba(160, 110, 50, 0.55);
 }
 
 /* The inbox chat wallpaper (message-thread.tsx's DOODLE_BG_CLASSES) is
