@@ -513,6 +513,30 @@ html[data-theme="marigold"] [data-slot="input"] {
     inset 2px 2px 5px rgba(160, 110, 50, 0.12);
 }
 
+/* Plain `bg-card` panels that don't go through the shared <Card>
+ * component — e.g. the Dashboard's WhatsApp-status/quota row
+ * (whatsapp-quota-card.tsx: a bare `rounded-xl border bg-card` div,
+ * no data-slot, no inline shadow) — never picked up --shadow-soft,
+ * since that's applied via Card's own inline style, not a class rule.
+ * Reusing --shadow-soft here (rather than a new hardcoded value) means
+ * this always matches whatever the Card-driven emboss looks like, and
+ * costs the real <Card> instances nothing since they'd resolve to the
+ * same box-shadow value twice. */
+html[data-theme="marigold"] .bg-card {
+  box-shadow: var(--shadow-soft);
+}
+
+/* Sidebar's active nav item (bg-primary/10 — see layout/sidebar.tsx;
+ * the slash-opacity utility needs escaping as a literal class name in
+ * a hand-written selector). Gets a light version of the same chip
+ * treatment so the current page reads as a raised pill, not just a
+ * tinted rectangle. */
+html[data-theme="marigold"] .bg-primary\/10 {
+  box-shadow:
+    -2px -2px 5px rgba(255, 253, 247, 0.7),
+    3px 3px 8px rgba(180, 128, 60, 0.28);
+}
+
 /* The inbox chat wallpaper (message-thread.tsx's DOODLE_BG_CLASSES) is
  * a fixed slate-500 SVG tuned for a near-black background — under
  * Marigold's warm cream it read as an out-of-place cool-grey smudge.
