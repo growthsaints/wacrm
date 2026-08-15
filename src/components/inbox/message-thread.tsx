@@ -145,11 +145,17 @@ const STATUS_OPTIONS = CONVERSATION_STATUS_OPTIONS;
  * `/public/inbox-doodle.svg`; the slate-950 colour sits underneath so
  * the doodles read as a subtle pattern rather than a stark grid.
  *
+ * `inbox-doodle` is a bare marker class (no styles of its own) so
+ * globals.css can swap the background-image per theme — the Marigold
+ * accent overrides it to a warm-toned tile, since the default asset's
+ * cool slate stroke was tuned for a near-black background and clashes
+ * against Marigold's cream.
+ *
  * Defined once at module scope so the two render paths can't drift —
  * if we ever switch the asset, both spots update together.
  */
 const DOODLE_BG_CLASSES =
-  "bg-background bg-[url('/inbox-doodle.svg')] bg-repeat";
+  "inbox-doodle bg-background bg-[url('/inbox-doodle.svg')] bg-repeat";
 
 export function MessageThread({
   conversation,

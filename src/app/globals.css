@@ -438,6 +438,15 @@ html[data-theme="marigold"] [data-slot="button"].bg-primary:active {
     inset 3px 3px 8px rgba(150, 100, 40, 0.35);
 }
 
+/* The inbox chat wallpaper (message-thread.tsx's DOODLE_BG_CLASSES) is
+ * a fixed slate-500 SVG tuned for a near-black background — under
+ * Marigold's warm cream it read as an out-of-place cool-grey smudge.
+ * Swap in the warm-stroked copy instead of touching the shared asset
+ * every other theme still uses. */
+html[data-theme="marigold"] .inbox-doodle {
+  background-image: url("/inbox-doodle-warm.svg");
+}
+
 /* The gradient itself — painted on both `body` and `.app-shell-surface`
  * for the same reason as Ember's pattern below: the shell wrappers
  * paint their own opaque `bg-background` on top of `body` and would
