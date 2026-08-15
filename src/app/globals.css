@@ -380,7 +380,7 @@ html[data-theme="marigold"] {
   --destructive: #ef4444;
   --border: #edd3a8;
   --input: #edd3a8;
-  --radius: 1.15rem;
+  --radius: 1.35rem;
 
   --primary: #ef7d0f;
   --primary-foreground: #ffffff;
@@ -406,13 +406,19 @@ html[data-theme="marigold"] {
   /* Overrides the app's default single-shadow --shadow-soft(-lg) —
    * Card reads this via an inline style, and .card-hover's :hover
    * state reads -lg, so every card in the app gets the clay emboss
-   * with no component changes. */
+   * with no component changes.
+   *
+   * First pass here (±7px/14px, 0.32 alpha) read as basically flat in
+   * the actual app — real cards are smaller and denser than the
+   * concept mockup, so a shadow subtle enough to look tasteful in a
+   * big demo card all but disappears at real UI scale. Pushed noticeably
+   * darker/bigger to actually read as embossed at normal viewing size. */
   --shadow-soft:
-    -7px -7px 14px rgba(255, 252, 244, 0.9),
-    7px 7px 16px rgba(198, 154, 92, 0.32);
+    -9px -9px 18px rgba(255, 253, 247, 0.95),
+    9px 9px 20px rgba(180, 128, 60, 0.5);
   --shadow-soft-lg:
-    -10px -10px 20px rgba(255, 252, 244, 0.95),
-    10px 10px 24px rgba(198, 154, 92, 0.38);
+    -12px -12px 26px rgba(255, 253, 247, 1),
+    12px 12px 30px rgba(180, 128, 60, 0.6);
 }
 
 /* Filled buttons (`bg-primary` is a stable marker of Button's "default"
@@ -436,6 +442,30 @@ html[data-theme="marigold"] [data-slot="button"].bg-primary:active {
   box-shadow:
     inset -3px -3px 7px rgba(255, 200, 140, 0.35),
     inset 3px 3px 8px rgba(150, 100, 40, 0.35);
+}
+
+/* Outline/secondary buttons (bg-background / bg-secondary — the other
+ * two variants with a solid, page-matching fill) get the same emboss
+ * language at a lighter weight, so every button feels tactile, not
+ * just the primary CTA. Ghost/link/destructive stay untouched — they
+ * have no solid fill for a shadow to read against. */
+html[data-theme="marigold"] [data-slot="button"].bg-background,
+html[data-theme="marigold"] [data-slot="button"].bg-secondary {
+  box-shadow:
+    -2px -2px 5px rgba(255, 253, 247, 0.8),
+    3px 3px 8px rgba(180, 128, 60, 0.35);
+}
+html[data-theme="marigold"] [data-slot="button"].bg-background:hover:not(:disabled),
+html[data-theme="marigold"] [data-slot="button"].bg-secondary:hover:not(:disabled) {
+  box-shadow:
+    -3px -3px 7px rgba(255, 253, 247, 0.85),
+    4px 4px 11px rgba(180, 128, 60, 0.4);
+}
+html[data-theme="marigold"] [data-slot="button"].bg-background:active,
+html[data-theme="marigold"] [data-slot="button"].bg-secondary:active {
+  box-shadow:
+    inset -2px -2px 5px rgba(255, 253, 247, 0.6),
+    inset 2px 2px 6px rgba(150, 100, 40, 0.3);
 }
 
 /* The inbox chat wallpaper (message-thread.tsx's DOODLE_BG_CLASSES) is
