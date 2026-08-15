@@ -468,6 +468,23 @@ html[data-theme="marigold"] [data-slot="button"].bg-secondary:active {
     inset 2px 2px 6px rgba(150, 100, 40, 0.3);
 }
 
+/* "Chip" surfaces — a static (non-hover) `bg-muted` paired with a
+ * rounded-* radius is this codebase's pattern for a small filled
+ * badge/tile inside a larger panel (contact-sidebar's Status/Assigned
+ * Agent chips, stat tiles, etc.) — most visible on the Inbox page,
+ * which doesn't use <Card> at all (its 3-pane layout is deliberately
+ * flush like WhatsApp Web, so the panels themselves correctly stay
+ * un-embossed; only chips *inside* them read as raised here).
+ * `hover:bg-muted` compiles to a different, unrelated class, so this
+ * only ever matches an always-on muted fill, never a hover state. */
+html[data-theme="marigold"] .bg-muted.rounded-lg,
+html[data-theme="marigold"] .bg-muted.rounded-xl,
+html[data-theme="marigold"] .bg-muted.rounded-md {
+  box-shadow:
+    -2px -2px 5px rgba(255, 253, 247, 0.8),
+    3px 3px 8px rgba(180, 128, 60, 0.3);
+}
+
 /* The inbox chat wallpaper (message-thread.tsx's DOODLE_BG_CLASSES) is
  * a fixed slate-500 SVG tuned for a near-black background — under
  * Marigold's warm cream it read as an out-of-place cool-grey smudge.
