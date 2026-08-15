@@ -354,6 +354,90 @@ html[data-theme="sunshine"] {
   --sidebar-ring: #f59e0b;
 }
 
+/* Marigold — a "clay" / soft-UI look: cream-orange surfaces with almost
+ * no borders, depth carried entirely by a dual light/dark shadow pair
+ * (embossed-looking) instead of the app's default single soft-elevation
+ * shadow. --card equals --background on purpose (true neumorphism reads
+ * surfaces as one continuous material, cut apart only by shadow) — the
+ * existing ring-foreground/10 on Card stays but is faint enough not to
+ * break the illusion. Self-contained like ember/sunshine (overrides the
+ * full surface set, not just accent tokens), so it looks the same
+ * regardless of the light/dark mode toggle. */
+html[data-theme="marigold"] {
+  --background: #fbe9d0;
+  --foreground: #3d2712;
+  --card: #fbe9d0;
+  --card-2: #f6dfc0;
+  --card-foreground: #3d2712;
+  --popover: #fffdf8;
+  --popover-foreground: #3d2712;
+  --secondary: #f6dfc0;
+  --secondary-foreground: #3d2712;
+  --muted: #f6dfc0;
+  --muted-foreground: #8a6a3f;
+  --accent: #ffe3bc;
+  --accent-foreground: #3d2712;
+  --destructive: #ef4444;
+  --border: #edd3a8;
+  --input: #edd3a8;
+  --radius: 1.15rem;
+
+  --primary: #ef7d0f;
+  --primary-foreground: #ffffff;
+  --primary-hover: #d96c05;
+  --primary-soft: rgba(239, 125, 15, 0.12);
+  --primary-soft-2: rgba(239, 125, 15, 0.22);
+  --ring: #ef7d0f;
+  --chart-1: #ef7d0f;
+  --chart-2: #ffc93d;
+  --chart-3: #22c55e;
+  --chart-4: #3b82f6;
+  --chart-5: #ef4444;
+
+  --sidebar: #fff6e8;
+  --sidebar-foreground: #3d2712;
+  --sidebar-accent: #f6dfc0;
+  --sidebar-accent-foreground: #3d2712;
+  --sidebar-border: #edd3a8;
+  --sidebar-primary: #ef7d0f;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-ring: #ef7d0f;
+
+  /* Overrides the app's default single-shadow --shadow-soft(-lg) —
+   * Card reads this via an inline style, and .card-hover's :hover
+   * state reads -lg, so every card in the app gets the clay emboss
+   * with no component changes. */
+  --shadow-soft:
+    -7px -7px 14px rgba(255, 252, 244, 0.9),
+    7px 7px 16px rgba(198, 154, 92, 0.32);
+  --shadow-soft-lg:
+    -10px -10px 20px rgba(255, 252, 244, 0.95),
+    10px 10px 24px rgba(198, 154, 92, 0.38);
+}
+
+/* Filled buttons (`bg-primary` is a stable marker of Button's "default"
+ * variant — see buttonVariants in components/ui/button.tsx) get the
+ * same clay treatment: an orange-to-yellow gradient face, an embossed
+ * shadow at rest/hover, and a pressed *inset* shadow on :active so the
+ * existing translate/scale press animation reads as pushing the button
+ * into the surface rather than just shrinking it. */
+html[data-theme="marigold"] [data-slot="button"].bg-primary {
+  background-image: linear-gradient(135deg, #ff8a3d, #ffc93d);
+  box-shadow:
+    -3px -3px 7px rgba(255, 252, 244, 0.7),
+    5px 5px 13px rgba(198, 154, 92, 0.4);
+}
+html[data-theme="marigold"] [data-slot="button"].bg-primary:hover:not(:disabled) {
+  box-shadow:
+    -4px -4px 9px rgba(255, 252, 244, 0.75),
+    7px 7px 16px rgba(198, 154, 92, 0.45);
+}
+html[data-theme="marigold"] [data-slot="button"].bg-primary:active {
+  box-shadow:
+    inset -3px -3px 7px rgba(255, 200, 140, 0.35),
+    inset 3px 3px 8px rgba(150, 100, 40, 0.35);
+}
+
 /* The gradient itself — painted on both `body` and `.app-shell-surface`
  * for the same reason as Ember's pattern below: the shell wrappers
  * paint their own opaque `bg-background` on top of `body` and would

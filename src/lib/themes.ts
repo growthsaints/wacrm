@@ -22,6 +22,7 @@ export const THEME_IDS = [
   "rose",
   "ember",
   "sunshine",
+  "marigold",
 ] as const;
 
 export type ThemeId = (typeof THEME_IDS)[number];
@@ -120,6 +121,12 @@ export const THEMES: ReadonlyArray<ThemeMeta> = [
     name: "Sunshine",
     tagline: "Golden-yellow gradient background with crisp ivory cards — bright and optimistic.",
     swatch: "#F59E0B",
+  },
+  {
+    id: "marigold",
+    name: "Marigold",
+    tagline: "Soft clay surfaces in cream and orange — tactile, embossed cards with no hard borders.",
+    swatch: "#F2790F",
   },
 ];
 
