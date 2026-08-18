@@ -311,25 +311,71 @@ export async function sendMessageToConversation(
     }
   }
 
-  // Template row (for header + button components). isMessageTemplate
-  // guards against a malformed local row crashing the send-builder.
+  // Template row (for header + button components, and to resolve the
+  // Meta-registered language). isMessageTemplate guards against a
+  // malformed local row crashing the send-builder.
+  //
+  // Callers (especially external integrations hitting the public API)
+  // routinely omit `template.language`, or send a plausible-looking
+  // code that isn't actually the one the template was approved under
+  // (e.g. "en" vs "en_US" — Meta treats these as different templates
+  // entirely). The old code always defaulted a missing/mismatched
+  // language to 'en_US' and sent that straight to Meta regardless of
+  // whether any local row matched, which surfaces as an opaque
+  // "(#132001) Template name does not exist in the translation" from
+  // Meta instead of an actionable error from us. Now: try the exact
+  // language first if one was given, then fall back to name-only and
+  // use *that* row's real language — covering the common case of one
+  // language per template name — and only fail loudly if no row for
+  // this name exists under any language at all.
   let templateRow: MessageTemplate | null = null;
+  let effectiveTemplateLanguage = templateLanguage || 'en_US';
   if (messageType === 'template' && templateName) {
-    const { data } = await db
-      .from('message_templates')
-      .select('*')
-      .eq('account_id', accountId)
-      .eq('name', templateName)
-      .eq('language', templateLanguage || 'en_US')
-      .maybeSingle();
-    if (data && !isMessageTemplate(data)) {
+    let data: MessageTemplate | null = null;
+    if (templateLanguage) {
+      const { data: exact } = await db
+        .from('message_templates')
+        .select('*')
+        .eq('account_id', accountId)
+        .eq('name', templateName)
+        .eq('language', templateLanguage)
+        .maybeSingle();
+      data = exact ?? null;
+    }
+    if (!data) {
+      const { data: byName } = await db
+        .from('message_templates')
+        .select('*')
+        .eq('account_id', accountId)
+        .eq('name', templateName)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (byName) {
+        if (templateLanguage) {
+          console.warn(
+            `[send-message] template "${templateName}" has no row for language "${templateLanguage}" — falling back to its registered language "${byName.language}"`
+          );
+        }
+        data = byName;
+      }
+    }
+    if (!data) {
+      throw new SendMessageError(
+        'template_not_found',
+        `No template named "${templateName}" is registered for this account. Check Settings → Templates for the exact name and language.`,
+        404
+      );
+    }
+    if (!isMessageTemplate(data)) {
       throw new SendMessageError(
         'template_malformed',
         'Template row is malformed locally — run "Sync from Meta" in Settings to repair it.',
         500
       );
     }
-    templateRow = data ?? null;
+    templateRow = data;
+    effectiveTemplateLanguage = data.language || effectiveTemplateLanguage;
   }
 
   // Wallet check — before touching Meta at all, so a message that
@@ -354,7 +400,7 @@ export async function sendMessageToConversation(
         accessToken,
         to: phone,
         templateName: templateName!,
-        language: templateLanguage || 'en_US',
+        language: effectiveTemplateLanguage,
         template: templateRow ?? undefined,
         messageParams: templateMessageParams ?? undefined,
         params: templateParams || [],
