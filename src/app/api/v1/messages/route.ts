@@ -23,8 +23,18 @@
 //       "params": ["A123"] | { "body": [...] }   // array = positional body; object = structured
 //     },
 //     "reply_to_message_id": "<uuid>",       // optional, must be in the same conversation
-//     "name": "Jane Doe"                     // optional, names a newly-created contact
+//     "name": "Jane Doe",                    // optional, names a newly-created contact
+//     "idempotency_key": "order-42-shipped"  // optional, see below — an `Idempotency-Key`
+//                                             //   header takes precedence over this field
 //   }
+//
+// Idempotency: a retried request (same account, same key) within the
+// stored window replays the *original* response verbatim — including
+// status 201 — instead of sending the WhatsApp message a second time.
+// Pass a caller-chosen key via the `Idempotency-Key` header (preferred,
+// Stripe-style) or the `idempotency_key` body field. Omit it entirely
+// for one-shot sends where replay safety doesn't matter (e.g. a human
+// clicking "send" in a UI) — the key is optional, not required.
 //
 // Response (201):
 //   { "data": { "message_id", "whatsapp_message_id", "conversation_id",
@@ -39,11 +49,22 @@ import {
   validateSendMessageParams,
   SendMessageError,
 } from '@/lib/whatsapp/send-message';
+import {
+  reserveIdempotencyKey,
+  fillIdempotencyKey,
+  releaseIdempotencyKey,
+  extractIdempotencyKey,
+} from '@/lib/api/v1/idempotency';
 import type { InteractiveMessagePayload } from '@/lib/whatsapp/interactive';
 
 export async function POST(request: Request) {
+  // Hoisted above the try so the catch block can release a reserved
+  // idempotency key regardless of where in the pipeline it failed.
+  let ctx: Awaited<ReturnType<typeof requireApiKey>> | null = null;
+  let reservedIdempotencyKey: string | null = null;
+
   try {
-    const ctx = await requireApiKey(request, 'messages:send');
+    ctx = await requireApiKey(request, 'messages:send');
 
     const body = (await request.json().catch(() => null)) as Record<
       string,
@@ -56,6 +77,33 @@ export async function POST(request: Request) {
     const to = typeof body.to === 'string' ? body.to.trim() : '';
     if (!to) {
       return fail('bad_request', "'to' is required", 400);
+    }
+
+    const idempotencyKey = extractIdempotencyKey(request, body);
+
+    // Reserve the key BEFORE doing anything side-effecting. Two
+    // concurrent requests for the same key both race on this INSERT;
+    // the UNIQUE constraint lets exactly one through. The loser either
+    // replays the winner's already-filled-in response, or — if the
+    // winner hasn't finished yet — is told a send is already in
+    // flight, rather than sending the message a second time.
+    const reservation = await reserveIdempotencyKey(
+      ctx.supabase,
+      ctx.accountId,
+      idempotencyKey
+    );
+    if (reservation.status === 'replay') {
+      return ok(reservation.responseBody, 201);
+    }
+    if (reservation.status === 'in_progress') {
+      return fail(
+        'idempotency_in_progress',
+        'A request with this idempotency key is already being processed',
+        409
+      );
+    }
+    if (reservation.status === 'reserved') {
+      reservedIdempotencyKey = idempotencyKey;
     }
 
     const type = typeof body.type === 'string' ? body.type : 'text';
@@ -127,17 +175,32 @@ export async function POST(request: Request) {
       }
     );
 
-    return ok(
-      {
-        message_id: result.messageId,
-        whatsapp_message_id: result.whatsappMessageId,
-        conversation_id: resolved.conversationId,
-        contact_id: resolved.contactId,
-        contact_created: resolved.contactCreated,
-      },
-      201
-    );
+    const responseData = {
+      message_id: result.messageId,
+      whatsapp_message_id: result.whatsappMessageId,
+      conversation_id: resolved.conversationId,
+      contact_id: resolved.contactId,
+      contact_created: resolved.contactCreated,
+    };
+
+    if (reservedIdempotencyKey) {
+      await fillIdempotencyKey(
+        ctx.supabase,
+        ctx.accountId,
+        reservedIdempotencyKey,
+        responseData,
+        result.messageId
+      );
+    }
+
+    return ok(responseData, 201);
   } catch (err) {
+    // The send never completed — release the reservation so a genuine
+    // retry (not just a duplicate) isn't permanently stuck behind a
+    // NULL response_body forever.
+    if (reservedIdempotencyKey && ctx) {
+      await releaseIdempotencyKey(ctx.supabase, ctx.accountId, reservedIdempotencyKey);
+    }
     if (err instanceof SendMessageError) {
       return fail(err.code, err.message, err.status);
     }

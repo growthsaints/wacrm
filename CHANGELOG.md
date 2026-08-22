@@ -9,6 +9,46 @@ Versions follow [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Pre-1.0, `MINOR` bumps cover new modules; `PATCH` bumps cover bug fixes
 and polish.
 
+## [Unreleased]
+
+Adds a full ecommerce/payment/shipping notification pipeline to the
+public API — configurable per account, no code changes needed to onboard
+a new client.
+
+> **Migration required:** apply, in order, `supabase/migrations/065_message_send_idempotency.sql`,
+> `066_notification_rules.sql`, `067_payment_gateway_configs.sql`,
+> `068_shipping_configs.sql`, and `069_notification_send_logs.sql`.
+
+### Added
+
+- **Idempotency keys on `POST /api/v1/messages`.** Pass an
+  `Idempotency-Key` header (or `idempotency_key` body field) so a
+  retried request replays the original response instead of sending the
+  WhatsApp message twice. Race-safe under concurrent retries via a
+  reserve-then-fill insert, not check-then-insert.
+- **`notification_rules`** — per-account, per-event config mapping an
+  ecommerce/payment/shipping event to a WhatsApp template, language, and
+  an ordered list of dot-paths to fill its variables from. Managed via
+  `POST`/`GET`/`PATCH`/`DELETE /api/v1/notification-rules`.
+- **`POST /api/v1/ecommerce/webhook`** — generic, API-key-authenticated
+  receiver for a custom order backend (not Shopify/WooCommerce, which
+  already have their own native connectors) to trigger a templated
+  WhatsApp notification on an order event.
+- **`POST /api/v1/payments/webhook/{configId}`** — Razorpay payment
+  webhook receiver, HMAC-signature-verified against a per-account
+  encrypted secret (`payment_gateway_configs`, managed via
+  `/api/v1/payment-gateways`). Built on a pluggable gateway-adapter
+  interface so a second gateway (e.g. Stripe) is additive.
+- **`POST /api/v1/shipping/webhook/{configId}`** — generic shipping/
+  courier receiver, signed with the same Stripe-style HMAC scheme
+  wacrm's own outbound webhooks use (`shipping_configs`, managed via
+  `/api/v1/shipping-configs`).
+- **`notification_send_logs`** — every accepted delivery across the
+  three receivers above is logged (sent/replayed/skipped/failed +
+  reason), queryable per account for delivery troubleshooting.
+- A new `notifications:manage` API key scope gates all of the above
+  config endpoints.
+
 ## [0.8.1] — 2026-07-10
 
 Fixes inbound chats fragmenting into multiple threads for the same

@@ -50,6 +50,8 @@ it. Grant the minimum.
 | `conversations:read` | List and read conversations              |
 | `broadcasts:send`    | Launch broadcast campaigns               |
 | `webhooks:manage`    | Register and manage outbound webhooks    |
+| `flows:trigger`      | Start automation flows for a contact     |
+| `notifications:manage` | Configure event → template notification rules |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -163,6 +165,27 @@ Response (201):
 Domain error codes beyond the table above: `whatsapp_not_configured`
 (400), `meta_error` (502 — the request reached Meta and it rejected the
 send), `template_malformed` (500).
+
+**Idempotency.** A webhook-triggered caller (an order/payment/shipping
+backend reacting to its own retried event) can't always tell whether a
+prior send actually went through before it retries. Pass a caller-
+chosen `Idempotency-Key` header (or an `idempotency_key` body field —
+the header wins if both are set):
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/messages \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: order-42-shipped" \
+  -d '{ "to": "+14155550123", "type": "template", "template": { "name": "order_shipped" } }'
+```
+
+Retrying the same request with the same key replays the *original*
+`201` response instead of sending the message again. A retry that
+races the original request while it's still in flight gets
+`409 idempotency_in_progress` — retry again shortly. The key is
+optional; omit it for one-shot sends (e.g. an agent clicking "send" in
+the inbox) where replay safety doesn't matter.
 
 ### `GET /api/v1/contacts`
 
@@ -373,6 +396,125 @@ reconcile with the read endpoints when it matters.
 resolve to a public address — requests to `localhost`, private/RFC1918
 ranges, link-local (incl. cloud metadata `169.254.169.254`), and similar
 internal targets are refused at delivery time.
+
+## Notification rules
+
+Config for the ecommerce/payment/shipping notification receivers: which
+WhatsApp template fires for which event, per account. **Migration
+required:** `supabase/migrations/066_notification_rules.sql`. All under
+scope `notifications:manage`.
+
+### Events
+
+| Namespace  | Events |
+| ---------- | ------ |
+| Ecommerce  | `order.created`, `order.paid`, `order.processing`, `order.shipped`, `order.delivered`, `order.cancelled`, `order.refunded`, `cart.abandoned` |
+| Payments   | `payment.captured`, `payment.failed`, `payment.refunded` |
+| Shipping   | `shipment.created`, `shipment.in_transit`, `shipment.out_for_delivery`, `shipment.delivered`, `shipment.failed`, `shipment.returned` |
+
+### Managing rules
+
+- `POST /api/v1/notification-rules` — create a rule: `{ "event": "order.shipped", "template_name": "order_shipped", "template_language": "en", "param_mapping": ["order.number", "order.tracking_url"] }`. `template_language` defaults to `"en"`; `param_mapping` defaults to `[]`. One rule per `event` per account — `409` if one already exists (use `PATCH` instead).
+- `GET /api/v1/notification-rules` — list your account's rules.
+- `GET /api/v1/notification-rules/{id}` — read one.
+- `PATCH /api/v1/notification-rules/{id}` — update `template_name`, `template_language`, `param_mapping`, or `is_active`.
+- `DELETE /api/v1/notification-rules/{id}` — remove one.
+
+`param_mapping` is an ordered list of dot-paths into the receiving
+webhook's normalized `data` object (documented per-receiver) — each
+path is resolved and passed as the template's positional body
+variables, in order. A path that doesn't resolve (typo, missing
+optional field) becomes an empty string rather than failing the send.
+A disabled (`is_active: false`) or unconfigured event is silently
+skipped by the receiver — no template fires, nothing errors.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/notification-rules \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "event": "order.shipped", "template_name": "order_shipped", "param_mapping": ["order.number", "order.tracking_url"] }'
+```
+
+### `POST /api/v1/ecommerce/webhook`
+
+Generic ecommerce event receiver for a custom/non-Shopify/WooCommerce
+order backend that already holds a wacrm API key. Scope:
+`messages:send` — the bearer token **is** the authentication; there's
+no separate payload signature to configure, unlike the payment/
+shipping receivers below (which sit in front of a third-party platform
+with its own signing convention). If you're on Shopify or WooCommerce,
+use the built-in store connection in Settings instead — this endpoint
+is for everything else.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/ecommerce/webhook \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: your-own-event-id" \
+  -d '{
+        "event": "order.shipped",
+        "to": "+14155550123",
+        "name": "Jane Doe",
+        "data": { "order": { "number": "ORD-42", "tracking_url": "https://…" } }
+      }'
+```
+
+- `event` — required, one of the [ecommerce events](#events) above.
+- `to` — required, E.164. Find-or-creates the contact, same as `POST /api/v1/messages`.
+- `name` — optional, names a newly-created contact.
+- `data` — the object `param_mapping` dot-paths (configured via [notification rules](#notification-rules)) are resolved against.
+- `idempotency_key` (or an `Idempotency-Key` header, which wins) — recommended, since your own backend likely retries a failed delivery to this endpoint the same way it retries anything else.
+
+An `event` wacrm doesn't recognize, or a recognized event with no
+active rule configured for this account, is **not** an error — it
+`200`s with `{ "data": { "skipped": true, "reason": "…" } }` and sends
+nothing, so an account that hasn't configured a given event yet
+doesn't make your delivery system treat it as a failure worth
+retrying. A genuine send failure (bad phone, WhatsApp not configured,
+Meta rejected the send) uses the same error codes as
+`POST /api/v1/messages`.
+
+### Payment gateway notifications (Razorpay)
+
+Unlike the receiver above, a payment gateway posts directly to a URL
+you paste into *its own* dashboard — there's no wacrm API key in that
+request. **Migration required:**
+`supabase/migrations/067_payment_gateway_configs.sql`.
+
+1. `POST /api/v1/payment-gateways` (scope `notifications:manage`) — connect a gateway: `{ "gateway": "razorpay", "webhook_secret": "<the signing secret shown in Razorpay's dashboard>" }`. The response's `webhook_url` is what you paste into **Razorpay → Settings → Webhooks** (alongside the *same* secret, so both sides agree on it).
+2. `GET` / `PATCH` / `DELETE /api/v1/payment-gateways/{id}` — list, rotate the secret or toggle `is_active`, or disconnect. The secret is never returned once saved.
+3. Configure [notification rules](#notification-rules) for `payment.captured`, `payment.failed`, `payment.refunded` — `param_mapping` reads from `{ "payment": { "id", "amount", "currency", "email", "contact", "order_id" } }` (`amount` is already converted from paise to a 2-decimal string).
+
+Razorpay signs each delivery with `X-Razorpay-Signature: <hex>` (HMAC-SHA256 of the raw body using your configured secret) — verified before anything else runs; an invalid signature is `401`ed with no lookups, no rule matching, and no send attempted. An event Razorpay sends that wacrm doesn't act on (e.g. `payment.authorized`), or one with no phone number in the payload, is skipped the same way as the generic receiver — `200`, nothing sent.
+
+### Shipping / courier notifications
+
+No single courier API dominates the way Razorpay does for payments,
+so this receiver defines its own signing convention rather than
+adapting to one specific carrier: the same Stripe-style HMAC scheme
+wacrm's own outbound [webhooks](#webhooks) use. **Migration required:**
+`supabase/migrations/068_shipping_configs.sql`.
+
+1. `POST /api/v1/shipping-configs` (scope `notifications:manage`) — register a target: `{ "carrier": "delhivery", "webhook_secret": "<a secret you generate>" }`. `carrier` is just a label for your own reference. The response's `webhook_url` is where your shipping system (or a relay in front of your actual courier) should POST.
+2. `GET` / `PATCH` / `DELETE /api/v1/shipping-configs/{id}` — list, rotate the secret / rename / toggle `is_active`, or remove.
+3. Sign every request to `webhook_url` with `X-Wacrm-Signature: t=<unix_seconds>,v1=<hex>` where `v1 = HMAC-SHA256(secret, "${t}.${rawBody}")` — identical to [verifying wacrm's own outbound signature](#verifying-the-signature), just in reverse.
+4. Body: `{ "event": "shipment.delivered", "to": "+14155550123", "name": "Jane Doe", "data": { "shipment": { "tracking_number": "…" } }, "idempotency_key": "…" }`. `event` must be one of the `shipment.*` [events](#events) above — anything else (or an unconfigured event) is skipped (`200`, nothing sent), same as the other receivers. `idempotency_key` (no header variant here — pass it in the body) is recommended for retried deliveries.
+
+A missing or invalid signature is `401`ed before the body is even
+parsed — no rule lookup, no send attempted.
+
+### Delivery log
+
+Every delivery accepted by any of the three receivers above (i.e. past
+signature/auth verification) writes one row to `notification_send_logs`
+(`supabase/migrations/069_notification_send_logs.sql`) — `source`
+(`ecommerce` / `payment` / `shipping`), `event`, `phone`,
+`template_name`, `status` (`sent` / `replayed` / `skipped` / `failed`),
+and `reason` (the skip reason or error message). Any account member can
+read it directly via the Supabase client (RLS-scoped, same as
+`notification_rules`); there's no dedicated `/api/v1` endpoint for it
+yet. This is what to check first when a customer says they didn't get
+a WhatsApp notification.
 
 ## Roadmap
 
