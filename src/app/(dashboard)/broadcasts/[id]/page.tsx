@@ -332,7 +332,18 @@ export default function BroadcastDetailPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-        {pendingCount > 0 ? (
+        {broadcast.status === 'awaiting_confirmation' && pendingCount > 0 ? (
+          <Button
+            size="sm"
+            onClick={handleResume}
+            disabled={isResuming}
+            title={t('confirmSendRemainingHover')}
+            className="bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${isResuming ? 'animate-spin' : ''}`} />
+            {isResuming ? t('resuming') : t('confirmSendRemaining', { count: pendingCount })}
+          </Button>
+        ) : pendingCount > 0 ? (
           <Button
             variant="outline"
             size="sm"
@@ -390,6 +401,18 @@ export default function BroadcastDetailPage() {
         )}
         </div>
       </div>
+
+      {broadcast.status === 'awaiting_confirmation' ? (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
+          <div className="text-amber-200">
+            <p className="font-medium">{t('testBatchTitle')}</p>
+            <p className="mt-0.5 text-amber-200/80">
+              {t('testBatchBody', { count: pendingCount })}
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       {/* Stats — 6 cards: Total / Sent / Delivered / Read / Replied / Failed */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">

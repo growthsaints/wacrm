@@ -37,6 +37,10 @@ export const broadcastStatusConfig: Record<BroadcastStatus, StatusDisplay> = {
     classes: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
     pulse: true,
   },
+  awaiting_confirmation: {
+    label: "awaitingConfirmation",
+    classes: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  },
   sent: {
     label: "sent",
     classes: "bg-primary/10 text-primary border-primary/20",

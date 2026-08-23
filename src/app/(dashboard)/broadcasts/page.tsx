@@ -31,6 +31,7 @@ const BROADCAST_STATUSES: readonly BroadcastStatus[] = [
   'draft',
   'scheduled',
   'sending',
+  'awaiting_confirmation',
   'sent',
   'failed',
 ];

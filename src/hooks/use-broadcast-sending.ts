@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import { BroadcastRecipient, Contact, MessageTemplate } from '@/types';
+import { shouldTestBatchFirst, TEST_BATCH_SIZE } from '@/lib/whatsapp/test-batch';
 
 export type CustomFieldOperator = 'is' | 'is_not' | 'contains';
 
@@ -640,13 +641,26 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
 
       const totalRecipients = recipients.length;
 
+      // Large audiences send a small test batch first and then stop —
+      // a bad template or a bad audience should be caught while only a
+      // handful of contacts have been messaged, not after hundreds have
+      // (exactly the pattern that trips Meta's quality-rating
+      // enforcement). The rest stay `pending`; the broadcast detail
+      // page's existing "Resend to Pending" action — already wired to
+      // resumeBroadcast() below — doubles as the human confirmation
+      // step to send the remainder.
+      const isLargeBroadcast = shouldTestBatchFirst(totalRecipients);
+      const recipientsToSend = isLargeBroadcast
+        ? recipients.slice(0, TEST_BATCH_SIZE)
+        : recipients;
+
       // Media-header templates (image/video/document) require a media
       // URL on every send. Collected in the personalize step and applied
       // to all recipients; falls back to the template's stored URL on the
       // server when omitted.
       const { failedCount } = await runSendLoop({
         supabase,
-        recipients,
+        recipients: recipientsToSend,
         templateName: payload.template.name,
         templateLanguage: payload.template.language ?? 'en_US',
         variables: payload.variables,
@@ -663,7 +677,12 @@ export function useBroadcastSending(): UseBroadcastSendingReturn {
       // Aggregate counts are maintained by the DB trigger (migration
       // 003); we only flip the final status here.
       setProgress(95);
-      const finalStatus = failedCount === totalRecipients ? 'failed' : 'sent';
+      const allSentFailed = failedCount === recipientsToSend.length;
+      const finalStatus = allSentFailed
+        ? 'failed'
+        : isLargeBroadcast
+          ? 'awaiting_confirmation'
+          : 'sent';
       await supabase
         .from('broadcasts')
         .update({ status: finalStatus })

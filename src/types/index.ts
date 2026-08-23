@@ -469,7 +469,13 @@ export interface Deal {
   assignee?: Profile;
 }
 
-export type BroadcastStatus = 'draft' | 'scheduled' | 'sending' | 'sent' | 'failed';
+export type BroadcastStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'sending'
+  | 'awaiting_confirmation'
+  | 'sent'
+  | 'failed';
 export type RecipientStatus = 'pending' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed';
 
 export interface Broadcast {
@@ -512,6 +518,12 @@ export interface BroadcastRecipient {
    * Added in migration 003.
    */
   whatsapp_message_id?: string;
+  /**
+   * Body {{N}} personalization values, persisted at creation time so a
+   * later resumeBroadcastDelivery (public API) can re-send with the
+   * same personalization. Migration 076.
+   */
+  send_params?: string[] | null;
   created_at: string;
   contact?: Contact;
 }

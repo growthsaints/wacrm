@@ -33,6 +33,7 @@ import { categoryFromTemplate } from '@/lib/billing/rates';
 import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet';
 import { ensureDailyBroadcastQuota, DailyQuotaError } from '@/lib/whatsapp/daily-quota';
 import { ensureQualityRatingSafe, QualityRatingError } from '@/lib/whatsapp/quality-guard';
+import { shouldTestBatchFirst, TEST_BATCH_SIZE } from '@/lib/whatsapp/test-batch';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -77,6 +78,13 @@ export interface BroadcastPlan {
   planned: PlannedRecipient[];
   /** Phones rejected up front (invalid E.164) — counted as failed. */
   rejected: number;
+  /**
+   * True when the audience is large enough to send a test batch first
+   * (see lib/whatsapp/test-batch.ts) — deliverBroadcast only sends to
+   * the first TEST_BATCH_SIZE of `planned` and leaves the broadcast at
+   * `awaiting_confirmation`; resumeBroadcastDelivery sends the rest.
+   */
+  isLargeBroadcast: boolean;
 }
 
 const MAX_RECIPIENTS = 1000;
@@ -223,6 +231,11 @@ export async function createBroadcast(
         broadcast_id: broadcast.id,
         contact_id: r.contactId,
         status: 'pending' as const,
+        // Persisted so a later resumeBroadcastDelivery (confirming a
+        // test batch, or recovering a broadcast that never finished)
+        // can re-send with the same personalization — params only ever
+        // existed in-memory here otherwise.
+        send_params: r.params,
       }))
     )
     .select('id, contact_id');
@@ -249,37 +262,46 @@ export async function createBroadcast(
     templateRow,
     planned,
     rejected,
+    isLargeBroadcast: shouldTestBatchFirst(deduped.length),
   };
 }
 
-/**
- * Fan out a {@link BroadcastPlan}: send each recipient's template
- * (phone-variant retry) and stamp its `broadcast_recipients` row.
- * Best-effort per recipient — one failure never aborts the rest.
- * Designed to run inside `after()`.
- *
- * The per-status count columns on `broadcasts` are owned by the DB
- * aggregate trigger (migrations 003/005): each recipient-row update
- * below advances them automatically, and later Meta delivery/read
- * webhooks keep advancing them. We therefore never write those columns
- * here — only the terminal `status` — otherwise a manual value would
- * race and clobber the trigger-maintained counts.
- */
-export async function deliverBroadcast(
-  db: SupabaseClient,
-  plan: BroadcastPlan
-): Promise<void> {
-  let sentCount = 0;
-  const billingCategory = categoryFromTemplate(plan.templateRow?.category);
+interface SendPlannedRecipientsParams {
+  accountId: string;
+  templateName: string;
+  templateLanguage: string;
+  phoneNumberId: string;
+  accessToken: string;
+  templateRow: MessageTemplate | null;
+  planned: PlannedRecipient[];
+}
 
-  for (const recipient of plan.planned) {
+/**
+ * The actual per-recipient send loop: phone-variant retry, wallet/daily-
+ * quota/quality-rating guards, and the `broadcast_recipients` row
+ * update. Best-effort per recipient — one failure never aborts the
+ * rest. Shared by {@link deliverBroadcast} (the initial send) and
+ * {@link resumeBroadcastDelivery} (confirming a test batch, or
+ * recovering a broadcast that never finished) so both apply the exact
+ * same protections rather than a second, drifting copy.
+ */
+async function sendPlannedRecipients(
+  db: SupabaseClient,
+  params: SendPlannedRecipientsParams
+): Promise<{ sentCount: number }> {
+  const { accountId, templateName, templateLanguage, phoneNumberId, accessToken, templateRow, planned } =
+    params;
+  let sentCount = 0;
+  const billingCategory = categoryFromTemplate(templateRow?.category);
+
+  for (const recipient of planned) {
     // Checked first and per-recipient: a Red quality rating can be hit
     // mid-broadcast (Meta re-scores continuously), so re-checking on
     // every recipient — not once up front — stops the send the moment
     // it happens instead of finishing out a batch that's actively
     // making the number's standing worse.
     try {
-      await ensureQualityRatingSafe(db, plan.accountId);
+      await ensureQualityRatingSafe(db, accountId);
     } catch (err) {
       const message = err instanceof QualityRatingError ? err.message : 'Quality rating check failed';
       await db
@@ -293,7 +315,7 @@ export async function deliverBroadcast(
     // wallet that runs out partway through stops billing further sends
     // instead of either over-charging or crashing the whole batch.
     try {
-      await ensureWalletBalance(db, plan.accountId, billingCategory);
+      await ensureWalletBalance(db, accountId, billingCategory);
     } catch (err) {
       const message = err instanceof WalletError ? err.message : 'Wallet check failed';
       await db
@@ -308,7 +330,7 @@ export async function deliverBroadcast(
     // tier's daily cap, rather than plowing through the rest of the
     // batch and risking Meta throttling/flagging the number.
     try {
-      await ensureDailyBroadcastQuota(db, plan.accountId);
+      await ensureDailyBroadcastQuota(db, accountId);
     } catch (err) {
       const message = err instanceof DailyQuotaError ? err.message : 'Daily quota check failed';
       await db
@@ -325,12 +347,12 @@ export async function deliverBroadcast(
     for (const variant of variants) {
       try {
         const result = await sendTemplateMessage({
-          phoneNumberId: plan.phoneNumberId,
-          accessToken: plan.accessToken,
+          phoneNumberId,
+          accessToken,
           to: variant,
-          templateName: plan.templateName,
-          language: plan.templateLanguage,
-          template: plan.templateRow ?? undefined,
+          templateName,
+          language: templateLanguage,
+          template: templateRow ?? undefined,
           params: recipient.params,
         });
         sentMessageId = result.messageId;
@@ -346,7 +368,7 @@ export async function deliverBroadcast(
 
     if (sentMessageId) {
       sentCount++;
-      await chargeWalletForSend(db, plan.accountId, billingCategory);
+      await chargeWalletForSend(db, accountId, billingCategory);
       await db
         .from('broadcast_recipients')
         .update({
@@ -367,14 +389,161 @@ export async function deliverBroadcast(
     }
   }
 
+  return { sentCount };
+}
+
+/**
+ * Fan out a {@link BroadcastPlan}. Designed to run inside `after()`.
+ *
+ * For a large audience (`plan.isLargeBroadcast`), only the first
+ * `TEST_BATCH_SIZE` of `plan.planned` are actually sent here — the rest
+ * stay `pending` and the broadcast lands at `awaiting_confirmation`
+ * rather than `sent`/`failed`, so a bad template/audience is caught
+ * while only a handful of contacts have been messaged. See
+ * {@link resumeBroadcastDelivery} for sending the remainder once
+ * confirmed.
+ *
+ * The per-status count columns on `broadcasts` are owned by the DB
+ * aggregate trigger (migrations 003/005): each recipient-row update
+ * advances them automatically, and later Meta delivery/read webhooks
+ * keep advancing them. We therefore never write those columns here —
+ * only the terminal `status` — otherwise a manual value would race and
+ * clobber the trigger-maintained counts.
+ */
+export async function deliverBroadcast(
+  db: SupabaseClient,
+  plan: BroadcastPlan
+): Promise<void> {
+  const toSend = plan.isLargeBroadcast ? plan.planned.slice(0, TEST_BATCH_SIZE) : plan.planned;
+
+  const { sentCount } = await sendPlannedRecipients(db, {
+    accountId: plan.accountId,
+    templateName: plan.templateName,
+    templateLanguage: plan.templateLanguage,
+    phoneNumberId: plan.phoneNumberId,
+    accessToken: plan.accessToken,
+    templateRow: plan.templateRow,
+    planned: toSend,
+  });
+
   // Terminal status only — counts are trigger-owned (see the note
   // above). If nothing sent, the broadcast failed outright; a partial
-  // send is still 'sent' (per-recipient failures show in failed_count).
+  // send of a normal-size broadcast is still 'sent' (per-recipient
+  // failures show in failed_count) — but a large broadcast's test batch
+  // lands at 'awaiting_confirmation' instead, pending a human decision
+  // to send the rest via resumeBroadcastDelivery.
+  const finalStatus =
+    sentCount === 0 ? 'failed' : plan.isLargeBroadcast ? 'awaiting_confirmation' : 'sent';
   await db
     .from('broadcasts')
     .update({
-      status: sentCount > 0 ? 'sent' : 'failed',
+      status: finalStatus,
       updated_at: new Date().toISOString(),
     })
     .eq('id', plan.broadcastId);
+}
+
+/**
+ * Confirms and sends the remainder of a broadcast a test batch left at
+ * `awaiting_confirmation` (see {@link deliverBroadcast}) — the public-
+ * API counterpart of the dashboard's `resumeBroadcast()` client hook,
+ * which does the equivalent for a dashboard-created broadcast via
+ * `/api/whatsapp/broadcast`. Also doubles as recovery for a broadcast
+ * whose delivery was interrupted (e.g. a serverless function frozen
+ * mid-`after()`), since both cases are just "recipients still pending".
+ *
+ * Rejects any status other than `awaiting_confirmation` so this can't
+ * be used to re-fire a broadcast that already finished sending.
+ */
+export async function resumeBroadcastDelivery(
+  db: SupabaseClient,
+  accountId: string,
+  broadcastId: string
+): Promise<{ sent: number; failed: number; status: 'sent' | 'failed' }> {
+  const { data: broadcast, error: bErr } = await db
+    .from('broadcasts')
+    .select('id, status, template_name, template_language')
+    .eq('id', broadcastId)
+    .eq('account_id', accountId)
+    .maybeSingle();
+  if (bErr || !broadcast) {
+    throw new BroadcastError('not_found', 'Broadcast not found', 404);
+  }
+  if (broadcast.status !== 'awaiting_confirmation') {
+    throw new BroadcastError(
+      'bad_request',
+      `Broadcast is '${broadcast.status}', not awaiting confirmation — nothing to confirm.`,
+      400
+    );
+  }
+
+  const { data: config, error: configError } = await db
+    .from('whatsapp_config')
+    .select('phone_number_id, access_token')
+    .eq('account_id', accountId)
+    .maybeSingle();
+  if (configError || !config) {
+    throw new BroadcastError(
+      'whatsapp_not_configured',
+      'WhatsApp not configured. Please set up your WhatsApp integration first.',
+      400
+    );
+  }
+  const accessToken = decrypt(config.access_token);
+
+  const { data: rawTemplateRow } = await db
+    .from('message_templates')
+    .select('*')
+    .eq('account_id', accountId)
+    .eq('name', broadcast.template_name)
+    .eq('language', broadcast.template_language)
+    .maybeSingle();
+  const templateRow =
+    rawTemplateRow && isMessageTemplate(rawTemplateRow) ? (rawTemplateRow as MessageTemplate) : null;
+
+  const { data: pendingRows, error: pendingError } = await db
+    .from('broadcast_recipients')
+    .select('id, send_params, contact:contacts(phone)')
+    .eq('broadcast_id', broadcastId)
+    .eq('status', 'pending');
+  if (pendingError) {
+    throw new BroadcastError('internal', 'Failed to load pending recipients', 500);
+  }
+
+  const planned: PlannedRecipient[] = ((pendingRows ?? []) as unknown as Array<{
+    id: string;
+    send_params: unknown;
+    contact: { phone?: string } | null;
+  }>)
+    .filter((row) => Boolean(row.contact?.phone))
+    .map((row) => ({
+      recipientRowId: row.id,
+      phone: row.contact!.phone as string,
+      params: Array.isArray(row.send_params) ? (row.send_params as string[]) : [],
+    }));
+
+  if (planned.length === 0) {
+    throw new BroadcastError('bad_request', 'No pending recipients left to confirm.', 400);
+  }
+
+  const { sentCount } = await sendPlannedRecipients(db, {
+    accountId,
+    templateName: broadcast.template_name,
+    templateLanguage: broadcast.template_language,
+    phoneNumberId: config.phone_number_id,
+    accessToken,
+    templateRow,
+    planned,
+  });
+
+  const status: 'sent' | 'failed' = sentCount === 0 ? 'failed' : 'sent';
+  await db
+    .from('broadcasts')
+    .update({
+      status,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', broadcastId);
+
+  return { sent: sentCount, failed: planned.length - sentCount, status };
 }

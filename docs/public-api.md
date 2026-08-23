@@ -329,11 +329,36 @@ Invalid phone numbers are dropped and counted as `rejected`. Response
 }
 ```
 
+Audiences over 50 recipients send a **test batch of 10 first** and stop
+— `status` lands at `awaiting_confirmation` instead of `sending`, and
+the rest stay `pending`. This catches a bad template/audience while
+only a handful of contacts have been messaged, rather than after
+hundreds — exactly the pattern that trips Meta's quality-rating
+enforcement. Review the test batch's delivery status, then call the
+confirm endpoint below to send to everyone still pending.
+
 ### `GET /api/v1/broadcasts/{id}`
 
 Broadcast status + counts. Scope: `broadcasts:send`. `status` moves
-`sending` → `sent`; `delivered_count` / `read_count` keep climbing as
-Meta delivery webhooks arrive. `404` for another account's broadcast.
+`sending` → (`awaiting_confirmation` →) `sent`; `delivered_count` /
+`read_count` keep climbing as Meta delivery webhooks arrive. `404` for
+another account's broadcast.
+
+### `POST /api/v1/broadcasts/{id}/confirm`
+
+Confirms a test-batch-gated broadcast and sends to every recipient
+still `pending`. Scope: `broadcasts:send`. Returns `400` if the
+broadcast isn't currently `awaiting_confirmation` (already sent, still
+sending, or never large enough to be gated in the first place).
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/broadcasts/{id}/confirm \
+  -H "Authorization: Bearer wacrm_live_xxx"
+```
+
+```json
+{ "data": { "broadcast_id": "…", "sent": 490, "failed": 0, "status": "sent" } }
+```
 
 ## Pagination
 
