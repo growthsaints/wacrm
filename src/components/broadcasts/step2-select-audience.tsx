@@ -4,6 +4,9 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { CustomField, Tag } from '@/types';
 import { Button } from '@/components/ui/button';
+import { findColdContactIds, tagColdContacts } from '@/lib/contacts/cold-contacts';
+import { useAuth } from '@/hooks/use-auth';
+import { toast } from 'sonner';
 import {
   Users,
   Tags,
@@ -13,11 +16,23 @@ import {
   ArrowRight,
   ArrowLeft,
   X,
+  AlertTriangle,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
 type AudienceType = 'all' | 'tags' | 'custom_field' | 'csv';
 type CustomFieldOperator = 'is' | 'is_not' | 'contains';
+
+/**
+ * Above this size, skip the cold-contact check rather than fetching
+ * every id in the audience just to warn about it — matches this
+ * wizard's existing "estimate, don't exhaustively compute" posture for
+ * very large audiences.
+ */
+const COLD_CHECK_MAX_CONTACTS = 5000;
+
+/** Cold share at/above this percentage gets warning styling, not just informational. */
+const COLD_WARNING_THRESHOLD_PCT = 30;
 
 interface CustomFieldFilter {
   fieldId: string;
@@ -47,6 +62,7 @@ export function Step2SelectAudience({
   onBack,
 }: Step2Props) {
   const t = useTranslations('Broadcasts.wizard');
+  const { accountId, user } = useAuth();
 
   const OPERATOR_OPTIONS = useMemo<{ value: CustomFieldOperator; label: string }[]>(() => [
     { value: 'is', label: t('selectAudience.operatorIs') },
@@ -91,22 +107,31 @@ export function Step2SelectAudience({
   const [loadingFields, setLoadingFields] = useState(false);
   const [estimatedCount, setEstimatedCount] = useState<number | null>(null);
   const [loadingCount, setLoadingCount] = useState(false);
+  // Contacts in the current audience that have never sent an inbound
+  // message — null until computed, or if the audience is too large / a
+  // CSV audience (no real contact ids to check against yet — see
+  // findColdContactIds). Kept as the actual id list (not just a count)
+  // so "Tag as Cold" below can act on exactly these contacts.
+  const [coldContactIds, setColdContactIds] = useState<string[] | null>(null);
+  const [tagging, setTagging] = useState(false);
+  const [tagged, setTagged] = useState(false);
+
+  const fetchTags = useCallback(async () => {
+    setLoadingTags(true);
+    try {
+      const supabase = createClient();
+      const { data } = await supabase.from('tags').select('*').order('name');
+      setTags(data ?? []);
+    } finally {
+      setLoadingTags(false);
+    }
+  }, []);
 
   // Tags are used both by the primary "Filter by Tags" audience type
   // AND by the exclude-list below — so always load once on mount.
   useEffect(() => {
-    async function fetchTags() {
-      setLoadingTags(true);
-      try {
-        const supabase = createClient();
-        const { data } = await supabase.from('tags').select('*').order('name');
-        setTags(data ?? []);
-      } finally {
-        setLoadingTags(false);
-      }
-    }
     fetchTags();
-  }, []);
+  }, [fetchTags]);
 
   // Lazy-load custom fields only when that audience type is active.
   useEffect(() => {
@@ -127,8 +152,24 @@ export function Step2SelectAudience({
     fetchFields();
   }, [audience.type]);
 
+  const computeColdCount = useCallback(async (
+    supabase: ReturnType<typeof createClient>,
+    contactIds: string[],
+  ) => {
+    if (contactIds.length === 0 || contactIds.length > COLD_CHECK_MAX_CONTACTS) return;
+    try {
+      const cold = await findColdContactIds(supabase, contactIds);
+      setColdContactIds([...cold]);
+    } catch {
+      // Best-effort — a failed cold-contact check shouldn't block the
+      // wizard; the warning just doesn't show.
+    }
+  }, []);
+
   const fetchEstimatedCount = useCallback(async () => {
     setLoadingCount(true);
+    setColdContactIds(null);
+    setTagged(false);
     try {
       const supabase = createClient();
 
@@ -190,6 +231,7 @@ export function Step2SelectAudience({
           (id) => !excludeSet?.has(id),
         );
         setEstimatedCount(effective.length);
+        await computeColdCount(supabase, effective);
       } else {
         // "All" — fetch the total, then subtract exclude set if any.
         const { count } = await supabase
@@ -197,6 +239,18 @@ export function Step2SelectAudience({
           .select('*', { count: 'exact', head: true });
         const total = count ?? 0;
         setEstimatedCount(excludeSet ? Math.max(0, total - excludeSet.size) : total);
+
+        // The cold-contact check needs real ids, not just a count — only
+        // worth the extra round trip at a bounded size (matches this
+        // wizard's existing "acceptable at current scale" posture, same
+        // as the dashboard's own live-aggregation queries).
+        if (total > 0 && total <= COLD_CHECK_MAX_CONTACTS) {
+          const { data: allIds } = await supabase.from('contacts').select('id');
+          const ids = (allIds ?? [])
+            .map((r) => r.id as string)
+            .filter((id) => !excludeSet?.has(id));
+          await computeColdCount(supabase, ids);
+        }
       }
     } finally {
       setLoadingCount(false);
@@ -207,7 +261,31 @@ export function Step2SelectAudience({
     audience.customField,
     audience.csvContacts,
     audience.excludeTagIds,
+    computeColdCount,
   ]);
+
+  async function handleTagCold() {
+    if (!coldContactIds || coldContactIds.length === 0 || !accountId || !user) return;
+    setTagging(true);
+    try {
+      const supabase = createClient();
+      const { tagged: taggedCount } = await tagColdContacts(
+        supabase,
+        accountId,
+        user.id,
+        coldContactIds,
+      );
+      setTagged(true);
+      await fetchTags(); // pick up a newly-created "Cold" tag so Exclude Tags can use it immediately
+      toast.success(
+        `Tagged ${taggedCount.toLocaleString()} contact${taggedCount === 1 ? '' : 's'} as Cold. Add "Cold" to Exclude Tags above to leave them out of this (or a future) broadcast.`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to tag cold contacts');
+    } finally {
+      setTagging(false);
+    }
+  }
 
   useEffect(() => {
     fetchEstimatedCount();
@@ -436,12 +514,60 @@ export function Step2SelectAudience({
             <span className="text-xs text-muted-foreground">Calculating…</span>
           </div>
         ) : estimatedCount !== null ? (
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-primary" />
-            <span className="text-sm text-foreground">
-              {estimatedCount.toLocaleString()}
-            </span>
-            <span className="text-xs text-muted-foreground">estimated recipients</span>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-primary" />
+              <span className="text-sm text-foreground">
+                {estimatedCount.toLocaleString()}
+              </span>
+              <span className="text-xs text-muted-foreground">estimated recipients</span>
+            </div>
+            {coldContactIds !== null && coldContactIds.length > 0 && estimatedCount > 0 ? (() => {
+              const coldCount = coldContactIds.length;
+              const coldPct = Math.round((coldCount / estimatedCount) * 100);
+              const isHighRisk = coldPct >= COLD_WARNING_THRESHOLD_PCT;
+              return (
+                <div
+                  className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
+                    isHighRisk
+                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                      : 'border-border bg-muted/50 text-muted-foreground'
+                  }`}
+                >
+                  <AlertTriangle
+                    className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${isHighRisk ? 'text-amber-400' : 'text-muted-foreground'}`}
+                  />
+                  <div className="space-y-1.5">
+                    <span>
+                      {coldPct}% of this audience ({coldCount.toLocaleString()} contacts) has never
+                      messaged you.
+                      {isHighRisk
+                        ? ' Broadcasting to a lot of cold contacts raises the risk of blocks/reports that lower your WhatsApp quality rating.'
+                        : ''}
+                    </span>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={handleTagCold}
+                        disabled={tagging || tagged}
+                        className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-all disabled:opacity-60 ${
+                          isHighRisk
+                            ? 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:bg-amber-500/20'
+                            : 'border-border bg-muted text-muted-foreground hover:bg-muted/80'
+                        }`}
+                      >
+                        {tagging && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {tagged
+                          ? 'Tagged as Cold'
+                          : tagging
+                            ? 'Tagging…'
+                            : `Tag ${coldCount.toLocaleString()} as Cold`}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })() : null}
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
