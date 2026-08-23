@@ -229,18 +229,21 @@ status) and for a falsy/omitted value.
 Every contact gets a `contact_consent` row the moment it's created —
 regardless of whether it came from a manual "Add Contact", a CSV
 import, this API, or the customer messaging in first — so there's one
-place to check "have we ever asked this number, and how did they
-respond." **Migration required:**
-`supabase/migrations/070_contact_consent.sql` through `072_contact_consent_auto_track.sql`.
+place to check "where did this number come from, and what's their
+consent status." **Migration required:**
+`supabase/migrations/070_contact_consent.sql` through `073_contact_consent_default_opted_in.sql`.
 
-**No template is ever sent automatically.** A contact created via
-manual add / CSV import / this API starts `pending` and stays that way
-until an admin deliberately sends a consent-request batch (below) — a
-contact who messages in on WhatsApp themselves is marked `opted_in`
-immediately, no template needed, since they initiated contact. Bulk-
-messaging a freshly-imported, unconsented list is exactly the pattern
-that risks a WhatsApp Business Account / quality-rating restriction,
-so this is deliberately never automatic.
+**Every new contact starts `opted_in`**, regardless of source — an
+explicit account-owner decision (migration 073), so no template is
+sent automatically on contact creation. `source` is still recorded
+(`manual` / `csv_import` / `unknown` (API) / `whatsapp_inbound`) for
+audit purposes even though it no longer affects the initial status.
+
+The `pending` status and the batch-send endpoint below still exist for
+any account that wants a stricter opt-in gate (e.g. by pausing the
+073 migration or manually setting a contact back to `pending`) —
+useful context if you're auditing an older dataset that still has
+`pending` rows, or configuring a different account.
 
 **`POST /api/contacts/consent/send-batch`** (dashboard session,
 admin+ — not part of the API-key surface) sends a consent-request
