@@ -4,6 +4,7 @@ import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
+import { recordConsentResponse } from '@/lib/contacts/consent'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
@@ -870,6 +871,20 @@ async function processMessage(
   // can send STOP at any point in the conversation. Best-effort: a
   // failure here shouldn't affect the rest of message processing.
   await handleOptOutKeyword(contentText, contactRecord.id)
+
+  // Consent-request button tap (YES_CONSENT / NO_CONSENT) — same
+  // best-effort posture as the opt-out keyword above. A no-op for any
+  // other button tap: recordConsentResponse only acts when the
+  // payload matches a known consent value AND a pending row exists.
+  if (interactiveReplyId) {
+    await recordConsentResponse(
+      supabaseAdmin(),
+      accountId,
+      contactRecord.id,
+      contactRecord.phone,
+      interactiveReplyId
+    )
+  }
 
   // ============================================================
   // Flow runner dispatch.
