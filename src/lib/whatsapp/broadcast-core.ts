@@ -32,6 +32,7 @@ import { findOrCreateContact } from '@/lib/api/v1/contacts';
 import { categoryFromTemplate } from '@/lib/billing/rates';
 import { ensureWalletBalance, chargeWalletForSend, WalletError } from '@/lib/billing/wallet';
 import { ensureDailyBroadcastQuota, DailyQuotaError } from '@/lib/whatsapp/daily-quota';
+import { ensureQualityRatingSafe, QualityRatingError } from '@/lib/whatsapp/quality-guard';
 
 /** Thrown by createBroadcast on a caller-visible failure; route maps it. */
 export class BroadcastError extends Error {
@@ -272,6 +273,22 @@ export async function deliverBroadcast(
   const billingCategory = categoryFromTemplate(plan.templateRow?.category);
 
   for (const recipient of plan.planned) {
+    // Checked first and per-recipient: a Red quality rating can be hit
+    // mid-broadcast (Meta re-scores continuously), so re-checking on
+    // every recipient — not once up front — stops the send the moment
+    // it happens instead of finishing out a batch that's actively
+    // making the number's standing worse.
+    try {
+      await ensureQualityRatingSafe(db, plan.accountId);
+    } catch (err) {
+      const message = err instanceof QualityRatingError ? err.message : 'Quality rating check failed';
+      await db
+        .from('broadcast_recipients')
+        .update({ status: 'failed', error_message: message })
+        .eq('id', recipient.recipientRowId);
+      continue;
+    }
+
     // Checked per-recipient (not once for the whole broadcast) so a
     // wallet that runs out partway through stops billing further sends
     // instead of either over-charging or crashing the whole batch.
