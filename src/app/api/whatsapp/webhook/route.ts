@@ -17,6 +17,7 @@ import {
   handleTemplateWebhookChange,
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
+import { handleQualityRatingChange } from '@/lib/whatsapp/quality-alert'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -281,7 +282,15 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
       // it rather than silently dropping it. See logAccountLevelEvent
       // for why this doesn't try to parse a specific "banned" shape.
       if (!value.messages && !value.statuses) {
-        await logAccountLevelEvent(change.field, value, entry.id)
+        const accountId = await logAccountLevelEvent(change.field, value, entry.id)
+
+        // phone_number_quality_update specifically also gets a live
+        // re-fetch + account-owner notification — see quality-alert.ts
+        // for why we re-verify via the Graph API rather than trusting
+        // this payload's own quality value.
+        if (change.field === 'phone_number_quality_update' && accountId) {
+          await handleQualityRatingChange(supabaseAdmin(), accountId)
+        }
       }
 
       // Handle incoming messages
@@ -367,7 +376,7 @@ async function logAccountLevelEvent(
   field: string,
   value: unknown,
   wabaId: string
-): Promise<void> {
+): Promise<string | null> {
   try {
     const admin = supabaseAdmin()
     const metadata = (value as { metadata?: { phone_number_id?: string } })?.metadata
@@ -402,8 +411,10 @@ async function logAccountLevelEvent(
     if (error) {
       console.error('[webhook] failed to log account-level event:', error.message)
     }
+    return accountId
   } catch (err) {
     console.error('[webhook] logAccountLevelEvent threw:', err instanceof Error ? err.message : err)
+    return null
   }
 }
 

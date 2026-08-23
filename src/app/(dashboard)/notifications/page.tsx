@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import type { Notification } from "@/types";
-import { AtSign, Bell, CheckCheck, Loader2, UserPlus } from "lucide-react";
+import { AlertTriangle, AtSign, Bell, CheckCheck, Loader2, UserPlus } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { toast } from "sonner";
 const TYPE_ICON: Record<Notification["type"], typeof Bell> = {
   conversation_assigned: UserPlus,
   mention: AtSign,
+  quality_rating_changed: AlertTriangle,
 };
 
 export default function NotificationsPage() {
@@ -117,6 +118,8 @@ export default function NotificationsPage() {
         router.push(`/inbox?c=${n.conversation_id}`);
       } else if (n.type === "mention" && n.contact_id) {
         router.push(`/business-workspace/customer-360?contact=${n.contact_id}`);
+      } else if (n.type === "quality_rating_changed") {
+        router.push(`/settings?tab=whatsapp`);
       }
     },
     [markRead, router],
