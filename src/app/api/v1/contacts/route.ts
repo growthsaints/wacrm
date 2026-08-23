@@ -6,6 +6,12 @@
 // supports `?search=` (name/phone) and `?tag=<tagId>` filters. Create
 // is find-or-create by phone: an existing match returns 200 with
 // `created: false`; a new row returns 201 with `created: true`.
+//
+// `consent_given: true` — pass this when the caller already collected
+// WhatsApp-messaging consent off-platform (e.g. a website form's own
+// checkbox). Marks the new contact's consent record `opted_in`
+// immediately instead of leaving it `pending` for the manual
+// consent-request batch (see docs/public-api.md).
 // ============================================================
 
 import { requireApiKey } from '@/lib/auth/api-context';
@@ -24,6 +30,7 @@ import {
   resolveAuditUserId,
   ContactError,
 } from '@/lib/api/v1/contacts';
+import { applyWebsiteConsentIfGiven } from '@/lib/contacts/consent';
 
 // PostgREST filter values are comma/paren-delimited; strip anything
 // that could break the `.or()` grammar before interpolating a search
@@ -133,6 +140,17 @@ export async function POST(request: Request) {
         body.tags.filter((t): t is string => typeof t === 'string')
       );
     }
+
+    // Website forms that already collected a WhatsApp-consent checkbox
+    // can assert it here instead of leaving the contact `pending` for
+    // the manual consent-request batch — see lib/contacts/consent.ts.
+    await applyWebsiteConsentIfGiven(
+      ctx.supabase,
+      ctx.accountId,
+      id,
+      created,
+      body.consent_given === true
+    );
 
     const contact = await getContactById(ctx.supabase, ctx.accountId, id);
     return ok(contact, created ? 201 : 200);

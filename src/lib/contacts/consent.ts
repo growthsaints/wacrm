@@ -143,3 +143,45 @@ export async function recordImplicitConsentFromInboundMessage(
     );
   }
 }
+
+/**
+ * Upgrade a freshly-created contact's `contact_consent` row to
+ * `opted_in` / source `website` when the caller (e.g. a website's own
+ * form, which already collected a "I agree to receive WhatsApp
+ * updates" checkbox) asserts consent was already given off-platform.
+ *
+ * Call right after `POST /api/v1/contacts` creates a new contact — by
+ * then migration 072's trigger has already inserted the default
+ * `pending` row for `contacts.source = 'api'`, so this only needs to
+ * update it. No-op if `consentGiven` is false (the row stays
+ * `pending`, to be resolved later via the batch-send flow or an
+ * inbound reply) or if the contact wasn't newly created (an existing
+ * contact's tracked consent state shouldn't be silently overwritten by
+ * a later API call that happens to pass `consent_given: true`).
+ */
+export async function applyWebsiteConsentIfGiven(
+  db: SupabaseClient,
+  accountId: string,
+  contactId: string,
+  wasCreated: boolean,
+  consentGiven: boolean
+): Promise<void> {
+  if (!wasCreated || !consentGiven) return;
+
+  try {
+    const { error } = await db
+      .from('contact_consent')
+      .update({
+        consent_status: 'opted_in',
+        source: 'website',
+        consent_responded_at: new Date().toISOString(),
+      })
+      .eq('account_id', accountId)
+      .eq('contact_id', contactId);
+    if (error) {
+      console.error('[consent] applyWebsiteConsentIfGiven failed:', error.message);
+    }
+  } catch (err) {
+    console.error('[consent] applyWebsiteConsentIfGiven failed:', err);
+  }
+}

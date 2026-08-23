@@ -5,6 +5,7 @@ import {
   resolveConsentStatus,
   recordConsentResponse,
   recordImplicitConsentFromInboundMessage,
+  applyWebsiteConsentIfGiven,
   CONSENT_YES_PAYLOAD,
   CONSENT_NO_PAYLOAD,
 } from './consent';
@@ -152,6 +153,46 @@ describe('recordImplicitConsentFromInboundMessage', () => {
     const db = {} as unknown as SupabaseClient;
     await expect(
       recordImplicitConsentFromInboundMessage(db, 'acct-1', 'contact-1', '+14155550123')
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('applyWebsiteConsentIfGiven', () => {
+  function makeUpdateDb() {
+    const eq2 = vi.fn(async () => ({ error: null }));
+    const eq1 = vi.fn(() => ({ eq: eq2 }));
+    const update = vi.fn(() => ({ eq: eq1 }));
+    const from = vi.fn(() => ({ update }));
+    return { from, update, eq1, eq2 } as unknown as SupabaseClient & {
+      update: typeof update;
+      eq1: typeof eq1;
+    };
+  }
+
+  it('is a no-op when consent was not given', async () => {
+    const db = makeUpdateDb();
+    await applyWebsiteConsentIfGiven(db, 'acct-1', 'contact-1', true, false);
+    expect(db.from).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when the contact already existed (not newly created)', async () => {
+    const db = makeUpdateDb();
+    await applyWebsiteConsentIfGiven(db, 'acct-1', 'contact-1', false, true);
+    expect(db.from).not.toHaveBeenCalled();
+  });
+
+  it('updates the row to opted_in/website when newly created with consent given', async () => {
+    const db = makeUpdateDb();
+    await applyWebsiteConsentIfGiven(db, 'acct-1', 'contact-1', true, true);
+    expect(db.update).toHaveBeenCalledWith(
+      expect.objectContaining({ consent_status: 'opted_in', source: 'website' })
+    );
+  });
+
+  it('swallows a thrown error rather than throwing', async () => {
+    const db = {} as unknown as SupabaseClient;
+    await expect(
+      applyWebsiteConsentIfGiven(db, 'acct-1', 'contact-1', true, true)
     ).resolves.toBeUndefined();
   });
 });

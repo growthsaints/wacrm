@@ -216,6 +216,52 @@ match returns `200` with the existing contact; a new contact returns
 `201`. The response body is the serialized contact (same shape as the
 list rows above).
 
+**`consent_given: true`** — pass this when you already collected
+WhatsApp-messaging consent off-platform (e.g. your own website form's
+"I agree to receive WhatsApp updates" checkbox). A newly-created
+contact is marked `opted_in` immediately instead of `pending` — see
+[Consent tracking](#consent-tracking). Ignored for an existing contact
+(find-or-create doesn't overwrite a contact's already-tracked consent
+status) and for a falsy/omitted value.
+
+### Consent tracking
+
+Every contact gets a `contact_consent` row the moment it's created —
+regardless of whether it came from a manual "Add Contact", a CSV
+import, this API, or the customer messaging in first — so there's one
+place to check "have we ever asked this number, and how did they
+respond." **Migration required:**
+`supabase/migrations/070_contact_consent.sql` through `072_contact_consent_auto_track.sql`.
+
+**No template is ever sent automatically.** A contact created via
+manual add / CSV import / this API starts `pending` and stays that way
+until an admin deliberately sends a consent-request batch (below) — a
+contact who messages in on WhatsApp themselves is marked `opted_in`
+immediately, no template needed, since they initiated contact. Bulk-
+messaging a freshly-imported, unconsented list is exactly the pattern
+that risks a WhatsApp Business Account / quality-rating restriction,
+so this is deliberately never automatic.
+
+**`POST /api/contacts/consent/send-batch`** (dashboard session,
+admin+ — not part of the API-key surface) sends a consent-request
+template to a small, oldest-first batch of `pending` contacts that
+have never been asked:
+
+```json
+{ "template_name": "ask_consent", "template_language": "en", "limit": 25 }
+```
+
+`limit` defaults to 25, capped at 100. Response:
+`{ "data": { "attempted", "sent", "failed", "remaining_pending" } }`.
+Call it again (as often as you judge safe) to work through the rest
+of the backlog in further small batches — it never sends more than
+`limit` in one call.
+
+When the customer taps the template's `YES_CONSENT` / `NO_CONSENT`
+quick-reply button, the webhook resolves it automatically;
+`NO_CONSENT` also flips `contacts.marketing_opt_out` so the existing
+broadcast-audience exclusion honors it immediately.
+
 ### `GET` / `PATCH /api/v1/contacts/{id}`
 
 Read or update one contact. Scopes: `contacts:read` / `contacts:write`.
