@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   resolveConsentStatus,
   recordConsentResponse,
+  recordImplicitConsentFromInboundMessage,
   CONSENT_YES_PAYLOAD,
   CONSENT_NO_PAYLOAD,
 } from './consent';
@@ -105,6 +106,52 @@ describe('recordConsentResponse', () => {
     const db = {} as unknown as SupabaseClient;
     await expect(
       recordConsentResponse(db, 'acct-1', 'contact-1', '+14155550123', CONSENT_YES_PAYLOAD)
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe('recordImplicitConsentFromInboundMessage', () => {
+  function makeInsertDb(error: { code: string; message: string } | null) {
+    const insert = vi.fn(async () => ({ error }));
+    const from = vi.fn(() => ({ insert }));
+    return { from, insert } as unknown as SupabaseClient & { insert: typeof insert };
+  }
+
+  it('inserts an opted_in row sourced as whatsapp_inbound, sanitizing the phone', async () => {
+    const db = makeInsertDb(null);
+    await recordImplicitConsentFromInboundMessage(
+      db,
+      'acct-1',
+      'contact-1',
+      '+1 (415) 555-0123'
+    );
+    expect(db.insert).toHaveBeenCalledWith({
+      account_id: 'acct-1',
+      contact_id: 'contact-1',
+      phone_number: '14155550123',
+      source: 'whatsapp_inbound',
+      consent_status: 'opted_in',
+    });
+  });
+
+  it('treats a unique-violation (an existing tracked row) as a silent no-op', async () => {
+    const db = makeInsertDb({ code: '23505', message: 'duplicate' });
+    await expect(
+      recordImplicitConsentFromInboundMessage(db, 'acct-1', 'contact-1', '+14155550123')
+    ).resolves.toBeUndefined();
+  });
+
+  it('logs but does not throw on a non-conflict DB error', async () => {
+    const db = makeInsertDb({ code: '55000', message: 'db hiccup' });
+    await expect(
+      recordImplicitConsentFromInboundMessage(db, 'acct-1', 'contact-1', '+14155550123')
+    ).resolves.toBeUndefined();
+  });
+
+  it('swallows a thrown error rather than throwing', async () => {
+    const db = {} as unknown as SupabaseClient;
+    await expect(
+      recordImplicitConsentFromInboundMessage(db, 'acct-1', 'contact-1', '+14155550123')
     ).resolves.toBeUndefined();
   });
 });

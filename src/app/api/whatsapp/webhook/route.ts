@@ -4,7 +4,10 @@ import { decrypt, encrypt, isLegacyFormat } from '@/lib/whatsapp/encryption'
 import { getMediaUrl, downloadMedia } from '@/lib/whatsapp/meta-api'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
-import { recordConsentResponse } from '@/lib/contacts/consent'
+import {
+  recordConsentResponse,
+  recordImplicitConsentFromInboundMessage,
+} from '@/lib/contacts/consent'
 import { verifyMetaWebhookSignature } from '@/lib/whatsapp/webhook-signature'
 import { runAutomationsForTrigger } from '@/lib/automations/engine'
 import { dispatchInboundToFlows } from '@/lib/flows/engine'
@@ -883,6 +886,20 @@ async function processMessage(
       contactRecord.id,
       contactRecord.phone,
       interactiveReplyId
+    )
+  }
+
+  // A contact whose first-ever interaction with us was messaging in
+  // themselves is implicitly consented — no consent-request template
+  // needed, since they initiated contact, not us. No-op if this
+  // number already has a tracked consent row from another source
+  // (CSV/manual/API) — never overwrite an existing status.
+  if (isFirstInboundMessage) {
+    await recordImplicitConsentFromInboundMessage(
+      supabaseAdmin(),
+      accountId,
+      contactRecord.id,
+      contactRecord.phone
     )
   }
 
