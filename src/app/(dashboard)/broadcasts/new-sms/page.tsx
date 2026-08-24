@@ -4,15 +4,27 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { createClient } from '@/lib/supabase/client';
-import type { Tag } from '@/types';
-import { useSmsBroadcast, type SmsAudienceConfig } from '@/hooks/use-sms-broadcast';
+import type { CustomField, Tag } from '@/types';
+import {
+  useSmsBroadcast,
+  type SmsAudienceConfig,
+  type SmsCustomFieldOperator,
+} from '@/hooks/use-sms-broadcast';
+import { parseContactCsv } from '@/lib/contacts/parse-contact-csv';
+import { countRecentSmsSent, SMS_DAILY_CAP } from '@/lib/sms/daily-quota';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ArrowLeft, Loader2, MessageSquare, Users } from 'lucide-react';
+import { ArrowLeft, Loader2, MessageSquare, Upload, Users } from 'lucide-react';
 
 const SMS_MAX_CHARS = 918; // 6 GSM-7 segments — a generous ceiling before per-recipient cost climbs a lot.
+
+const OPERATOR_OPTIONS: { value: SmsCustomFieldOperator; label: string }[] = [
+  { value: 'is', label: 'is' },
+  { value: 'is_not', label: 'is not' },
+  { value: 'contains', label: 'contains' },
+];
 
 export default function NewSmsBroadcastPage() {
   const router = useRouter();
@@ -24,6 +36,14 @@ export default function NewSmsBroadcastPage() {
   const [tagIds, setTagIds] = useState<string[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [loadingTags, setLoadingTags] = useState(false);
+  const [customFields, setCustomFields] = useState<CustomField[]>([]);
+  const [loadingFields, setLoadingFields] = useState(false);
+  const [customFieldId, setCustomFieldId] = useState('');
+  const [customFieldOperator, setCustomFieldOperator] = useState<SmsCustomFieldOperator>('is');
+  const [customFieldValue, setCustomFieldValue] = useState('');
+  const [csvContacts, setCsvContacts] = useState<{ phone: string; name?: string }[]>([]);
+  const [csvFileName, setCsvFileName] = useState('');
+  const [remainingQuota, setRemainingQuota] = useState<number | null>(null);
 
   useEffect(() => {
     async function fetchTags() {
@@ -39,22 +59,74 @@ export default function NewSmsBroadcastPage() {
     fetchTags();
   }, []);
 
+  useEffect(() => {
+    if (audienceType !== 'custom_field' || customFields.length > 0) return;
+    async function fetchFields() {
+      setLoadingFields(true);
+      try {
+        const supabase = createClient();
+        const { data } = await supabase.from('custom_fields').select('*').order('field_name');
+        setCustomFields(data ?? []);
+      } finally {
+        setLoadingFields(false);
+      }
+    }
+    fetchFields();
+  }, [audienceType, customFields.length]);
+
+  // Shown as a heads-up before sending — the hook re-checks this itself
+  // right before dispatching, this is just so the form doesn't surprise
+  // the user with a mid-send cutoff.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const sentToday = await countRecentSmsSent(supabase);
+        if (!cancelled) setRemainingQuota(Math.max(0, SMS_DAILY_CAP - sentToday));
+      } catch {
+        if (!cancelled) setRemainingQuota(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function toggleTag(id: string) {
     setTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  }
+
+  async function handleCsvFile(file: File) {
+    const text = await file.text();
+    const { rows } = parseContactCsv(text);
+    setCsvContacts(rows.map((r) => ({ phone: r.phone, name: r.name })));
+    setCsvFileName(file.name);
   }
 
   const isValid =
     name.trim().length > 0 &&
     body.trim().length > 0 &&
     body.length <= SMS_MAX_CHARS &&
-    (audienceType === 'all' || tagIds.length > 0);
+    (audienceType === 'all' ||
+      (audienceType === 'tags' && tagIds.length > 0) ||
+      (audienceType === 'custom_field' && !!customFieldId && customFieldValue.trim().length > 0) ||
+      (audienceType === 'csv' && csvContacts.length > 0));
 
   async function handleSend() {
     try {
       const id = await createAndSendSmsBroadcast({
         name: name.trim(),
         body: body.trim(),
-        audience: { type: audienceType, tagIds: audienceType === 'tags' ? tagIds : undefined },
+        audience: {
+          type: audienceType,
+          tagIds: audienceType === 'tags' ? tagIds : undefined,
+          customField:
+            audienceType === 'custom_field'
+              ? { fieldId: customFieldId, operator: customFieldOperator, value: customFieldValue.trim() }
+              : undefined,
+          csvContacts: audienceType === 'csv' ? csvContacts : undefined,
+        },
       });
       router.push(`/broadcasts/sms/${id}`);
     } catch (err) {
@@ -79,6 +151,22 @@ export default function NewSmsBroadcastPage() {
           </p>
         </div>
       </div>
+
+      {remainingQuota !== null && (
+        <div
+          className={`rounded-lg border px-3 py-2 text-xs ${
+            remainingQuota === 0
+              ? 'border-red-500/30 bg-red-500/10 text-red-300'
+              : remainingQuota <= 20
+                ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                : 'border-border bg-muted/50 text-muted-foreground'
+          }`}
+        >
+          {remainingQuota === 0
+            ? `Today's ${SMS_DAILY_CAP}/day SMS limit for this SIM is already reached — sends will queue as failed until it resets.`
+            : `${remainingQuota} of ${SMS_DAILY_CAP} SMS left today for this SIM. Recipients beyond that are skipped, not silently dropped.`}
+        </div>
+      )}
 
       {isProcessing ? (
         <div className="space-y-3 rounded-xl border border-border bg-card/50 p-6 text-center">
@@ -122,6 +210,25 @@ export default function NewSmsBroadcastPage() {
               >
                 By tag
               </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={audienceType === 'custom_field' ? 'default' : 'outline'}
+                onClick={() => setAudienceType('custom_field')}
+                className={audienceType === 'custom_field' ? 'bg-primary text-primary-foreground' : 'border-border'}
+              >
+                By custom field
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={audienceType === 'csv' ? 'default' : 'outline'}
+                onClick={() => setAudienceType('csv')}
+                className={audienceType === 'csv' ? 'bg-primary text-primary-foreground' : 'border-border'}
+              >
+                <Upload className="h-3.5 w-3.5" />
+                CSV upload
+              </Button>
             </div>
 
             {audienceType === 'tags' && (
@@ -152,6 +259,70 @@ export default function NewSmsBroadcastPage() {
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {audienceType === 'custom_field' && (
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_120px_minmax(0,1fr)]">
+                <select
+                  value={customFieldId}
+                  onChange={(e) => setCustomFieldId(e.target.value)}
+                  className="h-9 rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">{loadingFields ? 'Loading…' : 'Select field…'}</option>
+                  {customFields.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.field_name}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={customFieldOperator}
+                  onChange={(e) => setCustomFieldOperator(e.target.value as SmsCustomFieldOperator)}
+                  className="h-9 rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+                >
+                  {OPERATOR_OPTIONS.map((op) => (
+                    <option key={op.value} value={op.value}>
+                      {op.label}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={customFieldValue}
+                  onChange={(e) => setCustomFieldValue(e.target.value)}
+                  placeholder="Value…"
+                />
+              </div>
+            )}
+
+            {audienceType === 'csv' && (
+              <div className="mt-3">
+                <input
+                  type="file"
+                  accept=".csv"
+                  id="sms-csv-upload"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleCsvFile(f);
+                    e.target.value = '';
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => document.getElementById('sms-csv-upload')?.click()}
+                  className="border-border"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  Choose CSV file
+                </Button>
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {csvFileName
+                    ? `${csvFileName} — ${csvContacts.length} contact${csvContacts.length === 1 ? '' : 's'} found`
+                    : 'Needs a "phone" column; "name" is optional.'}
+                </p>
               </div>
             )}
           </div>
