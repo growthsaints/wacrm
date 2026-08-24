@@ -17,6 +17,14 @@ import {
   SheetTitle,
   SheetDescription,
 } from '@/components/ui/sheet';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,6 +46,7 @@ import {
   X,
   DollarSign,
   LayoutTemplate,
+  MessageSquare,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 
@@ -67,6 +76,14 @@ export function ContactDetailView({
   // find-or-creates the conversation, so no inbound message is required.
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
   const [sendingTemplate, setSendingTemplate] = useState(false);
+
+  // Send SMS — same idea as "Send template" above but for the SMS
+  // channel (via the account's configured SMS Gateway device): a plain
+  // text box since SMS has no templates. The send route find-or-creates
+  // a channel:'sms' conversation for this contact.
+  const [smsDialogOpen, setSmsDialogOpen] = useState(false);
+  const [smsText, setSmsText] = useState('');
+  const [sendingSms, setSendingSms] = useState(false);
 
   // Details tab
   const [editName, setEditName] = useState('');
@@ -372,6 +389,39 @@ export function ContactDetailView({
     }
   }
 
+  async function handleSendSms() {
+    if (!contactId || !smsText.trim()) return;
+    setSendingSms(true);
+    try {
+      const res = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: contactId,
+          channel: 'sms',
+          message_type: 'text',
+          content_text: smsText.trim(),
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const reason = payload?.error || `HTTP ${res.status}`;
+        toast.error(t('toastSmsFailed', { reason }));
+        return;
+      }
+
+      toast.success(t('toastSmsSent'));
+      setSmsText('');
+      setSmsDialogOpen(false);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'network error';
+      toast.error(t('toastSmsFailed', { reason }));
+    } finally {
+      setSendingSms(false);
+    }
+  }
+
   function getInitials(name?: string | null) {
     if (!name) return '?';
     return name
@@ -438,7 +488,7 @@ export function ContactDetailView({
                   </div>
                 </div>
               </div>
-              <div className="mt-3">
+              <div className="mt-3 flex gap-2">
                 <Button
                   size="sm"
                   onClick={() => setTemplatePickerOpen(true)}
@@ -451,6 +501,14 @@ export function ContactDetailView({
                     <LayoutTemplate className="size-4" />
                   )}
                   {t('sendTemplateBtn')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSmsDialogOpen(true)}
+                >
+                  <MessageSquare className="size-4" />
+                  {t('sendSmsBtn')}
                 </Button>
               </div>
             </SheetHeader>
@@ -760,6 +818,34 @@ export function ContactDetailView({
       onOpenChange={setTemplatePickerOpen}
       onSelect={handleSendTemplate}
     />
+    <Dialog open={smsDialogOpen} onOpenChange={setSmsDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('sendSmsDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('sendSmsDialogDesc')}</DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={smsText}
+          onChange={(e) => setSmsText(e.target.value)}
+          placeholder={t('sendSmsPlaceholder')}
+          rows={4}
+          autoFocus
+        />
+        <DialogFooter>
+          <Button
+            onClick={handleSendSms}
+            disabled={sendingSms || !smsText.trim()}
+          >
+            {sendingSms ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <MessageSquare className="size-4" />
+            )}
+            {t('sendSmsSendBtn')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }
