@@ -201,7 +201,8 @@
       "favorite": "Add to favorites",
       "unfavorite": "Remove from favorites",
       "pinFailed": "Failed to update pin",
-      "favoriteFailed": "Failed to update favorite"
+      "favoriteFailed": "Failed to update favorite",
+      "channelSms": "SMS"
     },
     "messageThread": {
       "backToConversations": "Back to conversations",
@@ -488,6 +489,11 @@
         "noTagsAvailable": "No tags available. Create tags in Settings."
       },
       "sendTemplateBtn": "Send template",
+      "sendSmsBtn": "Send SMS",
+      "sendSmsDialogTitle": "Send SMS",
+      "sendSmsDialogDesc": "Starts (or reuses) this contact's SMS conversation.",
+      "sendSmsPlaceholder": "Type your message…",
+      "sendSmsSendBtn": "Send",
       "saveChangesBtn": "Save Changes",
       "saveCustomFieldsBtn": "Save Custom Fields",
       "toastPhoneRequired": "Phone number is required",
@@ -505,7 +511,9 @@
       "toastCustomFieldsSaved": "Custom fields saved",
       "toastCustomFieldsFailed": "Failed to save custom fields",
       "toastTemplateSent": "Template \"{name}\" sent",
-      "toastTemplateFailed": "Failed to send template: {reason}"
+      "toastTemplateFailed": "Failed to send template: {reason}",
+      "toastSmsSent": "SMS sent",
+      "toastSmsFailed": "Failed to send SMS: {reason}"
     },
     "importModal": {
       "title": "Import Contacts",
@@ -1887,12 +1895,41 @@
       "accountAlertTitle": "Meta reported an account-level event",
       "accountAlertDesc": "On {date}, Meta sent an account-level update that may need your attention — this can mean your WhatsApp number was restricted, disabled, or flagged for review. Check Meta Business Suite / WhatsApp Manager for the exact reason. This clears automatically once our team confirms it's resolved."
     },
+    "sms": {
+      "title": "SMS connection",
+      "description": "Connect a self-hosted SMS Gateway for Android device. Text-only send/receive alongside WhatsApp in the shared inbox.",
+      "connected": "Connected",
+      "notConnected": "Not Connected",
+      "connectedDesc": "wacrm can reach your SMS gateway and send messages.",
+      "notConnectedDesc": "Enter your gateway's Base URL and Basic Auth credentials below to connect.",
+      "credentialsTitle": "Gateway Credentials",
+      "credentialsDesc": "From the SMS Gateway Android app: enable Local, Private, or Cloud server mode and copy its address + Basic Auth username/password here.",
+      "baseUrl": "Base URL",
+      "baseUrlPlaceholder": "http://192.168.1.20:8080 or https://api.sms-gate.app/3rdparty/v1",
+      "username": "Username",
+      "password": "Password",
+      "passwordPlaceholder": "Enter the gateway password",
+      "passwordHidden": "Password is hidden for security. Re-enter it to update configuration.",
+      "saveBtn": "Save Configuration",
+      "saving": "Saving...",
+      "webhookTitle": "Webhook URL",
+      "webhookDesc": "Paste this into the SMS Gateway app's Webhooks settings for the \"sms:received\" event (and optionally sms:sent / sms:delivered / sms:failed) so inbound texts and status updates reach wacrm.",
+      "copyBtn": "Copy",
+      "copied": "Copied",
+      "toastSaved": "SMS gateway configuration saved",
+      "toastSaveFailed": "Failed to save: {reason}",
+      "toastLoadFailed": "Failed to load SMS configuration",
+      "baseUrlRequired": "Base URL is required",
+      "usernameRequired": "Username is required",
+      "passwordRequired": "Password is required for initial setup"
+    },
     "sections": {
       "overview": "Overview",
       "profile": "Your profile",
       "security": "Login & security",
       "appearance": "Appearance",
       "whatsapp": "WhatsApp",
+      "sms": "SMS",
       "templates": "Templates",
       "fields": "Fields & tags",
       "deals": "Deals & currency",

@@ -1233,7 +1233,10 @@ export function MessageThread({
       {/* Composer */}
       <MessageComposer
         conversationId={conversation.id}
-        sessionExpired={sessionInfo.expired}
+        channel={conversation.channel}
+        // The 24h session window is a WhatsApp/Meta Cloud API concept —
+        // never applies to SMS.
+        sessionExpired={conversation.channel === "sms" ? false : sessionInfo.expired}
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}

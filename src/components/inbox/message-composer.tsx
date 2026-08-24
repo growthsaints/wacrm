@@ -55,7 +55,7 @@ import {
   blankButtonsPayload,
 } from "@/components/interactive/interactive-builder";
 import { validateInteractivePayload } from "@/lib/whatsapp/interactive";
-import type { InteractiveMessagePayload, QuickReply } from "@/types";
+import type { ConversationChannel, InteractiveMessagePayload, QuickReply } from "@/types";
 import { QuickReplyPicker } from "./quick-reply-picker";
 
 /** Media content types an agent can send from the composer. */
@@ -128,6 +128,13 @@ interface MediaDraft {
 
 interface MessageComposerProps {
   conversationId: string;
+  /**
+   * Which channel this conversation runs on. SMS has no templates,
+   * media, interactive buttons, or a 24h session window — those
+   * affordances are hidden for `'sms'`, leaving plain text + AI draft.
+   * Defaults to `'whatsapp'` so existing callers are unaffected.
+   */
+  channel?: ConversationChannel;
   sessionExpired: boolean;
   onSend: (text: string, replyToId?: string) => void;
   onSendMedia: (payload: SendMediaPayload) => void;
@@ -150,6 +157,7 @@ const OPUS_ENCODER_PATH = "/opus/encoderWorker.min.js";
 
 export function MessageComposer({
   conversationId,
+  channel = "whatsapp",
   sessionExpired,
   onSend,
   onSendMedia,
@@ -159,6 +167,9 @@ export function MessageComposer({
   onClearReply,
 }: MessageComposerProps) {
   const t = useTranslations("Inbox.composer");
+  // SMS has no templates, media, interactive messages, or a 24h
+  // session-expiry window — those are WhatsApp/Meta Cloud API concepts.
+  const isSms = channel === "sms";
 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -643,7 +654,7 @@ export function MessageComposer({
           />
         </div>
       )}
-      {sessionExpired && (
+      {sessionExpired && !isSms && (
         <div className="mb-2 flex items-center justify-between rounded-lg bg-amber-500/10 px-3 py-2">
           <p className="text-xs text-amber-400">
             {t("sessionExpiredHint")}
@@ -727,7 +738,9 @@ export function MessageComposer({
         </div>
       ) : (
         <div className="flex items-end gap-2">
-          {/* Attach menu — photo / video / document / voice. */}
+          {/* Attach menu — photo / video / document / voice. SMS has no
+              media send path via the gateway (MVP is text-only). */}
+          {!isSms && (
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={inputsDisabled || busy}
@@ -765,9 +778,12 @@ export function MessageComposer({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
 
           {/* + menu — interactive messages + quick replies. Gated on the
-              24h window like free-form text (interactive requires it). */}
+              24h window like free-form text (interactive requires it).
+              Interactive buttons/lists are a WhatsApp-only message type. */}
+          {!isSms && (
           <DropdownMenu>
             <DropdownMenuTrigger
               disabled={inputsDisabled}
@@ -793,7 +809,9 @@ export function MessageComposer({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          )}
 
+          {!isSms && (
           <GatedButton
             variant="ghost"
             size="sm"
@@ -805,6 +823,7 @@ export function MessageComposer({
           >
             <LayoutTemplate className="h-4 w-4" />
           </GatedButton>
+          )}
 
           <GatedButton
             variant="ghost"

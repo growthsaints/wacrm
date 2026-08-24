@@ -10,7 +10,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X, Pin, Star } from "lucide-react";
+import { Search, ChevronDown, X, Pin, Star, MessageSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
@@ -613,6 +613,12 @@ function ConversationItem({
           >
             {conversation.is_pinned && (
               <Pin className="h-3 w-3 shrink-0 fill-current text-muted-foreground" />
+            )}
+            {conversation.channel === "sms" && (
+              <MessageSquare
+                className="h-3 w-3 shrink-0 text-muted-foreground"
+                aria-label={t("channelSms")}
+              />
             )}
             <span className="truncate">{displayName}</span>
           </span>
