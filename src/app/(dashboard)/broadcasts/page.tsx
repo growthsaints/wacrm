@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Radio, Plus, Loader2, Search, Filter, ChevronDown } from 'lucide-react';
+import { Radio, Plus, Loader2, Search, Filter, ChevronDown, MessageSquare } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { useAuth } from '@/hooks/use-auth';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -238,15 +238,27 @@ export default function BroadcastsPage() {
             {t('subtitle')}
           </p>
         </div>
-        <GatedButton
-          canAct={canCreate}
-          gateReason="create broadcasts"
-          onClick={() => router.push('/broadcasts/new')}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" />
-          {t('newBroadcast')}
-        </GatedButton>
+        <div className="flex items-center gap-2">
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create broadcasts"
+            variant="outline"
+            onClick={() => router.push('/broadcasts/new-sms')}
+            className="border-border text-foreground"
+          >
+            <MessageSquare className="h-4 w-4" />
+            New SMS Broadcast
+          </GatedButton>
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create broadcasts"
+            onClick={() => router.push('/broadcasts/new')}
+            className="bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" />
+            {t('newBroadcast')}
+          </GatedButton>
+        </div>
       </div>
 
       {broadcasts.length > 0 && (
