@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+vi.mock("@/lib/sms/gateway-api", () => ({ sendSms: vi.fn() }));
+vi.mock("@/lib/sms/encryption", () => ({ decrypt: vi.fn((v: string) => `dec:${v}`) }));
+
 import { sendSmsToConversation, SmsSendError, validateSendSmsParams } from "./send-message";
+import { sendSms } from "@/lib/sms/gateway-api";
 
 // A db that explodes if touched — these tests cover the param
 // validation that MUST short-circuit before any query runs, mirroring
@@ -39,6 +43,140 @@ describe("validateSendSmsParams", () => {
     expect(() =>
       validateSendSmsParams({ messageType: "text", contentText: "hello" }),
     ).not.toThrow();
+  });
+});
+
+interface MockDbOpts {
+  conversation?: { sms_config_id: string | null; contact: { phone: string } | null } | null;
+  config?: { id: string; enabled: boolean; base_url: string; username: string; password: string } | null;
+  sentToday?: number;
+}
+
+function makeDb(opts: MockDbOpts) {
+  const insertedMessage = { id: "msg-1" };
+  const updateEq = vi.fn(async () => ({ error: null }));
+  const update = vi.fn(() => ({ eq: updateEq }));
+
+  const from = vi.fn((table: string) => {
+    if (table === "conversations") {
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: opts.conversation === undefined ? null : opts.conversation,
+                  error: opts.conversation === undefined ? { message: "not found" } : null,
+                }),
+              }),
+            }),
+          }),
+        }),
+        update,
+      };
+    }
+    if (table === "sms_config") {
+      return {
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: opts.config ?? null,
+                error: opts.config ? null : { message: "not found" },
+              }),
+            }),
+          }),
+        }),
+      };
+    }
+    if (table === "messages") {
+      return {
+        select: (...args: unknown[]) => {
+          if (args[1] && typeof args[1] === "object" && "count" in (args[1] as object)) {
+            return {
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    gte: async () => ({ count: opts.sentToday ?? 0, error: null }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return { single: async () => ({ data: insertedMessage, error: null }) };
+        },
+        insert: () => ({ select: () => ({ single: async () => ({ data: insertedMessage, error: null }) }) }),
+        update,
+      };
+    }
+    throw new Error(`unexpected table: ${table}`);
+  });
+
+  return { from, update, updateEq } as unknown as SupabaseClient & { update: typeof update };
+}
+
+describe("sendSmsToConversation — multi-device resolution", () => {
+  beforeEach(() => {
+    vi.mocked(sendSms).mockReset();
+  });
+
+  it("rejects when the conversation has no assigned device", async () => {
+    const db = makeDb({ conversation: { sms_config_id: null, contact: { phone: "+14155550123" } } });
+    await expect(
+      sendSmsToConversation(db, "acct-1", { conversationId: "cv-1", messageType: "text", contentText: "hi" }),
+    ).rejects.toMatchObject({ code: "sms_not_configured", status: 400 });
+  });
+
+  it("rejects when the assigned device no longer exists", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: "dev-1", contact: { phone: "+14155550123" } },
+      config: null,
+    });
+    await expect(
+      sendSmsToConversation(db, "acct-1", { conversationId: "cv-1", messageType: "text", contentText: "hi" }),
+    ).rejects.toMatchObject({ code: "sms_not_configured" });
+  });
+
+  it("rejects when the assigned device is disabled", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: "dev-1", contact: { phone: "+14155550123" } },
+      config: { id: "dev-1", enabled: false, base_url: "https://x", username: "u", password: "enc" },
+    });
+    await expect(
+      sendSmsToConversation(db, "acct-1", { conversationId: "cv-1", messageType: "text", contentText: "hi" }),
+    ).rejects.toMatchObject({ code: "sms_disabled", status: 403 });
+  });
+
+  it("rejects when the assigned device has hit its daily cap", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: "dev-1", contact: { phone: "+14155550123" } },
+      config: { id: "dev-1", enabled: true, base_url: "https://x", username: "u", password: "enc" },
+      sentToday: 100,
+    });
+    await expect(
+      sendSmsToConversation(db, "acct-1", { conversationId: "cv-1", messageType: "text", contentText: "hi" }),
+    ).rejects.toMatchObject({ code: "sms_daily_cap_reached", status: 429 });
+  });
+
+  it("sends through the assigned device when under cap", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: "dev-1", contact: { phone: "+14155550123" } },
+      config: { id: "dev-1", enabled: true, base_url: "https://gateway", username: "u", password: "enc" },
+      sentToday: 5,
+    });
+    vi.mocked(sendSms).mockResolvedValue({ id: "gw-1", state: "Pending" });
+
+    const result = await sendSmsToConversation(db, "acct-1", {
+      conversationId: "cv-1",
+      messageType: "text",
+      contentText: "hi",
+    });
+
+    expect(sendSms).toHaveBeenCalledWith(
+      { baseUrl: "https://gateway", username: "u", password: "dec:enc" },
+      expect.objectContaining({ phoneNumbers: ["+14155550123"], text: "hi" }),
+    );
+    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-1" });
   });
 });
 

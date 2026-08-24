@@ -253,7 +253,11 @@ export function ContactDetailView({
     fetch('/api/sms/config', { method: 'GET' })
       .then((res) => res.json())
       .then((data) => {
-        if (!cancelled) setSmsAvailable(Boolean(data.connected && data.enabled));
+        // Coarse "is SMS set up at all" gate for showing the button —
+        // whether a specific send actually goes through (device
+        // capacity, per-device daily cap) is resolved at send time.
+        const devices = Array.isArray(data.devices) ? data.devices : [];
+        if (!cancelled) setSmsAvailable(devices.some((d: { enabled?: boolean }) => d.enabled));
       })
       .catch(() => {
         if (!cancelled) setSmsAvailable(false);

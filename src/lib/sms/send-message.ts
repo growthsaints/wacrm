@@ -12,6 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendSms } from '@/lib/sms/gateway-api'
 import { decrypt } from '@/lib/sms/encryption'
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
+import { countRecentSmsSentByDevice, SMS_DAILY_CAP } from '@/lib/sms/daily-quota'
 
 export class SmsSendError extends Error {
   readonly code: string
@@ -85,16 +86,32 @@ export async function sendSmsToConversation(
     throw new SmsSendError('bad_request', 'Invalid phone number format', 400)
   }
 
+  // Multi-device (migration 080): the conversation is pinned to whichever
+  // device was assigned when it was first created (see
+  // findOrCreateConversation in api/whatsapp/send/route.ts) — replies
+  // must keep coming from the same device/number or the thread breaks on
+  // the customer's end. A conversation with no assignment (pre-migration
+  // row, or the device was since deleted) has nothing to send through.
+  const smsConfigId: string | null = conversation.sms_config_id
+  if (!smsConfigId) {
+    throw new SmsSendError(
+      'sms_not_configured',
+      'This SMS conversation has no gateway device assigned. Reconnect a device in Settings → SMS.',
+      400,
+    )
+  }
+
   const { data: config, error: configError } = await db
     .from('sms_config')
     .select('*')
+    .eq('id', smsConfigId)
     .eq('account_id', accountId)
     .single()
 
   if (configError || !config) {
     throw new SmsSendError(
       'sms_not_configured',
-      'SMS gateway not configured. Please set up your SMS integration first.',
+      'This conversation\'s SMS device no longer exists. Reconnect a device in Settings → SMS.',
       400,
     )
   }
@@ -102,8 +119,20 @@ export async function sendSmsToConversation(
   if (!config.enabled) {
     throw new SmsSendError(
       'sms_disabled',
-      'The SMS channel is currently disabled in Settings → SMS.',
+      'This conversation\'s SMS device is currently disabled in Settings → SMS.',
       403,
+    )
+  }
+
+  // Per-device daily cap (SMS_DAILY_CAP), checked here so it's enforced
+  // for every send path — bulk broadcast, Contact Detail, and Inbox
+  // replies alike — rather than only at conversation-creation time.
+  const sentToday = await countRecentSmsSentByDevice(db, smsConfigId)
+  if (sentToday >= SMS_DAILY_CAP) {
+    throw new SmsSendError(
+      'sms_daily_cap_reached',
+      `This device has reached its daily limit of ${SMS_DAILY_CAP} SMS — it resumes once the rolling 24h window clears. This protects the SIM from carrier throttling/spam flags.`,
+      429,
     )
   }
 
@@ -114,6 +143,7 @@ export async function sendSmsToConversation(
     .insert({
       conversation_id: conversationId,
       channel: 'sms',
+      sms_config_id: smsConfigId,
       sender_type: 'agent',
       content_type: 'text',
       content_text: contentText,

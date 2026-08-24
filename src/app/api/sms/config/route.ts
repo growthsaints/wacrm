@@ -2,8 +2,9 @@ import crypto from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
-import { encrypt, decrypt } from '@/lib/sms/encryption'
+import { encrypt } from '@/lib/sms/encryption'
 import { verifyGatewayConnection, GatewayApiError } from '@/lib/sms/gateway-api'
+import { countRecentSmsSentByDevice, SMS_DAILY_CAP } from '@/lib/sms/daily-quota'
 
 function webhookUrl(request: Request, token: string): string {
   return new URL(`/api/sms/webhook/${token}`, request.url).toString()
@@ -12,73 +13,44 @@ function webhookUrl(request: Request, token: string): string {
 /**
  * GET /api/sms/config
  *
- * Mirrors /api/whatsapp/config's GET: used by the settings page to show
- * connection status and by the "Test Connection" button. Returns 200 in
- * every non-auth case so the UI can render a message instead of a 500.
+ * Lists every SMS Gateway device on the account (migration 080 — an
+ * account can have many, one per phone/SIM). Doesn't live-verify each
+ * device's gateway connection on every list load (that's 1 HTTP call
+ * per device — fine for one, not for twenty) — `status`/`enabled` are
+ * the stored, last-known state; live verification happens at save time
+ * (POST) instead.
  */
 export async function GET(request: Request) {
   try {
     const { supabase, accountId } = await getCurrentAccount()
 
-    const { data: config, error } = await supabase
+    const { data: configs, error } = await supabase
       .from('sms_config')
-      .select('base_url, username, password, webhook_token, status, enabled')
+      .select('id, label, base_url, username, webhook_token, status, enabled, connected_at')
       .eq('account_id', accountId)
-      .maybeSingle()
+      .order('created_at', { ascending: true })
 
     if (error) {
       console.error('[sms/config GET] fetch error:', error)
-      return NextResponse.json(
-        { connected: false, reason: 'db_error', message: 'Failed to fetch configuration' },
-        { status: 200 },
-      )
+      return NextResponse.json({ devices: [] }, { status: 200 })
     }
 
-    if (!config) {
-      return NextResponse.json(
-        {
-          connected: false,
-          reason: 'no_config',
-          message: 'No SMS gateway configured yet. Fill in the form and click Save Configuration.',
-        },
-        { status: 200 },
-      )
-    }
+    const devices = await Promise.all(
+      (configs ?? []).map(async (c) => ({
+        id: c.id,
+        label: c.label,
+        base_url: c.base_url,
+        username: c.username,
+        webhook_url: webhookUrl(request, c.webhook_token),
+        status: c.status,
+        enabled: c.enabled,
+        connected_at: c.connected_at,
+        sent_today: await countRecentSmsSentByDevice(supabase, c.id).catch(() => 0),
+        daily_cap: SMS_DAILY_CAP,
+      })),
+    )
 
-    let password: string
-    try {
-      password = decrypt(config.password)
-    } catch (err) {
-      console.error('[sms/config GET] password decryption failed:', err)
-      return NextResponse.json(
-        {
-          connected: false,
-          reason: 'token_corrupted',
-          needs_reset: true,
-          message:
-            'The stored gateway password cannot be decrypted with the current ENCRYPTION_KEY. Reset and re-save the configuration.',
-        },
-        { status: 200 },
-      )
-    }
-
-    const shared = {
-      base_url: config.base_url,
-      username: config.username,
-      webhook_url: webhookUrl(request, config.webhook_token),
-      enabled: config.enabled,
-    }
-
-    try {
-      await verifyGatewayConnection({ baseUrl: config.base_url, username: config.username, password })
-      return NextResponse.json({ connected: true, ...shared })
-    } catch (err) {
-      const message = err instanceof GatewayApiError ? err.message : 'Unknown gateway error'
-      return NextResponse.json(
-        { connected: false, reason: 'gateway_error', message, ...shared },
-        { status: 200 },
-      )
-    }
+    return NextResponse.json({ devices })
   } catch (err) {
     return toErrorResponse(err)
   }
@@ -87,17 +59,19 @@ export async function GET(request: Request) {
 /**
  * POST /api/sms/config
  *
- * Saves or updates the account's SMS gateway config. Verifies the
- * credentials reach a real gateway before persisting. `webhook_token`
- * is generated once (on first insert) and stays stable across re-saves
- * so the URL the user pastes into the Android app doesn't change.
+ * Adds a NEW SMS Gateway device to the account (does not update an
+ * existing one — see PATCH /api/sms/config/{id} for that). Verifies the
+ * credentials reach a real gateway before persisting. Every device gets
+ * its own webhook_token/secret, so each Android app instance is pointed
+ * at a distinct webhook URL and inbound routing never has to guess
+ * which device a webhook call came from.
  */
 export async function POST(request: Request) {
   try {
     const { supabase, accountId, userId } = await requireRole('admin')
 
     const body = await request.json()
-    const { base_url, username, password } = body
+    const { label, base_url, username, password } = body
 
     if (!base_url || !username || !password) {
       return NextResponse.json(
@@ -120,108 +94,36 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: `Could not connect to SMS gateway: ${message}` }, { status: 400 })
     }
 
-    const { data: existing } = await supabase
+    const webhookToken = crypto.randomBytes(16).toString('hex')
+    const webhookSecret = encrypt(crypto.randomBytes(32).toString('hex'))
+
+    const { data: inserted, error: insertError } = await supabase
       .from('sms_config')
-      .select('id, webhook_token, webhook_secret')
-      .eq('account_id', accountId)
-      .maybeSingle()
+      .insert({
+        account_id: accountId,
+        user_id: userId,
+        label: typeof label === 'string' && label.trim() ? label.trim() : 'SMS Gateway',
+        base_url: normalizedBaseUrl,
+        username,
+        password: encrypt(password),
+        webhook_token: webhookToken,
+        webhook_secret: webhookSecret,
+        status: 'connected',
+        connected_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single()
 
-    const webhookToken = existing?.webhook_token ?? crypto.randomBytes(16).toString('hex')
-    const webhookSecret = existing?.webhook_secret ?? encrypt(crypto.randomBytes(32).toString('hex'))
-
-    const row = {
-      base_url: normalizedBaseUrl,
-      username,
-      password: encrypt(password),
-      webhook_token: webhookToken,
-      webhook_secret: webhookSecret,
-      status: 'connected',
-      connected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-
-    if (existing) {
-      const { error: updateError } = await supabase
-        .from('sms_config')
-        .update(row)
-        .eq('account_id', accountId)
-      if (updateError) {
-        console.error('[sms/config POST] update error:', updateError)
-        return NextResponse.json({ error: 'Failed to update configuration' }, { status: 500 })
-      }
-    } else {
-      const { error: insertError } = await supabase
-        .from('sms_config')
-        .insert({ account_id: accountId, user_id: userId, ...row })
-      if (insertError) {
-        console.error('[sms/config POST] insert error:', insertError)
-        return NextResponse.json({ error: 'Failed to save configuration' }, { status: 500 })
-      }
+    if (insertError || !inserted) {
+      console.error('[sms/config POST] insert error:', insertError)
+      return NextResponse.json({ error: 'Failed to save configuration' }, { status: 500 })
     }
 
     return NextResponse.json({
       success: true,
+      id: inserted.id,
       webhook_url: webhookUrl(request, webhookToken),
     })
-  } catch (err) {
-    return toErrorResponse(err)
-  }
-}
-
-/**
- * PATCH /api/sms/config
- *
- * Flips the channel on/off without touching the saved credentials —
- * lets an admin pause SMS (stop new sends and inbound webhook
- * processing) and resume it later without re-entering the gateway
- * password. No-op body other than `{ enabled: boolean }`.
- */
-export async function PATCH(request: Request) {
-  try {
-    const { supabase, accountId } = await requireRole('admin')
-
-    const body = await request.json()
-    if (typeof body.enabled !== 'boolean') {
-      return NextResponse.json({ error: 'enabled (boolean) is required' }, { status: 400 })
-    }
-
-    const { data, error } = await supabase
-      .from('sms_config')
-      .update({ enabled: body.enabled, updated_at: new Date().toISOString() })
-      .eq('account_id', accountId)
-      .select('enabled')
-      .maybeSingle()
-
-    if (error) {
-      console.error('[sms/config PATCH] update error:', error)
-      return NextResponse.json({ error: 'Failed to update configuration' }, { status: 500 })
-    }
-    if (!data) {
-      return NextResponse.json({ error: 'No SMS configuration to update' }, { status: 404 })
-    }
-
-    return NextResponse.json({ success: true, enabled: data.enabled })
-  } catch (err) {
-    return toErrorResponse(err)
-  }
-}
-
-/**
- * DELETE /api/sms/config
- *
- * Removes the account's SMS gateway configuration.
- */
-export async function DELETE() {
-  try {
-    const { supabase, accountId } = await requireRole('admin')
-
-    const { error } = await supabase.from('sms_config').delete().eq('account_id', accountId)
-    if (error) {
-      console.error('[sms/config DELETE] delete error:', error)
-      return NextResponse.json({ error: 'Failed to delete configuration' }, { status: 500 })
-    }
-
-    return NextResponse.json({ success: true })
   } catch (err) {
     return toErrorResponse(err)
   }

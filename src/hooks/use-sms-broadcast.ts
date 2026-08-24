@@ -4,7 +4,6 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import type { Contact } from '@/types';
-import { countRecentSmsSent, SMS_DAILY_CAP } from '@/lib/sms/daily-quota';
 
 export type SmsCustomFieldOperator = 'is' | 'is_not' | 'contains';
 
@@ -201,14 +200,14 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
         throw new Error('No contacts found for this audience.');
       }
 
-      // Checked once up front — 100/day per account (one gateway = one
-      // SIM in this codebase's model). Recipients beyond what's left of
-      // today's cap are still recorded (so the detail page shows who
-      // was skipped and why) but never attempted.
-      setProgress(10);
-      const alreadySentToday = await countRecentSmsSent(supabase);
-      const remainingQuota = Math.max(0, SMS_DAILY_CAP - alreadySentToday);
-
+      // Per-device daily caps and device assignment (round-robin new
+      // conversations to whichever connected device has the most room
+      // left today; existing conversations stick to their own assigned
+      // device) are both enforced centrally per-recipient inside
+      // sendSmsToConversation, called via /api/whatsapp/send below —
+      // nothing to pre-check here. A recipient whose device is at cap
+      // (or who has none available) simply comes back as a per-recipient
+      // failure from that call, same as any other send failure.
       setProgress(15);
       const { data: broadcast, error: broadcastError } = await supabase
         .from('sms_broadcasts')
@@ -232,8 +231,6 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
       }
 
       setProgress(25);
-      const overQuota = contacts.slice(remainingQuota);
-
       const recipientRows = contacts.map((c) => ({
         sms_broadcast_id: broadcast.id,
         contact_id: c.id,
@@ -259,27 +256,12 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
         }
       }
 
-      const overQuotaIds = new Set(overQuota.map((c) => c.id));
-      const toSend = recipientIds.filter((r) => !overQuotaIds.has(r.contact.id));
-      const skipped = recipientIds.filter((r) => overQuotaIds.has(r.contact.id));
-
       let sentCount = 0;
       let failedCount = 0;
 
-      if (skipped.length > 0) {
-        failedCount += skipped.length;
-        await supabase
-          .from('sms_broadcast_recipients')
-          .update({
-            status: 'failed',
-            error_message: `Daily SMS limit of ${SMS_DAILY_CAP} reached for this SIM — resend the rest after it resets.`,
-          })
-          .in('id', skipped.map((r) => r.id));
-      }
-
-      const total = toSend.length || 1;
-      for (let i = 0; i < toSend.length; i += SEND_BATCH_SIZE) {
-        const batch = toSend.slice(i, i + SEND_BATCH_SIZE);
+      const total = recipientIds.length || 1;
+      for (let i = 0; i < recipientIds.length; i += SEND_BATCH_SIZE) {
+        const batch = recipientIds.slice(i, i + SEND_BATCH_SIZE);
 
         await Promise.all(
           batch.map(async ({ id, contact }) => {
@@ -322,7 +304,7 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
         );
 
         setProgress(25 + Math.round(((i + batch.length) / total) * 70));
-        if (i + SEND_BATCH_SIZE < toSend.length) {
+        if (i + SEND_BATCH_SIZE < recipientIds.length) {
           await sleep(SEND_BATCH_DELAY_MS);
         }
       }

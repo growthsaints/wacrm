@@ -11,6 +11,7 @@ import {
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
 import { sendSmsToConversation, SmsSendError } from '@/lib/sms/send-message'
+import { listEnabledDevicesWithCapacity, pickLeastLoadedDevice } from '@/lib/sms/device-assignment'
 
 // The dashboard's outbound-send endpoint. It owns auth, per-user rate
 // limiting, and the two ways the UI targets a thread — an existing
@@ -160,12 +161,45 @@ export async function POST(request: Request) {
 
       channel = channelInput === 'sms' ? 'sms' : 'whatsapp'
 
+      // Multi-device SMS (migration 080): a brand-new conversation for
+      // this contact gets round-robin-assigned to whichever enabled
+      // device has the most capacity left today — an existing
+      // conversation already has its own device pinned and
+      // findOrCreateConversation below leaves it untouched. Resolved
+      // here (not inside findOrCreateConversation) so a reused
+      // conversation never pays for a device lookup it won't use.
+      let smsDeviceId: string | null = null
+      if (channel === 'sms') {
+        const devices = await listEnabledDevicesWithCapacity(supabase, accountId)
+        const chosen = pickLeastLoadedDevice(devices)
+        if (!chosen) {
+          if (devices.length === 0) {
+            // Distinguishes "nothing configured/enabled" from "all at
+            // cap" below — the former needs Settings, the latter just
+            // needs to wait out the 24h window.
+            return NextResponse.json(
+              {
+                error:
+                  'No enabled SMS gateway device found. Connect (or re-enable) one in Settings → SMS.',
+              },
+              { status: 400 }
+            )
+          }
+          return NextResponse.json(
+            { error: 'Every connected SMS device has reached its daily limit — try again after it resets.' },
+            { status: 429 }
+          )
+        }
+        smsDeviceId = chosen.id
+      }
+
       const resolved = await findOrCreateConversation(
         supabase,
         accountId,
         user.id,
         channel,
-        contact_id
+        contact_id,
+        smsDeviceId
       )
       if (!resolved) {
         return NextResponse.json(
@@ -262,6 +296,7 @@ async function findOrCreateConversation(
   userId: string,
   channel: string,
   contactId: string,
+  smsDeviceId: string | null = null,
 ): Promise<string | null> {
   const { data: existing } = await supabase
     .from('conversations')
@@ -271,6 +306,8 @@ async function findOrCreateConversation(
     .eq('channel', channel)
     .maybeSingle()
 
+  // Already exists — its own sms_config_id (assigned when it was first
+  // created) stays authoritative, never reassigned here.
   if (existing) return existing.id
 
   const { data: created, error } = await supabase
@@ -280,6 +317,7 @@ async function findOrCreateConversation(
       user_id: userId,
       contact_id: contactId,
       channel,
+      ...(smsDeviceId ? { sms_config_id: smsDeviceId } : {}),
     })
     .select('id')
     .single()

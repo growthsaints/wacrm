@@ -11,7 +11,8 @@ import {
   type SmsCustomFieldOperator,
 } from '@/hooks/use-sms-broadcast';
 import { parseContactCsv } from '@/lib/contacts/parse-contact-csv';
-import { countRecentSmsSent, SMS_DAILY_CAP } from '@/lib/sms/daily-quota';
+import { useAuth } from '@/hooks/use-auth';
+import { listEnabledDevicesWithCapacity, type SmsDeviceCapacity } from '@/lib/sms/device-assignment';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,6 +29,7 @@ const OPERATOR_OPTIONS: { value: SmsCustomFieldOperator; label: string }[] = [
 
 export default function NewSmsBroadcastPage() {
   const router = useRouter();
+  const { accountId } = useAuth();
   const { createAndSendSmsBroadcast, isProcessing, progress } = useSmsBroadcast();
 
   const [name, setName] = useState('');
@@ -43,7 +45,7 @@ export default function NewSmsBroadcastPage() {
   const [customFieldValue, setCustomFieldValue] = useState('');
   const [csvContacts, setCsvContacts] = useState<{ phone: string; name?: string }[]>([]);
   const [csvFileName, setCsvFileName] = useState('');
-  const [remainingQuota, setRemainingQuota] = useState<number | null>(null);
+  const [deviceCapacity, setDeviceCapacity] = useState<SmsDeviceCapacity[] | null>(null);
 
   useEffect(() => {
     async function fetchTags() {
@@ -74,24 +76,26 @@ export default function NewSmsBroadcastPage() {
     fetchFields();
   }, [audienceType, customFields.length]);
 
-  // Shown as a heads-up before sending — the hook re-checks this itself
-  // right before dispatching, this is just so the form doesn't surprise
-  // the user with a mid-send cutoff.
+  // Shown as a heads-up before sending — actual per-device enforcement
+  // happens at send time (round-robin assignment + per-device cap
+  // inside sendSmsToConversation), this is just so the form doesn't
+  // surprise the user with a mid-send cutoff.
   useEffect(() => {
+    if (!accountId) return;
     let cancelled = false;
     (async () => {
       try {
         const supabase = createClient();
-        const sentToday = await countRecentSmsSent(supabase);
-        if (!cancelled) setRemainingQuota(Math.max(0, SMS_DAILY_CAP - sentToday));
+        const devices = await listEnabledDevicesWithCapacity(supabase, accountId);
+        if (!cancelled) setDeviceCapacity(devices);
       } catch {
-        if (!cancelled) setRemainingQuota(null);
+        if (!cancelled) setDeviceCapacity(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accountId]);
 
   function toggleTag(id: string) {
     setTagIds((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
@@ -152,21 +156,27 @@ export default function NewSmsBroadcastPage() {
         </div>
       </div>
 
-      {remainingQuota !== null && (
-        <div
-          className={`rounded-lg border px-3 py-2 text-xs ${
-            remainingQuota === 0
-              ? 'border-red-500/30 bg-red-500/10 text-red-300'
-              : remainingQuota <= 20
-                ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
-                : 'border-border bg-muted/50 text-muted-foreground'
-          }`}
-        >
-          {remainingQuota === 0
-            ? `Today's ${SMS_DAILY_CAP}/day SMS limit for this SIM is already reached — sends will queue as failed until it resets.`
-            : `${remainingQuota} of ${SMS_DAILY_CAP} SMS left today for this SIM. Recipients beyond that are skipped, not silently dropped.`}
-        </div>
-      )}
+      {deviceCapacity !== null && (() => {
+        const totalRemaining = deviceCapacity.reduce((sum, d) => sum + d.remaining, 0);
+        const deviceCount = deviceCapacity.length;
+        return (
+          <div
+            className={`rounded-lg border px-3 py-2 text-xs ${
+              deviceCount === 0 || totalRemaining === 0
+                ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                : totalRemaining <= 20
+                  ? 'border-amber-500/30 bg-amber-500/10 text-amber-200'
+                  : 'border-border bg-muted/50 text-muted-foreground'
+            }`}
+          >
+            {deviceCount === 0
+              ? 'No enabled SMS device connected — connect one in Settings → SMS before sending.'
+              : totalRemaining === 0
+                ? `All ${deviceCount} connected device${deviceCount === 1 ? '' : 's'} have reached today's limit — sends will fail until it resets.`
+                : `${totalRemaining.toLocaleString()} SMS of capacity left today across ${deviceCount} connected device${deviceCount === 1 ? '' : 's'}. Recipients beyond that fail per-device, not silently dropped.`}
+          </div>
+        );
+      })()}
 
       {isProcessing ? (
         <div className="space-y-3 rounded-xl border border-border bg-card/50 p-6 text-center">
