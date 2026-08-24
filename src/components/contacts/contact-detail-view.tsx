@@ -84,6 +84,10 @@ export function ContactDetailView({
   const [smsDialogOpen, setSmsDialogOpen] = useState(false);
   const [smsText, setSmsText] = useState('');
   const [sendingSms, setSendingSms] = useState(false);
+  // Account-level, not contact-level — gates the "Send SMS" button so it
+  // doesn't dangle when the account never configured a gateway or
+  // paused it via the Settings → SMS toggle.
+  const [smsAvailable, setSmsAvailable] = useState(false);
 
   // Details tab
   const [editName, setEditName] = useState('');
@@ -205,6 +209,22 @@ export function ContactDetailView({
       fetchDeals();
     }
   }, [open, contactId, fetchContact, fetchTags, fetchNotes, fetchCustomFields, fetchDeals]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch('/api/sms/config', { method: 'GET' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled) setSmsAvailable(Boolean(data.connected && data.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setSmsAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   async function copyPhone() {
     if (!contact) return;
@@ -502,14 +522,16 @@ export function ContactDetailView({
                   )}
                   {t('sendTemplateBtn')}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSmsDialogOpen(true)}
-                >
-                  <MessageSquare className="size-4" />
-                  {t('sendSmsBtn')}
-                </Button>
+                {smsAvailable && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSmsDialogOpen(true)}
+                  >
+                    <MessageSquare className="size-4" />
+                    {t('sendSmsBtn')}
+                  </Button>
+                )}
               </div>
             </SheetHeader>
 
