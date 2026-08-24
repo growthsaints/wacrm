@@ -157,21 +157,10 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed';
 
-export type ConversationChannel = 'whatsapp' | 'sms';
-
 export interface Conversation {
   id: string;
   user_id: string;
   contact_id: string;
-  /**
-   * Which channel this thread runs on (migration 037). Optional on the
-   * TS type (rather than required) so the many existing places that
-   * build a partial `Conversation` object literal — optimistic UI
-   * updates, tests — don't all need updating; the DB column itself is
-   * NOT NULL with a `'whatsapp'` default, so a real row always has it.
-   * Treat `undefined` as `'whatsapp'`.
-   */
-  channel?: ConversationChannel;
   status: ConversationStatus;
   assigned_agent_id?: string;
   last_message_text?: string;
@@ -232,9 +221,6 @@ export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
 export interface Message {
   id: string;
   conversation_id: string;
-  /** Which channel this message went out/came in on (migration 037). See
-   *  the note on `Conversation.channel` — optional for the same reason. */
-  channel?: ConversationChannel;
   sender_type: SenderType;
   sender_id?: string;
   content_type: ContentType;

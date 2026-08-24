@@ -10,7 +10,6 @@ import {
   validateSendMessageParams,
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
-import { sendSmsToConversation, SmsSendError } from '@/lib/sms/send-message'
 
 // The dashboard's outbound-send endpoint. It owns auth, per-user rate
 // limiting, and the two ways the UI targets a thread — an existing
@@ -68,11 +67,6 @@ export async function POST(request: Request) {
       // yet (Contact detail → Send template) — we find-or-create one below.
       conversation_id: conversationIdInput,
       contact_id,
-      // Only meaningful alongside `contact_id`: 'sms' initiates (or
-      // reuses) the contact's SMS conversation instead of WhatsApp.
-      // Ignored when `conversation_id` is given — that thread's own
-      // channel column is authoritative.
-      channel: channelInput,
       message_type,
       content_text,
       media_url,
@@ -118,17 +112,11 @@ export async function POST(request: Request) {
     // contact so a business-initiated template send (Contact detail view)
     // reuses the shared send core below.
     let conversationId: string | null = null
-    // Which channel core to delegate to below. `conversation_id` sends
-    // (existing thread — inbox composer) can target either channel;
-    // `contact_id` sends (Contact detail → Send WhatsApp Message) always
-    // initiate a WhatsApp conversation — SMS has its own initiation
-    // entry point that creates a channel:'sms' conversation up front.
-    let channel: string = 'whatsapp'
 
     if (conversationIdInput) {
       const { data, error: convError } = await supabase
         .from('conversations')
-        .select('id, channel')
+        .select('id')
         .eq('id', conversationIdInput)
         .eq('account_id', accountId)
         .single()
@@ -140,7 +128,6 @@ export async function POST(request: Request) {
         )
       }
       conversationId = data.id
-      channel = data.channel
     } else {
       // contact_id path: verify the contact is in this account first so a
       // caller can't open a conversation against someone else's contact.
@@ -158,13 +145,10 @@ export async function POST(request: Request) {
         )
       }
 
-      channel = channelInput === 'sms' ? 'sms' : 'whatsapp'
-
       const resolved = await findOrCreateConversation(
         supabase,
         accountId,
         user.id,
-        channel,
         contact_id
       )
       if (!resolved) {
@@ -183,31 +167,10 @@ export async function POST(request: Request) {
       )
     }
 
-    // Delegate to the shared send core for the conversation's channel.
-    // Both cores validate, send, and persist; their typed errors carry a
-    // machine code + HTTP status that maps onto the dashboard's
-    // internal `{ error }` shape the same way.
-    if (channel === 'sms') {
-      try {
-        const result = await sendSmsToConversation(supabase, accountId, {
-          conversationId,
-          messageType: message_type,
-          contentText: content_text,
-        })
-
-        return NextResponse.json({
-          success: true,
-          message_id: result.messageId,
-          gateway_message_id: result.gatewayMessageId,
-        })
-      } catch (err) {
-        if (err instanceof SmsSendError) {
-          return NextResponse.json({ error: err.message }, { status: err.status })
-        }
-        throw err
-      }
-    }
-
+    // Delegate to the shared send core (validates, sends to Meta with
+    // phone-variant retry, persists, pauses active flow runs). Its
+    // `SendMessageError` carries a machine code + HTTP status; the
+    // dashboard maps it to the internal `{ error }` shape.
     try {
       const result = await sendMessageToConversation(supabase, accountId, {
         conversationId,
@@ -249,18 +212,16 @@ export async function POST(request: Request) {
 type SendSupabase = Awaited<ReturnType<typeof createClient>>
 
 /**
- * Return the contact's conversation id in this account for `channel`,
- * creating one if it doesn't exist yet. Mirrors the webhook's
- * find-or-create so an inbound-then-outbound (or outbound-first)
- * sequence converges on a single thread per (contact, channel). Runs
- * under the caller's RLS — the conversations_insert policy requires
- * account agent membership, which the caller already is.
+ * Return the contact's conversation id in this account, creating one if
+ * it doesn't exist yet. Mirrors the webhook's find-or-create so an
+ * inbound-then-outbound (or outbound-first) sequence converges on a single
+ * thread per contact. Runs under the caller's RLS — the conversations_insert
+ * policy requires account agent membership, which the caller already is.
  */
 async function findOrCreateConversation(
   supabase: SendSupabase,
   accountId: string,
   userId: string,
-  channel: string,
   contactId: string,
 ): Promise<string | null> {
   const { data: existing } = await supabase
@@ -268,7 +229,6 @@ async function findOrCreateConversation(
     .select('id')
     .eq('account_id', accountId)
     .eq('contact_id', contactId)
-    .eq('channel', channel)
     .maybeSingle()
 
   if (existing) return existing.id
@@ -279,7 +239,6 @@ async function findOrCreateConversation(
       account_id: accountId,
       user_id: userId,
       contact_id: contactId,
-      channel,
     })
     .select('id')
     .single()
