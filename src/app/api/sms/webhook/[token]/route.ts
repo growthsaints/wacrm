@@ -47,7 +47,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
 
   const { data: config, error: configError } = await supabaseAdmin()
     .from('sms_config')
-    .select('account_id, user_id, webhook_secret')
+    .select('account_id, user_id, webhook_secret, enabled')
     .eq('webhook_token', token)
     .maybeSingle()
 
@@ -72,6 +72,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   if (!verifySmsWebhookSignature(rawBody, signature, timestamp, secret)) {
     console.warn('[sms/webhook] rejected request with invalid signature')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
+  // Channel paused via Settings → SMS. Still 200 (now that the caller is
+  // authenticated) so the gateway doesn't retry-storm us, but skip
+  // everything below — no new conversations, no status mirrors, while
+  // the account has it turned off.
+  if (!config.enabled) {
+    return NextResponse.json({ status: 'ignored', reason: 'sms_disabled' }, { status: 200 })
   }
 
   let body: SmsWebhookBody

@@ -183,7 +183,7 @@ export interface Conversation {
   user_id: string;
   contact_id: string;
   /**
-   * Which channel this thread runs on (migration 037). Optional on the
+   * Which channel this thread runs on (migration 077). Optional on the
    * TS type (rather than required) so the many existing places that
    * build a partial `Conversation` object literal — optimistic UI
    * updates, tests — don't all need updating; the DB column itself is
@@ -280,7 +280,7 @@ export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed'
 export interface Message {
   id: string;
   conversation_id: string;
-  /** Which channel this message went out/came in on (migration 037). See
+  /** Which channel this message went out/came in on (migration 077). See
    *  the note on `Conversation.channel` — optional for the same reason. */
   channel?: ConversationChannel;
   sender_type: SenderType;

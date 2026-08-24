@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Switch } from '@/components/ui/switch';
 import { SettingsPanelHead } from './settings-panel-head';
 
 const MASKED_PASSWORD = '••••••••••••••••';
@@ -36,6 +37,8 @@ export function SmsConfig() {
   const [statusMessage, setStatusMessage] = useState('');
   const [webhookUrl, setWebhookUrl] = useState('');
   const [copied, setCopied] = useState(false);
+  const [enabled, setEnabled] = useState(true);
+  const [togglingEnabled, setTogglingEnabled] = useState(false);
   // Same re-hydration guard as WhatsAppConfig — avoid clobbering an
   // unsaved edit when the auth effect re-fires for unrelated reasons
   // (tab regains focus → token refresh).
@@ -60,6 +63,7 @@ export function SmsConfig() {
         setUsername(payload.username || '');
         setPassword(MASKED_PASSWORD);
         setWebhookUrl(payload.webhook_url || '');
+        setEnabled(payload.enabled ?? true);
       } else if (payload.reason === 'no_config') {
         setHasConfig(false);
         setConnectionStatus('unknown');
@@ -68,6 +72,7 @@ export function SmsConfig() {
         setUsername('');
         setPassword('');
         setWebhookUrl('');
+        setEnabled(true);
       } else {
         // A row exists but the connection currently fails (bad
         // credentials, gateway unreachable, corrupted ciphertext).
@@ -78,6 +83,7 @@ export function SmsConfig() {
         setUsername(payload.username || '');
         setPassword(MASKED_PASSWORD);
         setWebhookUrl(payload.webhook_url || '');
+        setEnabled(payload.enabled ?? true);
       }
       setPasswordEdited(false);
     } catch (err) {
@@ -158,6 +164,36 @@ export function SmsConfig() {
     });
   }, [webhookUrl]);
 
+  // Pause/resume the channel without touching saved credentials — flips
+  // sms_config.enabled via PATCH. New sends and inbound webhook
+  // processing both check this server-side, so the toggle is the real
+  // gate, not just a UI affordance.
+  async function handleToggleEnabled(next: boolean) {
+    setTogglingEnabled(true);
+    const previous = enabled;
+    setEnabled(next); // optimistic
+    try {
+      const res = await fetch('/api/sms/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setEnabled(previous);
+        toast.error(t('toastSaveFailed', { reason: data.error || `HTTP ${res.status}` }));
+        return;
+      }
+      toast.success(next ? t('enabledOn') : t('enabledOff'));
+    } catch (err) {
+      setEnabled(previous);
+      const reason = err instanceof Error ? err.message : 'network error';
+      toast.error(t('toastSaveFailed', { reason }));
+    } finally {
+      setTogglingEnabled(false);
+    }
+  }
+
   if (loading) {
     return (
       <section className="animate-in fade-in-50 duration-200">
@@ -191,6 +227,25 @@ export function SmsConfig() {
               : statusMessage || t('notConnectedDesc')}
           </AlertDescription>
         </Alert>
+
+        {hasConfig && (
+          <Alert className="bg-card border-border">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <AlertTitle className="text-foreground mb-0">{t('enableTitle')}</AlertTitle>
+                <AlertDescription className="text-muted-foreground">
+                  {t('enableDesc')}
+                </AlertDescription>
+              </div>
+              <Switch
+                checked={enabled}
+                onCheckedChange={(v) => handleToggleEnabled(!!v)}
+                disabled={togglingEnabled}
+                aria-label={t('enableTitle')}
+              />
+            </div>
+          </Alert>
+        )}
 
         <Card className="bg-card border-border">
           <CardHeader>

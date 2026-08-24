@@ -99,6 +99,14 @@ export async function sendSmsToConversation(
     )
   }
 
+  if (!config.enabled) {
+    throw new SmsSendError(
+      'sms_disabled',
+      'The SMS channel is currently disabled in Settings → SMS.',
+      403,
+    )
+  }
+
   const password = decrypt(config.password)
 
   const { data: messageRow, error: insertPendingError } = await db
