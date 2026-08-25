@@ -5,9 +5,19 @@ import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/acco
 import { encrypt } from '@/lib/sms/encryption'
 import { verifyGatewayConnection, GatewayApiError } from '@/lib/sms/gateway-api'
 import { countRecentSmsSentByDevice, SMS_DAILY_CAP } from '@/lib/sms/daily-quota'
+import { getBaseUrl } from '@/lib/http/base-url'
 
+// `new URL(path, request.url)` is NOT safe behind a reverse proxy
+// (Hostinger/nginx) — request.url reflects the internal address Next.js
+// is bound to (e.g. http://localhost:3000), not the public hostname.
+// That produced unreachable "https://localhost:3000/api/sms/webhook/…"
+// URLs in Settings → SMS, which silently breaks both delivery-status
+// callbacks (sms:sent/delivered/failed) and inbound SMS (sms:received)
+// from ever reaching this server — see lib/http/base-url.ts, which
+// exists specifically to avoid this (same bug bit the invite-link flow
+// and the Supabase auth callback redirect before it).
 function webhookUrl(request: Request, token: string): string {
-  return new URL(`/api/sms/webhook/${token}`, request.url).toString()
+  return `${getBaseUrl(request, 'sms/config webhookUrl')}/api/sms/webhook/${token}`
 }
 
 /**
