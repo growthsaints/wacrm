@@ -20,7 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Radio, Plus, Loader2, Search, Filter, ChevronDown, MessageSquare } from 'lucide-react';
+import { Radio, Plus, Loader2, Search, Filter, ChevronDown, MessageSquare, MessagesSquare } from 'lucide-react';
 import { useCan } from '@/hooks/use-can';
 import { useAuth } from '@/hooks/use-auth';
 import { GatedButton } from '@/components/ui/gated-button';
@@ -256,6 +256,24 @@ export default function BroadcastsPage() {
           >
             <MessageSquare className="h-4 w-4" />
             New SMS Broadcast
+          </GatedButton>
+          <Button
+            variant="outline"
+            onClick={() => router.push('/broadcasts/httpsms')}
+            className="border-border text-foreground"
+          >
+            <MessagesSquare className="h-4 w-4" />
+            httpSMS Campaigns
+          </Button>
+          <GatedButton
+            canAct={canCreate}
+            gateReason="create broadcasts"
+            variant="outline"
+            onClick={() => router.push('/broadcasts/new-httpsms')}
+            className="border-border text-foreground"
+          >
+            <MessagesSquare className="h-4 w-4" />
+            New httpSMS Broadcast
           </GatedButton>
           <GatedButton
             canAct={canCreate}

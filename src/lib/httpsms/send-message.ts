@@ -3,8 +3,10 @@
 // src/lib/sms/send-message.ts (Android SMS Gateway) and
 // src/lib/whatsapp/send-message.ts. Same shape (validate → load
 // conversation/contact/config → send → persist), smaller: httpSMS is
-// plain text only, one connected number per account in V1 (no
-// multi-device round-robin yet).
+// plain text only, and there's no per-number daily cap to enforce
+// (httpSMS paces sends per phone on its own side) — device selection
+// for a NEW conversation happens earlier, in
+// lib/httpsms/conversation.ts's resolveHttpSmsConversation.
 // ============================================================
 
 import type { SupabaseClient } from '@supabase/supabase-js'
@@ -33,6 +35,7 @@ export interface SendHttpSmsParams {
 export interface SendHttpSmsResult {
   messageId: string
   providerMessageId: string
+  httpsmsConfigId: string
 }
 
 export function validateSendHttpSmsParams(params: {
@@ -172,5 +175,5 @@ export async function sendHttpSmsToConversation(
     })
     .eq('id', conversationId)
 
-  return { messageId: messageRow.id, providerMessageId: providerResult.id }
+  return { messageId: messageRow.id, providerMessageId: providerResult.id, httpsmsConfigId }
 }

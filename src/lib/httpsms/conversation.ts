@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { listEnabledHttpSmsNumbers, pickLeastLoadedHttpSmsNumber } from '@/lib/httpsms/device-assignment';
 
 export class HttpSmsConversationError extends Error {
   readonly status: number;
@@ -10,19 +11,25 @@ export class HttpSmsConversationError extends Error {
 }
 
 /**
- * Find (or create) this contact's httpSMS conversation. V1 supports
- * one connected httpSMS phone number per account (no round-robin like
- * SMS Gateway's multi-device — see lib/sms/device-assignment.ts) so
- * there's nothing to pick between yet; a new conversation is always
- * pinned to that single enabled config. An existing conversation keeps
- * whatever config it was first pinned to, same reasoning as every
- * other channel: replies must keep coming from the same number.
+ * Find (or create) this contact's httpSMS conversation, assigning a
+ * number via round-robin only when actually creating one — an
+ * existing conversation keeps whatever number it was first pinned to
+ * (replies must keep coming from the same number the customer already
+ * saw). Mirrors lib/sms/conversation.ts's resolveSmsConversation.
+ *
+ * preferredConfigId (bulk-broadcast wizard's "send from" picker):
+ * when set, a NEW conversation is pinned to that specific number
+ * instead of round-robin; if it's disabled or gone this throws rather
+ * than silently falling back, since picking one on purpose implies
+ * caring which number the campaign goes out from. Omit for the
+ * default round-robin behavior.
  */
 export async function resolveHttpSmsConversation(
   supabase: SupabaseClient,
   accountId: string,
   userId: string,
   contactId: string,
+  preferredConfigId?: string | null,
 ): Promise<string> {
   const { data: existing } = await supabase
     .from('conversations')
@@ -34,15 +41,15 @@ export async function resolveHttpSmsConversation(
 
   if (existing) return existing.id as string;
 
-  const { data: config } = await supabase
-    .from('httpsms_config')
-    .select('id')
-    .eq('account_id', accountId)
-    .eq('enabled', true)
-    .limit(1)
-    .maybeSingle();
+  const numbers = await listEnabledHttpSmsNumbers(supabase, accountId);
+  const chosen = preferredConfigId
+    ? numbers.find((n) => n.id === preferredConfigId)
+    : pickLeastLoadedHttpSmsNumber(numbers);
 
-  if (!config) {
+  if (!chosen) {
+    if (preferredConfigId) {
+      throw new HttpSmsConversationError('The selected httpSMS number is no longer connected or enabled.', 400);
+    }
     throw new HttpSmsConversationError(
       'No enabled httpSMS number connected. Connect one in Settings → httpSMS.',
       400,
@@ -56,7 +63,7 @@ export async function resolveHttpSmsConversation(
       user_id: userId,
       contact_id: contactId,
       channel: 'httpsms',
-      httpsms_config_id: config.id,
+      httpsms_config_id: chosen.id,
     })
     .select('id')
     .single();
