@@ -46,6 +46,11 @@ export default function NewSmsBroadcastPage() {
   const [csvContacts, setCsvContacts] = useState<{ phone: string; name?: string }[]>([]);
   const [csvFileName, setCsvFileName] = useState('');
   const [deviceCapacity, setDeviceCapacity] = useState<SmsDeviceCapacity[] | null>(null);
+  // '' = auto-distribute (default). Only steers which device NEW
+  // conversations get pinned to — a contact who's already messaged
+  // before keeps using whatever device their conversation was
+  // originally assigned.
+  const [preferredDeviceId, setPreferredDeviceId] = useState('');
 
   useEffect(() => {
     async function fetchTags() {
@@ -131,6 +136,7 @@ export default function NewSmsBroadcastPage() {
               : undefined,
           csvContacts: audienceType === 'csv' ? csvContacts : undefined,
         },
+        preferredDeviceId: preferredDeviceId || undefined,
       });
       router.push(`/broadcasts/sms/${id}`);
     } catch (err) {
@@ -196,6 +202,28 @@ export default function NewSmsBroadcastPage() {
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Weekend offer"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="sms-broadcast-device">Sending device</Label>
+            <select
+              id="sms-broadcast-device"
+              value={preferredDeviceId}
+              onChange={(e) => setPreferredDeviceId(e.target.value)}
+              className="h-9 w-full rounded-lg border border-border bg-muted px-2.5 text-sm text-foreground outline-none focus:border-primary focus:ring-1 focus:ring-primary"
+            >
+              <option value="">Auto-distribute across all devices (recommended)</option>
+              {(deviceCapacity ?? []).map((d) => (
+                <option key={d.id} value={d.id} disabled={d.remaining === 0}>
+                  {d.label} — {d.remaining} left today{d.remaining === 0 ? ' (at limit)' : ''}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              {preferredDeviceId
+                ? 'New conversations this campaign opens will all go out from this one device — recipients beyond its remaining capacity fail rather than switching devices. Contacts who already have an SMS conversation keep using whatever device that started on.'
+                : 'New conversations are spread across every connected device by remaining capacity. Contacts who already have an SMS conversation keep using whatever device that started on, either way.'}
+            </p>
           </div>
 
           <div className="rounded-xl border border-border bg-card/50 p-4">

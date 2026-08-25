@@ -24,6 +24,12 @@ interface CreateSmsBroadcastParams {
   name: string;
   body: string;
   audience: SmsAudienceConfig;
+  // Send every NEW conversation this campaign opens through this one
+  // device instead of round-robin. A contact who already has an SMS
+  // conversation keeps using whichever device it was originally pinned
+  // to — this only steers brand-new conversations. Omit for the default
+  // auto-distribute-by-capacity behavior.
+  preferredDeviceId?: string;
 }
 
 interface UseSmsBroadcastReturn {
@@ -79,6 +85,7 @@ async function runSmsSendLoop(
   bodyText: string,
   onProgress: (pct: number) => void,
   isRetry = false,
+  preferredDeviceId?: string,
 ): Promise<{ sentCount: number; failedCount: number }> {
   let sentCount = 0;
   let failedCount = 0;
@@ -97,6 +104,7 @@ async function runSmsSendLoop(
               contact_id: contact.id,
               content_text: personalize(bodyText, contact),
               is_retry: isRetry,
+              preferred_device_id: preferredDeviceId,
             }),
           });
           const data = await res.json().catch(() => ({}));
@@ -349,6 +357,8 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
         recipientIds,
         params.body,
         (pct) => setProgress(25 + Math.round(pct * 0.7)),
+        false,
+        params.preferredDeviceId,
       );
 
       setProgress(98);

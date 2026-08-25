@@ -12,18 +12,29 @@ export class SmsConversationError extends Error {
 
 /**
  * Find (or create) this contact's SMS conversation, assigning a device
- * via round-robin only when actually creating one — an existing
- * conversation keeps whatever device it was first pinned to. Shared by
- * the interactive dashboard send route and the bulk-broadcast send
- * route so both apply identical device-assignment rules rather than a
- * second, drifting copy (see migration 080 / device-assignment.ts for
- * why pinning matters).
+ * only when actually creating one — an existing conversation keeps
+ * whatever device it was first pinned to (a manual preferredDeviceId
+ * never moves an existing conversation, same reasoning as everywhere
+ * else pinning applies: the customer already sees replies from that
+ * number). Shared by the interactive dashboard send route and the
+ * bulk-broadcast send route so both apply identical device-assignment
+ * rules rather than a second, drifting copy (see migration 080 /
+ * device-assignment.ts for why pinning matters).
+ *
+ * preferredDeviceId (bulk-broadcast wizard's "send from" picker):
+ * when set, a NEW conversation is pinned to that specific device
+ * instead of round-robin — and only that device; if it's disabled or
+ * at its cap this throws rather than silently spilling onto another
+ * device, since the whole point of picking one was to control which
+ * number the campaign goes out from. Omit it (or leave unset) for the
+ * default round-robin behavior.
  */
 export async function resolveSmsConversation(
   supabase: SupabaseClient,
   accountId: string,
   userId: string,
-  contactId: string
+  contactId: string,
+  preferredDeviceId?: string | null,
 ): Promise<string> {
   const { data: existing } = await supabase
     .from('conversations')
@@ -36,8 +47,19 @@ export async function resolveSmsConversation(
   if (existing) return existing.id as string;
 
   const devices = await listEnabledDevicesWithCapacity(supabase, accountId);
-  const chosen = pickLeastLoadedDevice(devices);
+  const chosen = preferredDeviceId
+    ? devices.find((d) => d.id === preferredDeviceId && d.remaining > 0)
+    : pickLeastLoadedDevice(devices);
   if (!chosen) {
+    if (preferredDeviceId) {
+      const exists = devices.some((d) => d.id === preferredDeviceId);
+      throw new SmsConversationError(
+        exists
+          ? 'The selected SMS device has reached its daily limit — pick a different device or try again after it resets.'
+          : 'The selected SMS device is no longer connected or enabled.',
+        exists ? 429 : 400,
+      );
+    }
     throw new SmsConversationError(
       devices.length === 0
         ? 'No enabled SMS gateway device found. Connect (or re-enable) one in Settings → SMS.'

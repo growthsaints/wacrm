@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { contact_id, content_text, is_retry } = body
+    const { contact_id, content_text, is_retry, preferred_device_id } = body
     if (!contact_id || typeof content_text !== 'string' || !content_text.trim()) {
       return NextResponse.json({ error: 'contact_id and content_text are required' }, { status: 400 })
     }
@@ -61,7 +61,13 @@ export async function POST(request: Request) {
 
     let conversationId: string
     try {
-      conversationId = await resolveSmsConversation(supabase, accountId, user.id, contact_id)
+      conversationId = await resolveSmsConversation(
+        supabase,
+        accountId,
+        user.id,
+        contact_id,
+        typeof preferred_device_id === 'string' ? preferred_device_id : undefined,
+      )
     } catch (err) {
       if (err instanceof SmsConversationError) {
         return NextResponse.json({ error: err.message }, { status: err.status })
