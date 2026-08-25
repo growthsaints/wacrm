@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, CheckCircle2, Loader2, MessageSquare, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Loader2, MessageSquare, RefreshCw, XCircle } from 'lucide-react';
+import { useSmsBroadcast } from '@/hooks/use-sms-broadcast';
+import { toast } from 'sonner';
 
 interface SmsBroadcastRow {
   id: string;
@@ -40,6 +42,7 @@ export default function SmsBroadcastDetailPage() {
   const [broadcast, setBroadcast] = useState<SmsBroadcastRow | null>(null);
   const [recipients, setRecipients] = useState<SmsRecipientRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const { retryFailedSmsBroadcast, isProcessing } = useSmsBroadcast();
 
   const fetchData = useCallback(async () => {
     const supabase = createClient();
@@ -60,6 +63,17 @@ export default function SmsBroadcastDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial fetch on mount, same pattern used elsewhere (broadcasts/[id]/page.tsx)
     fetchData();
   }, [fetchData]);
+
+  async function handleRetryFailed() {
+    if (!broadcast) return;
+    try {
+      await retryFailedSmsBroadcast(broadcast.id);
+      toast.success('Retry complete');
+      await fetchData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Retry failed');
+    }
+  }
 
   if (loading) {
     return (
@@ -82,22 +96,30 @@ export default function SmsBroadcastDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => router.push('/broadcasts')} className="border-border">
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              {broadcast.name}
-            </h1>
-            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[broadcast.status]}`}>
-              {broadcast.status}
-            </span>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => router.push('/broadcasts')} className="border-border">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
+                <MessageSquare className="h-5 w-5 text-primary" />
+                {broadcast.name}
+              </h1>
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[broadcast.status]}`}>
+                {broadcast.status}
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">{new Date(broadcast.created_at).toLocaleString()}</p>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">{new Date(broadcast.created_at).toLocaleString()}</p>
         </div>
+        {broadcast.failed_count > 0 && (
+          <Button onClick={handleRetryFailed} disabled={isProcessing} className="gap-2">
+            {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Retry Failed ({broadcast.failed_count})
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3">

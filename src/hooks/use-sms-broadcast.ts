@@ -28,6 +28,7 @@ interface CreateSmsBroadcastParams {
 
 interface UseSmsBroadcastReturn {
   createAndSendSmsBroadcast: (params: CreateSmsBroadcastParams) => Promise<string>;
+  retryFailedSmsBroadcast: (broadcastId: string) => Promise<void>;
   isProcessing: boolean;
   progress: number;
 }
@@ -50,6 +51,84 @@ function sleep(ms: number) {
 /** Positional {{name}} substitution only — SMS broadcasts are plain text, no template variable system. */
 function personalize(body: string, contact: Contact): string {
   return body.replaceAll('{{name}}', contact.name || contact.phone);
+}
+
+interface SmsSendLoopRecipient {
+  id: string;
+  contact: Contact;
+}
+
+/**
+ * The actual per-recipient send loop — batches of SEND_BATCH_SIZE,
+ * paced by SEND_BATCH_DELAY_MS. Shared by the initial send
+ * (createAndSendSmsBroadcast) and retrying failed recipients
+ * (retryFailedSmsBroadcast) — a retried recipient goes through the
+ * exact same device-assignment/per-device-cap path as a fresh send
+ * (via /api/sms/broadcast-send), so if the recipient's assigned device
+ * is still over its cap it simply fails again with the same reason,
+ * while a recipient whose conversation was never created (the old
+ * per-user-rate-limit bug meant many failures never got that far) gets
+ * freshly round-robin-assigned to whichever device has room now —
+ * including a different SIM than the one that was full before.
+ */
+async function runSmsSendLoop(
+  supabase: ReturnType<typeof createClient>,
+  recipients: SmsSendLoopRecipient[],
+  bodyText: string,
+  onProgress: (pct: number) => void,
+): Promise<{ sentCount: number; failedCount: number }> {
+  let sentCount = 0;
+  let failedCount = 0;
+  const total = recipients.length || 1;
+
+  for (let i = 0; i < recipients.length; i += SEND_BATCH_SIZE) {
+    const batch = recipients.slice(i, i + SEND_BATCH_SIZE);
+
+    await Promise.all(
+      batch.map(async ({ id, contact }) => {
+        try {
+          const res = await fetch('/api/sms/broadcast-send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contact_id: contact.id,
+              content_text: personalize(bodyText, contact),
+            }),
+          });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            failedCount++;
+            await supabase
+              .from('sms_broadcast_recipients')
+              .update({ status: 'failed', error_message: data.error || `HTTP ${res.status}` })
+              .eq('id', id);
+            return;
+          }
+          sentCount++;
+          await supabase
+            .from('sms_broadcast_recipients')
+            .update({ status: 'sent', sent_at: new Date().toISOString(), error_message: null })
+            .eq('id', id);
+        } catch (err) {
+          failedCount++;
+          await supabase
+            .from('sms_broadcast_recipients')
+            .update({
+              status: 'failed',
+              error_message: err instanceof Error ? err.message : 'Unknown error',
+            })
+            .eq('id', id);
+        }
+      }),
+    );
+
+    onProgress(Math.round(((i + batch.length) / total) * 100));
+    if (i + SEND_BATCH_SIZE < recipients.length) {
+      await sleep(SEND_BATCH_DELAY_MS);
+    }
+  }
+
+  return { sentCount, failedCount };
 }
 
 async function fetchContactsByIds(
@@ -256,56 +335,12 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
         }
       }
 
-      let sentCount = 0;
-      let failedCount = 0;
-
-      const total = recipientIds.length || 1;
-      for (let i = 0; i < recipientIds.length; i += SEND_BATCH_SIZE) {
-        const batch = recipientIds.slice(i, i + SEND_BATCH_SIZE);
-
-        await Promise.all(
-          batch.map(async ({ id, contact }) => {
-            try {
-              const res = await fetch('/api/sms/broadcast-send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contact_id: contact.id,
-                  content_text: personalize(params.body, contact),
-                }),
-              });
-              if (!res.ok) {
-                const data = await res.json().catch(() => ({}));
-                failedCount++;
-                await supabase
-                  .from('sms_broadcast_recipients')
-                  .update({ status: 'failed', error_message: data.error || `HTTP ${res.status}` })
-                  .eq('id', id);
-                return;
-              }
-              sentCount++;
-              await supabase
-                .from('sms_broadcast_recipients')
-                .update({ status: 'sent', sent_at: new Date().toISOString() })
-                .eq('id', id);
-            } catch (err) {
-              failedCount++;
-              await supabase
-                .from('sms_broadcast_recipients')
-                .update({
-                  status: 'failed',
-                  error_message: err instanceof Error ? err.message : 'Unknown error',
-                })
-                .eq('id', id);
-            }
-          }),
-        );
-
-        setProgress(25 + Math.round(((i + batch.length) / total) * 70));
-        if (i + SEND_BATCH_SIZE < recipientIds.length) {
-          await sleep(SEND_BATCH_DELAY_MS);
-        }
-      }
+      const { sentCount, failedCount } = await runSmsSendLoop(
+        supabase,
+        recipientIds,
+        params.body,
+        (pct) => setProgress(25 + Math.round(pct * 0.7)),
+      );
 
       setProgress(98);
       await supabase
@@ -324,5 +359,81 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
     }
   }
 
-  return { createAndSendSmsBroadcast, isProcessing, progress };
+  async function retryFailedSmsBroadcast(broadcastId: string): Promise<void> {
+    setIsProcessing(true);
+    setProgress(0);
+    const supabase = createClient();
+
+    try {
+      const { data: broadcast, error: broadcastError } = await supabase
+        .from('sms_broadcasts')
+        .select('id, body_text, sent_count')
+        .eq('id', broadcastId)
+        .single();
+      if (broadcastError || !broadcast) {
+        throw new Error(`Failed to load SMS broadcast: ${broadcastError?.message ?? 'unknown error'}`);
+      }
+
+      setProgress(10);
+      const { data: failedRows, error: failedErr } = await supabase
+        .from('sms_broadcast_recipients')
+        .select('id, contact:contacts(*)')
+        .eq('sms_broadcast_id', broadcastId)
+        .eq('status', 'failed');
+      if (failedErr) {
+        throw new Error(`Failed to load failed recipients: ${failedErr.message}`);
+      }
+
+      const retryTargets: SmsSendLoopRecipient[] = (
+        (failedRows ?? []) as unknown as { id: string; contact: Contact | null }[]
+      )
+        .filter((row): row is { id: string; contact: Contact } => Boolean(row.contact))
+        .map((row) => ({ id: row.id, contact: row.contact }));
+
+      if (retryTargets.length === 0) {
+        throw new Error('No failed recipients to retry.');
+      }
+
+      // Reset to 'pending' before resending so a recipient that fails
+      // again for the same reason doesn't briefly read as stale 'failed'
+      // data from the previous attempt.
+      await supabase
+        .from('sms_broadcast_recipients')
+        .update({ status: 'pending', error_message: null })
+        .in('id', retryTargets.map((r) => r.id));
+
+      setProgress(20);
+      // Each retried recipient re-enters resolveSmsConversation via
+      // /api/sms/broadcast-send. A recipient whose conversation was never
+      // created (the old per-user-rate-limit bug) gets a fresh
+      // round-robin device pick — automatically landing on a different
+      // SIM if the original is now full. A recipient with an
+      // already-pinned conversation retries on that same device by
+      // design (see lib/sms/conversation.ts) and will fail again only if
+      // that specific device is still at its cap.
+      const { sentCount, failedCount } = await runSmsSendLoop(
+        supabase,
+        retryTargets,
+        broadcast.body_text,
+        (pct) => setProgress(20 + Math.round(pct * 0.75)),
+      );
+
+      setProgress(98);
+      const newSentCount = (broadcast.sent_count ?? 0) + sentCount;
+      await supabase
+        .from('sms_broadcasts')
+        .update({
+          status: newSentCount > 0 ? 'sent' : 'failed',
+          sent_count: newSentCount,
+          failed_count: failedCount,
+        })
+        .eq('id', broadcastId);
+
+      setProgress(100);
+    } finally {
+      setIsProcessing(false);
+    }
+  }
+
+  return { createAndSendSmsBroadcast, retryFailedSmsBroadcast, isProcessing, progress };
 }
