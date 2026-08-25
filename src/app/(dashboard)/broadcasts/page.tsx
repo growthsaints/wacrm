@@ -239,6 +239,14 @@ export default function BroadcastsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => router.push('/broadcasts/sms')}
+            className="border-border text-foreground"
+          >
+            <MessageSquare className="h-4 w-4" />
+            SMS Campaigns
+          </Button>
           <GatedButton
             canAct={canCreate}
             gateReason="create broadcasts"
