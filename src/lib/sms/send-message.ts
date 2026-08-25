@@ -101,69 +101,63 @@ export async function sendSmsToConversation(
   // findOrCreateConversation in api/whatsapp/send/route.ts) — replies
   // must keep coming from the same device/number or the thread breaks on
   // the customer's end. A conversation with no assignment (pre-migration
-  // row, or the device was since deleted) has nothing to send through.
+  // row, or the device was since deleted — the FK is ON DELETE SET NULL,
+  // so deleting a device orphans every conversation pinned to it) has
+  // nothing to send through by default.
+  //
+  // On a retry (allowDeviceReassignOnCap), ANY of the ways the pinned
+  // device stopped working — never assigned, deleted, disabled, or at
+  // its daily cap — falls back to round-robin-picking a different
+  // enabled device with room, same reasoning throughout: a retry target
+  // never actually received anything from the old device, so there's no
+  // "wrong number mid-thread" inconsistency to create by moving it. An
+  // interactive reply/first send never reassigns and just fails.
   let smsConfigId: string | null = conversation.sms_config_id
-  if (!smsConfigId) {
-    throw new SmsSendError(
-      'sms_not_configured',
-      'This SMS conversation has no gateway device assigned. Reconnect a device in Settings → SMS.',
-      400,
-    )
+  let config: Record<string, unknown> | undefined
+
+  if (smsConfigId) {
+    const { data } = await db
+      .from('sms_config')
+      .select('*')
+      .eq('id', smsConfigId)
+      .eq('account_id', accountId)
+      .single()
+    config = data ?? undefined
   }
 
-  const { data: initialConfig, error: configError } = await db
-    .from('sms_config')
-    .select('*')
-    .eq('id', smsConfigId)
-    .eq('account_id', accountId)
-    .single()
+  const sentToday = config ? await countRecentSmsSentByDevice(db, smsConfigId!) : 0
+  const needsReplacement = !smsConfigId || !config || !config.enabled || sentToday >= SMS_DAILY_CAP
 
-  if (configError || !initialConfig) {
-    throw new SmsSendError(
-      'sms_not_configured',
-      'This conversation\'s SMS device no longer exists. Reconnect a device in Settings → SMS.',
-      400,
-    )
-  }
-  let config = initialConfig
-
-  if (!config.enabled) {
-    throw new SmsSendError(
-      'sms_disabled',
-      'This conversation\'s SMS device is currently disabled in Settings → SMS.',
-      403,
-    )
-  }
-
-  // Per-device daily cap (SMS_DAILY_CAP), checked here so it's enforced
-  // for every send path — bulk broadcast, Contact Detail, and Inbox
-  // replies alike — rather than only at conversation-creation time.
-  const sentToday = await countRecentSmsSentByDevice(db, smsConfigId)
-  if (sentToday >= SMS_DAILY_CAP) {
-    // A retry (allowDeviceReassignOnCap) may re-pin to a different
-    // device with room — the recipient never actually got this message,
-    // so there's no "wrong number mid-thread" inconsistency to create.
-    // An interactive reply/first send keeps the strict pin and just
-    // fails, same as before.
+  if (needsReplacement) {
     const reassigned = allowDeviceReassignOnCap
       ? pickLeastLoadedDevice(await listEnabledDevicesWithCapacity(db, accountId))
       : null
+    const replacementConfig = reassigned
+      ? (await db.from('sms_config').select('*').eq('id', reassigned.id).eq('account_id', accountId).single()).data
+      : null
 
-    if (!reassigned || reassigned.id === smsConfigId) {
-      throw new SmsSendError(
-        'sms_daily_cap_reached',
-        `This device has reached its daily limit of ${SMS_DAILY_CAP} SMS — it resumes once the rolling 24h window clears. This protects the SIM from carrier throttling/spam flags.`,
-        429,
-      )
-    }
-
-    const { data: newConfig, error: newConfigError } = await db
-      .from('sms_config')
-      .select('*')
-      .eq('id', reassigned.id)
-      .eq('account_id', accountId)
-      .single()
-    if (newConfigError || !newConfig) {
+    if (!reassigned || !replacementConfig) {
+      if (!smsConfigId) {
+        throw new SmsSendError(
+          'sms_not_configured',
+          'This SMS conversation has no gateway device assigned. Reconnect a device in Settings → SMS.',
+          400,
+        )
+      }
+      if (!config) {
+        throw new SmsSendError(
+          'sms_not_configured',
+          'This conversation\'s SMS device no longer exists. Reconnect a device in Settings → SMS.',
+          400,
+        )
+      }
+      if (!config.enabled) {
+        throw new SmsSendError(
+          'sms_disabled',
+          'This conversation\'s SMS device is currently disabled in Settings → SMS.',
+          403,
+        )
+      }
       throw new SmsSendError(
         'sms_daily_cap_reached',
         `This device has reached its daily limit of ${SMS_DAILY_CAP} SMS — it resumes once the rolling 24h window clears. This protects the SIM from carrier throttling/spam flags.`,
@@ -177,10 +171,10 @@ export async function sendSmsToConversation(
       .eq('id', conversationId)
 
     smsConfigId = reassigned.id
-    config = newConfig
+    config = replacementConfig
   }
 
-  const password = decrypt(config.password)
+  const password = decrypt(config!.password as string)
 
   const { data: messageRow, error: insertPendingError } = await db
     .from('messages')
@@ -204,7 +198,7 @@ export async function sendSmsToConversation(
   let gatewayResult: { id: string; state: string }
   try {
     gatewayResult = await sendSms(
-      { baseUrl: config.base_url, username: config.username, password },
+      { baseUrl: config!.base_url as string, username: config!.username as string, password },
       { id: messageRow.id, phoneNumbers: [`+${sanitizedPhone}`], text: contentText! },
     )
   } catch (err) {
@@ -228,5 +222,5 @@ export async function sendSmsToConversation(
     })
     .eq('id', conversationId)
 
-  return { messageId: messageRow.id, gatewayMessageId: gatewayResult.id, smsConfigId }
+  return { messageId: messageRow.id, gatewayMessageId: gatewayResult.id, smsConfigId: smsConfigId! }
 }

@@ -198,6 +198,57 @@ describe("sendSmsToConversation — multi-device resolution", () => {
     ).rejects.toMatchObject({ code: "sms_daily_cap_reached", status: 429 });
   });
 
+  it("reassigns on retry when the conversation has no assigned device at all", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: null, contact: { phone: "+14155550123" } },
+      otherDevices: [
+        { id: "dev-2", enabled: true, base_url: "https://y", username: "u2", password: "enc2", sentToday: 5 },
+      ],
+    });
+    vi.mocked(sendSms).mockResolvedValue({ id: "gw-2", state: "Pending" });
+
+    const result = await sendSmsToConversation(db, "acct-1", {
+      conversationId: "cv-1",
+      messageType: "text",
+      contentText: "hi",
+      allowDeviceReassignOnCap: true,
+    });
+
+    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-2", smsConfigId: "dev-2" });
+  });
+
+  it("still rejects (no reassign) when there's no assigned device and it isn't a retry", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: null, contact: { phone: "+14155550123" } },
+      otherDevices: [
+        { id: "dev-2", enabled: true, base_url: "https://y", username: "u2", password: "enc2", sentToday: 5 },
+      ],
+    });
+    await expect(
+      sendSmsToConversation(db, "acct-1", { conversationId: "cv-1", messageType: "text", contentText: "hi" }),
+    ).rejects.toMatchObject({ code: "sms_not_configured", status: 400 });
+    expect(sendSms).not.toHaveBeenCalled();
+  });
+
+  it("reassigns on retry when the assigned device was deleted (dangling sms_config_id)", async () => {
+    const db = makeDb({
+      conversation: { sms_config_id: "dev-1-deleted", contact: { phone: "+14155550123" } },
+      otherDevices: [
+        { id: "dev-2", enabled: true, base_url: "https://y", username: "u2", password: "enc2", sentToday: 5 },
+      ],
+    });
+    vi.mocked(sendSms).mockResolvedValue({ id: "gw-2", state: "Pending" });
+
+    const result = await sendSmsToConversation(db, "acct-1", {
+      conversationId: "cv-1",
+      messageType: "text",
+      contentText: "hi",
+      allowDeviceReassignOnCap: true,
+    });
+
+    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-2", smsConfigId: "dev-2" });
+  });
+
   it("does NOT reassign on cap by default, even with another device free", async () => {
     const db = makeDb({
       conversation: { sms_config_id: "dev-1", contact: { phone: "+14155550123" } },
