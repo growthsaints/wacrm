@@ -99,8 +99,8 @@ async function runSmsSendLoop(
               is_retry: isRetry,
             }),
           });
+          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
             failedCount++;
             await supabase
               .from('sms_broadcast_recipients')
@@ -111,7 +111,12 @@ async function runSmsSendLoop(
           sentCount++;
           await supabase
             .from('sms_broadcast_recipients')
-            .update({ status: 'sent', sent_at: new Date().toISOString(), error_message: null })
+            .update({
+              status: 'sent',
+              sent_at: new Date().toISOString(),
+              error_message: null,
+              sms_config_id: data.sms_config_id ?? null,
+            })
             .eq('id', id);
         } catch (err) {
           failedCount++;

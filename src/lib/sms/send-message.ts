@@ -43,6 +43,7 @@ export interface SendSmsParams {
 export interface SendSmsResult {
   messageId: string
   gatewayMessageId: string
+  smsConfigId: string
 }
 
 export function validateSendSmsParams(params: {
@@ -227,5 +228,5 @@ export async function sendSmsToConversation(
     })
     .eq('id', conversationId)
 
-  return { messageId: messageRow.id, gatewayMessageId: gatewayResult.id }
+  return { messageId: messageRow.id, gatewayMessageId: gatewayResult.id, smsConfigId }
 }

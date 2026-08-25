@@ -235,7 +235,7 @@ describe("sendSmsToConversation — multi-device resolution", () => {
       { baseUrl: "https://y", username: "u2", password: "dec:enc2" },
       expect.objectContaining({ phoneNumbers: ["+14155550123"], text: "hi" }),
     );
-    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-2" });
+    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-2", smsConfigId: "dev-2" });
   });
 
   it("still fails on a retry if every device is at cap", async () => {
@@ -276,7 +276,7 @@ describe("sendSmsToConversation — multi-device resolution", () => {
       { baseUrl: "https://gateway", username: "u", password: "dec:enc" },
       expect.objectContaining({ phoneNumbers: ["+14155550123"], text: "hi" }),
     );
-    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-1" });
+    expect(result).toEqual({ messageId: "msg-1", gatewayMessageId: "gw-1", smsConfigId: "dev-1" });
   });
 });
 

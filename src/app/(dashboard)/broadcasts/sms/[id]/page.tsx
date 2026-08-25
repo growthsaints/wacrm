@@ -25,6 +25,7 @@ interface SmsRecipientRow {
   error_message: string | null;
   sent_at: string | null;
   contact: { name: string | null; phone: string } | null;
+  sms_config: { label: string | null } | null;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -50,7 +51,7 @@ export default function SmsBroadcastDetailPage() {
       supabase.from('sms_broadcasts').select('*').eq('id', broadcastId).maybeSingle(),
       supabase
         .from('sms_broadcast_recipients')
-        .select('id, status, error_message, sent_at, contact:contacts(name, phone)')
+        .select('id, status, error_message, sent_at, contact:contacts(name, phone), sms_config:sms_config(label)')
         .eq('sms_broadcast_id', broadcastId)
         .order('created_at', { ascending: true }),
     ]);
@@ -147,6 +148,7 @@ export default function SmsBroadcastDetailPage() {
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-2 text-left">Contact</th>
+              <th className="px-4 py-2 text-left">Device</th>
               <th className="px-4 py-2 text-left">Status</th>
               <th className="px-4 py-2 text-left">Error</th>
             </tr>
@@ -157,6 +159,7 @@ export default function SmsBroadcastDetailPage() {
                 <td className="px-4 py-2 text-foreground">
                   {r.contact?.name || r.contact?.phone || 'Unknown'}
                 </td>
+                <td className="px-4 py-2 text-xs text-muted-foreground">{r.sms_config?.label || '—'}</td>
                 <td className="px-4 py-2">
                   <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[r.status]}`}>
                     {r.status === 'sent' && <CheckCircle2 className="h-3 w-3" />}

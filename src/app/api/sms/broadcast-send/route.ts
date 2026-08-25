@@ -84,6 +84,7 @@ export async function POST(request: Request) {
         success: true,
         message_id: result.messageId,
         gateway_message_id: result.gatewayMessageId,
+        sms_config_id: result.smsConfigId,
       })
     } catch (err) {
       if (err instanceof SmsSendError) {
