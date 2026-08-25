@@ -95,6 +95,15 @@ export function ContactDetailView({
   // paused it via the Settings → SMS toggle.
   const [smsAvailable, setSmsAvailable] = useState(false);
 
+  // Send httpSMS — a second, independent SMS channel (httpsms.com),
+  // separate from the SMS Gateway integration above. Same shape: plain
+  // text box, gated on whether the account has an enabled httpSMS
+  // number connected.
+  const [httpSmsDialogOpen, setHttpSmsDialogOpen] = useState(false);
+  const [httpSmsText, setHttpSmsText] = useState('');
+  const [sendingHttpSms, setSendingHttpSms] = useState(false);
+  const [httpSmsAvailable, setHttpSmsAvailable] = useState(false);
+
   // Details tab
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
@@ -261,6 +270,23 @@ export function ContactDetailView({
       })
       .catch(() => {
         if (!cancelled) setSmsAvailable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    fetch('/api/httpsms/config', { method: 'GET' })
+      .then((res) => res.json())
+      .then((data) => {
+        const numbers = Array.isArray(data.numbers) ? data.numbers : [];
+        if (!cancelled) setHttpSmsAvailable(numbers.some((n: { enabled?: boolean }) => n.enabled));
+      })
+      .catch(() => {
+        if (!cancelled) setHttpSmsAvailable(false);
       });
     return () => {
       cancelled = true;
@@ -508,6 +534,38 @@ export function ContactDetailView({
     }
   }
 
+  async function handleSendHttpSms() {
+    if (!contactId || !httpSmsText.trim()) return;
+    setSendingHttpSms(true);
+    try {
+      const res = await fetch('/api/httpsms/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: contactId,
+          message_type: 'text',
+          content_text: httpSmsText.trim(),
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const reason = payload?.error || `HTTP ${res.status}`;
+        toast.error(t('toastHttpSmsFailed', { reason }));
+        return;
+      }
+
+      toast.success(t('toastHttpSmsSent'));
+      setHttpSmsText('');
+      setHttpSmsDialogOpen(false);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'network error';
+      toast.error(t('toastHttpSmsFailed', { reason }));
+    } finally {
+      setSendingHttpSms(false);
+    }
+  }
+
   function getInitials(name?: string | null) {
     if (!name) return '?';
     return name
@@ -596,6 +654,16 @@ export function ContactDetailView({
                   >
                     <MessageSquare className="size-4" />
                     {t('sendSmsBtn')}
+                  </Button>
+                )}
+                {httpSmsAvailable && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setHttpSmsDialogOpen(true)}
+                  >
+                    <MessageSquare className="size-4" />
+                    {t('sendHttpSmsBtn')}
                   </Button>
                 )}
               </div>
@@ -1000,6 +1068,34 @@ export function ContactDetailView({
               <MessageSquare className="size-4" />
             )}
             {t('sendSmsSendBtn')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog open={httpSmsDialogOpen} onOpenChange={setHttpSmsDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('sendHttpSmsDialogTitle')}</DialogTitle>
+          <DialogDescription>{t('sendHttpSmsDialogDesc')}</DialogDescription>
+        </DialogHeader>
+        <Textarea
+          value={httpSmsText}
+          onChange={(e) => setHttpSmsText(e.target.value)}
+          placeholder={t('sendHttpSmsPlaceholder')}
+          rows={4}
+          autoFocus
+        />
+        <DialogFooter>
+          <Button
+            onClick={handleSendHttpSms}
+            disabled={sendingHttpSms || !httpSmsText.trim()}
+          >
+            {sendingHttpSms ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <MessageSquare className="size-4" />
+            )}
+            {t('sendHttpSmsSendBtn')}
           </Button>
         </DialogFooter>
       </DialogContent>

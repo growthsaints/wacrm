@@ -167,9 +167,10 @@ export function MessageComposer({
   onClearReply,
 }: MessageComposerProps) {
   const t = useTranslations("Inbox.composer");
-  // SMS has no templates, media, interactive messages, or a 24h
-  // session-expiry window — those are WhatsApp/Meta Cloud API concepts.
-  const isSms = channel === "sms";
+  // Neither SMS channel (SMS Gateway or httpSMS) has templates, media,
+  // interactive messages, or a 24h session-expiry window — those are
+  // WhatsApp/Meta Cloud API concepts.
+  const isSms = channel === "sms" || channel === "httpsms";
 
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);

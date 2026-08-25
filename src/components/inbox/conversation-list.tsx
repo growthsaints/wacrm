@@ -10,7 +10,7 @@ import {
 } from "@/lib/inbox/conversations";
 import { cn } from "@/lib/utils";
 import type { Conversation, ConversationStatus, Tag } from "@/types";
-import { Search, ChevronDown, X, Pin, Star, MessageSquare } from "lucide-react";
+import { Search, ChevronDown, X, Pin, Star, MessageSquare, MessagesSquare } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
@@ -618,6 +618,12 @@ function ConversationItem({
               <MessageSquare
                 className="h-3 w-3 shrink-0 text-muted-foreground"
                 aria-label={t("channelSms")}
+              />
+            )}
+            {conversation.channel === "httpsms" && (
+              <MessagesSquare
+                className="h-3 w-3 shrink-0 text-muted-foreground"
+                aria-label={t("channelHttpSms")}
               />
             )}
             <span className="truncate">{displayName}</span>

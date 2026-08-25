@@ -176,7 +176,7 @@ export interface ContactNote {
 
 export type ConversationStatus = 'open' | 'pending' | 'closed' | 'archived';
 
-export type ConversationChannel = 'whatsapp' | 'sms';
+export type ConversationChannel = 'whatsapp' | 'sms' | 'httpsms';
 
 export interface Conversation {
   id: string;

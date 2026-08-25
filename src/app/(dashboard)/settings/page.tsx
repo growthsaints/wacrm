@@ -13,6 +13,7 @@ import { SecurityPanel } from '@/components/settings/security-panel';
 import { AppearancePanel } from '@/components/settings/appearance-panel';
 import { WhatsAppConfig } from '@/components/settings/whatsapp-config';
 import { SmsConfig } from '@/components/settings/sms-config';
+import { HttpSmsConfig } from '@/components/settings/httpsms-config';
 import { TemplateManager } from '@/components/settings/template-manager';
 import { QuickRepliesManager } from '@/components/settings/quick-replies-manager';
 import { WhatsAppFlowsManager } from '@/components/settings/whatsapp-flows-manager';
@@ -74,6 +75,7 @@ export default function SettingsPage() {
     appearance: <AppearancePanel />,
     whatsapp: <WhatsAppConfig />,
     sms: <SmsConfig />,
+    httpsms: <HttpSmsConfig />,
     templates: <TemplateManager />,
     'quick-replies': <QuickRepliesManager />,
     'whatsapp-flows': <WhatsAppFlowsManager />,

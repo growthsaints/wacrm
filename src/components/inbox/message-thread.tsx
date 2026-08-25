@@ -476,7 +476,14 @@ export function MessageThread({
       setReplyTo(null);
 
       try {
-        const res = await fetch("/api/whatsapp/send", {
+        // httpSMS is its own independent send route (see
+        // /api/httpsms/send) rather than a branch inside
+        // /api/whatsapp/send the way the SMS Gateway channel is —
+        // everything else (WhatsApp, SMS Gateway) still goes through
+        // the shared route, which resolves the channel from the
+        // conversation itself.
+        const endpoint = conversation.channel === "httpsms" ? "/api/httpsms/send" : "/api/whatsapp/send";
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1235,8 +1242,10 @@ export function MessageThread({
         conversationId={conversation.id}
         channel={conversation.channel}
         // The 24h session window is a WhatsApp/Meta Cloud API concept —
-        // never applies to SMS.
-        sessionExpired={conversation.channel === "sms" ? false : sessionInfo.expired}
+        // never applies to either SMS channel.
+        sessionExpired={
+          conversation.channel === "sms" || conversation.channel === "httpsms" ? false : sessionInfo.expired
+        }
         onSend={handleSend}
         onSendMedia={handleSendMedia}
         onSendInteractive={handleSendInteractive}

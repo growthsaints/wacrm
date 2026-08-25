@@ -202,7 +202,8 @@
       "unfavorite": "Remove from favorites",
       "pinFailed": "Failed to update pin",
       "favoriteFailed": "Failed to update favorite",
-      "channelSms": "SMS"
+      "channelSms": "SMS",
+      "channelHttpSms": "httpSMS"
     },
     "messageThread": {
       "backToConversations": "Back to conversations",
@@ -494,6 +495,11 @@
       "sendSmsDialogDesc": "Starts (or reuses) this contact's SMS conversation.",
       "sendSmsPlaceholder": "Type your message…",
       "sendSmsSendBtn": "Send",
+      "sendHttpSmsBtn": "Send httpSMS",
+      "sendHttpSmsDialogTitle": "Send httpSMS",
+      "sendHttpSmsDialogDesc": "Starts (or reuses) this contact's httpSMS conversation.",
+      "sendHttpSmsPlaceholder": "Type your message…",
+      "sendHttpSmsSendBtn": "Send",
       "saveChangesBtn": "Save Changes",
       "saveCustomFieldsBtn": "Save Custom Fields",
       "toastPhoneRequired": "Phone number is required",
@@ -513,7 +519,9 @@
       "toastTemplateSent": "Template \"{name}\" sent",
       "toastTemplateFailed": "Failed to send template: {reason}",
       "toastSmsSent": "SMS sent",
-      "toastSmsFailed": "Failed to send SMS: {reason}"
+      "toastSmsFailed": "Failed to send SMS: {reason}",
+      "toastHttpSmsSent": "httpSMS sent",
+      "toastHttpSmsFailed": "Failed to send httpSMS: {reason}"
     },
     "importModal": {
       "title": "Import Contacts",
