@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { contact_id, content_text } = body
+    const { contact_id, content_text, is_retry } = body
     if (!contact_id || typeof content_text !== 'string' || !content_text.trim()) {
       return NextResponse.json({ error: 'contact_id and content_text are required' }, { status: 400 })
     }
@@ -74,6 +74,11 @@ export async function POST(request: Request) {
         conversationId,
         messageType: 'text',
         contentText: content_text,
+        // A retry may re-pin the conversation to a different device if
+        // its originally-assigned one is at today's cap — the failed
+        // recipient never actually received a message from that device,
+        // so there's no existing thread to make inconsistent.
+        allowDeviceReassignOnCap: Boolean(is_retry),
       })
       return NextResponse.json({
         success: true,

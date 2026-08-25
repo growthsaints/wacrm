@@ -62,20 +62,23 @@ interface SmsSendLoopRecipient {
  * The actual per-recipient send loop — batches of SEND_BATCH_SIZE,
  * paced by SEND_BATCH_DELAY_MS. Shared by the initial send
  * (createAndSendSmsBroadcast) and retrying failed recipients
- * (retryFailedSmsBroadcast) — a retried recipient goes through the
- * exact same device-assignment/per-device-cap path as a fresh send
- * (via /api/sms/broadcast-send), so if the recipient's assigned device
- * is still over its cap it simply fails again with the same reason,
- * while a recipient whose conversation was never created (the old
- * per-user-rate-limit bug meant many failures never got that far) gets
- * freshly round-robin-assigned to whichever device has room now —
- * including a different SIM than the one that was full before.
+ * (retryFailedSmsBroadcast). A recipient whose conversation was never
+ * created (the old per-user-rate-limit bug meant many failures never
+ * got that far) always gets freshly round-robin-assigned on retry.
+ * A recipient with an *existing* conversation stays pinned to its
+ * original device UNLESS isRetry is set — passed through to
+ * /api/sms/broadcast-send as is_retry, which allows
+ * sendSmsToConversation to re-pin to a different device if the
+ * original one is at its daily cap (see lib/sms/send-message.ts).
+ * That reassignment is retry-only: an interactive reply must keep
+ * using whatever device the customer already saw.
  */
 async function runSmsSendLoop(
   supabase: ReturnType<typeof createClient>,
   recipients: SmsSendLoopRecipient[],
   bodyText: string,
   onProgress: (pct: number) => void,
+  isRetry = false,
 ): Promise<{ sentCount: number; failedCount: number }> {
   let sentCount = 0;
   let failedCount = 0;
@@ -93,6 +96,7 @@ async function runSmsSendLoop(
             body: JSON.stringify({
               contact_id: contact.id,
               content_text: personalize(bodyText, contact),
+              is_retry: isRetry,
             }),
           });
           if (!res.ok) {
@@ -408,14 +412,17 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
       // created (the old per-user-rate-limit bug) gets a fresh
       // round-robin device pick — automatically landing on a different
       // SIM if the original is now full. A recipient with an
-      // already-pinned conversation retries on that same device by
-      // design (see lib/sms/conversation.ts) and will fail again only if
-      // that specific device is still at its cap.
+      // already-pinned conversation normally retries on that same
+      // device (see lib/sms/conversation.ts) — but isRetry=true here
+      // additionally lets sendSmsToConversation re-pin to a different
+      // device if the pinned one is still at its cap, since a retry
+      // target never actually received a message from it.
       const { sentCount, failedCount } = await runSmsSendLoop(
         supabase,
         retryTargets,
         broadcast.body_text,
         (pct) => setProgress(20 + Math.round(pct * 0.75)),
+        true,
       );
 
       setProgress(98);

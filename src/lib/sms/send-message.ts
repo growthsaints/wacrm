@@ -13,6 +13,7 @@ import { sendSms } from '@/lib/sms/gateway-api'
 import { decrypt } from '@/lib/sms/encryption'
 import { sanitizePhoneForMeta, isValidE164 } from '@/lib/whatsapp/phone-utils'
 import { countRecentSmsSentByDevice, SMS_DAILY_CAP } from '@/lib/sms/daily-quota'
+import { listEnabledDevicesWithCapacity, pickLeastLoadedDevice } from '@/lib/sms/device-assignment'
 
 export class SmsSendError extends Error {
   readonly code: string
@@ -29,6 +30,14 @@ export interface SendSmsParams {
   conversationId: string
   messageType: string
   contentText?: string | null
+  // When true, a conversation whose pinned device has hit its daily cap
+  // is re-pinned to whichever other enabled device currently has room,
+  // instead of failing outright. Only set by the failed-recipient retry
+  // path — a normal reply must keep coming from the same device/number
+  // the customer already saw, or the thread looks inconsistent on their
+  // end. A retry target never actually reached the customer (it failed),
+  // so there's nothing to be inconsistent with.
+  allowDeviceReassignOnCap?: boolean
 }
 
 export interface SendSmsResult {
@@ -57,7 +66,7 @@ export async function sendSmsToConversation(
   accountId: string,
   params: SendSmsParams,
 ): Promise<SendSmsResult> {
-  const { conversationId, messageType, contentText } = params
+  const { conversationId, messageType, contentText, allowDeviceReassignOnCap } = params
 
   if (!conversationId) {
     throw new SmsSendError('bad_request', 'conversation_id is required', 400)
@@ -92,7 +101,7 @@ export async function sendSmsToConversation(
   // must keep coming from the same device/number or the thread breaks on
   // the customer's end. A conversation with no assignment (pre-migration
   // row, or the device was since deleted) has nothing to send through.
-  const smsConfigId: string | null = conversation.sms_config_id
+  let smsConfigId: string | null = conversation.sms_config_id
   if (!smsConfigId) {
     throw new SmsSendError(
       'sms_not_configured',
@@ -101,20 +110,21 @@ export async function sendSmsToConversation(
     )
   }
 
-  const { data: config, error: configError } = await db
+  const { data: initialConfig, error: configError } = await db
     .from('sms_config')
     .select('*')
     .eq('id', smsConfigId)
     .eq('account_id', accountId)
     .single()
 
-  if (configError || !config) {
+  if (configError || !initialConfig) {
     throw new SmsSendError(
       'sms_not_configured',
       'This conversation\'s SMS device no longer exists. Reconnect a device in Settings → SMS.',
       400,
     )
   }
+  let config = initialConfig
 
   if (!config.enabled) {
     throw new SmsSendError(
@@ -129,11 +139,44 @@ export async function sendSmsToConversation(
   // replies alike — rather than only at conversation-creation time.
   const sentToday = await countRecentSmsSentByDevice(db, smsConfigId)
   if (sentToday >= SMS_DAILY_CAP) {
-    throw new SmsSendError(
-      'sms_daily_cap_reached',
-      `This device has reached its daily limit of ${SMS_DAILY_CAP} SMS — it resumes once the rolling 24h window clears. This protects the SIM from carrier throttling/spam flags.`,
-      429,
-    )
+    // A retry (allowDeviceReassignOnCap) may re-pin to a different
+    // device with room — the recipient never actually got this message,
+    // so there's no "wrong number mid-thread" inconsistency to create.
+    // An interactive reply/first send keeps the strict pin and just
+    // fails, same as before.
+    const reassigned = allowDeviceReassignOnCap
+      ? pickLeastLoadedDevice(await listEnabledDevicesWithCapacity(db, accountId))
+      : null
+
+    if (!reassigned || reassigned.id === smsConfigId) {
+      throw new SmsSendError(
+        'sms_daily_cap_reached',
+        `This device has reached its daily limit of ${SMS_DAILY_CAP} SMS — it resumes once the rolling 24h window clears. This protects the SIM from carrier throttling/spam flags.`,
+        429,
+      )
+    }
+
+    const { data: newConfig, error: newConfigError } = await db
+      .from('sms_config')
+      .select('*')
+      .eq('id', reassigned.id)
+      .eq('account_id', accountId)
+      .single()
+    if (newConfigError || !newConfig) {
+      throw new SmsSendError(
+        'sms_daily_cap_reached',
+        `This device has reached its daily limit of ${SMS_DAILY_CAP} SMS — it resumes once the rolling 24h window clears. This protects the SIM from carrier throttling/spam flags.`,
+        429,
+      )
+    }
+
+    await db
+      .from('conversations')
+      .update({ sms_config_id: reassigned.id })
+      .eq('id', conversationId)
+
+    smsConfigId = reassigned.id
+    config = newConfig
   }
 
   const password = decrypt(config.password)
