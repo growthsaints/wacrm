@@ -38,11 +38,16 @@ async function httpSmsFetch(path: string, apiKey: string, init?: RequestInit): P
 }
 
 /**
- * POST /messages/send — the one well-documented, high-confidence part
- * of httpSMS's API (confirmed via their swagger spec). `requestId` is
- * optional idempotency support on their side; we pass our own
- * `messages.id` so a retried send can't double-dispatch, mirroring the
- * Android Gateway integration's use of its own message id.
+ * POST /messages/send — confirmed against httpSMS's own docs
+ * (docs.httpsms.com). `requestId` is their idempotency key AND doubles
+ * as the correlation id status-change webhooks report back
+ * (`data.request_id`) — we pass our own `messages.id` so both a
+ * retried send can't double-dispatch and a later webhook can be
+ * matched to the right row without relying only on `data.id`.
+ *
+ * The response body wraps the message entity under `data`
+ * (`{ data: {...}, message: "...", status: "success" }`) — every
+ * httpSMS endpoint uses this envelope, not just this one.
  */
 export async function sendHttpSms(
   apiKey: string,
@@ -67,13 +72,63 @@ export async function sendHttpSms(
     throw new HttpSmsApiError(message, res.status)
   }
 
-  if (!body || typeof body !== 'object' || !('id' in body)) {
+  const data =
+    body && typeof body === 'object' && 'data' in body && typeof body.data === 'object'
+      ? (body.data as Record<string, unknown>)
+      : null
+
+  if (!data || !('id' in data)) {
     throw new HttpSmsApiError('httpSMS returned an unexpected response shape', 502)
   }
 
   return {
-    id: String((body as { id: unknown }).id),
-    status: 'status' in body ? String((body as { status: unknown }).status) : 'pending',
+    id: String(data.id),
+    status: 'status' in data ? String(data.status) : 'pending',
+  }
+}
+
+/**
+ * POST /webhooks — registers our webhook URL with httpSMS so
+ * status-change and inbound-message events get pushed to
+ * /api/httpsms/webhook/[token] automatically, no manual dashboard
+ * paste required. `signingKey` is the same secret we store (encrypted)
+ * as httpsms_config.webhook_secret — httpSMS signs each webhook POST's
+ * Authorization header with it (HS256 JWT), which
+ * lib/httpsms/webhook-signature.ts verifies on the way back in.
+ *
+ * Deliberately only the events this integration actually acts on —
+ * phone.heartbeat.* and message.call.missed exist but have nothing to
+ * do with SMS threading, so registering them would just mean silently
+ * ignoring extra traffic on every webhook call.
+ */
+const HTTPSMS_WEBHOOK_EVENTS = [
+  'message.phone.received',
+  'message.phone.sent',
+  'message.phone.delivered',
+  'message.send.failed',
+  'message.send.expired',
+]
+
+export async function registerHttpSmsWebhook(
+  apiKey: string,
+  params: { url: string; signingKey: string; phoneNumber: string },
+): Promise<void> {
+  const res = await httpSmsFetch('/webhooks', apiKey, {
+    method: 'POST',
+    body: JSON.stringify({
+      url: params.url,
+      signing_key: params.signingKey,
+      events: HTTPSMS_WEBHOOK_EVENTS,
+      phone_numbers: [params.phoneNumber],
+    }),
+  })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null)
+    const message =
+      (body && typeof body === 'object' && 'message' in body && String(body.message)) ||
+      `httpSMS returned ${res.status}`
+    throw new HttpSmsApiError(message, res.status)
   }
 }
 

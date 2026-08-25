@@ -1,6 +1,8 @@
 import { NextResponse, after } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
+import { decrypt } from '@/lib/httpsms/encryption'
+import { verifyHttpSmsWebhookAuth } from '@/lib/httpsms/webhook-signature'
 import { findExistingContact, isUniqueViolation } from '@/lib/contacts/dedupe'
 import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 
@@ -19,56 +21,84 @@ function supabaseAdmin() {
 }
 
 /**
+ * httpSMS wraps every webhook payload as a CloudEvent
+ * (docs.httpsms.com/webhooks/introduction):
+ * `{ data: {...}, type: "message.phone.received", source, id, time,
+ *    specversion, datacontenttype }`. `data`'s shape depends on `type`
+ * — see handleReceived/handleStatusEvent below for the fields each
+ * one actually uses.
+ */
+interface HttpSmsCloudEvent {
+  type?: string
+  data?: Record<string, unknown>
+}
+
+const STATUS_BY_EVENT: Record<string, string> = {
+  'message.phone.sent': 'sent',
+  'message.phone.delivered': 'delivered',
+  'message.send.failed': 'failed',
+  'message.send.expired': 'failed',
+}
+
+/**
  * POST /api/httpsms/webhook/[token]
  *
- * Inbound delivery target for httpsms.com (github.com/NdoleStudio/
- * httpsms) — pasted into their dashboard's webhook settings for a
- * connected number. `token` is the unguessable routing id from
- * `httpsms_config.webhook_token`, same trust model as the SMS Gateway
- * webhook route.
- *
- * KNOWN GAP: httpSMS's exact webhook payload shape and signature
- * header aren't confirmed from their (offline-to-us) docs — their
- * swagger only confirms the outbound send API in detail. This handler
- * is deliberately defensive: it doesn't enforce a signature (there's
- * nothing to enforce against an unconfirmed header name), and it
- * tries several plausible field-name shapes for an inbound message
- * rather than committing to one. Any payload that doesn't look like a
- * message gets logged and 200'd rather than rejected, so httpSMS
- * doesn't retry-storm us while this gets tightened up against a real
- * account's traffic.
+ * Inbound delivery target for httpsms.com — registered automatically
+ * against their API when a number is connected (see
+ * lib/httpsms/client.ts's registerHttpSmsWebhook, called from
+ * /api/httpsms/config's POST). `token` is the unguessable routing id
+ * from `httpsms_config.webhook_token`; the `Authorization: Bearer
+ * <JWT>` header is the actual authenticity check, verified against
+ * that config's own `webhook_secret`.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
 
   const { data: config, error: configError } = await supabaseAdmin()
     .from('httpsms_config')
-    .select('id, account_id, user_id, enabled')
+    .select('id, account_id, user_id, webhook_secret, enabled')
     .eq('webhook_token', token)
     .maybeSingle()
 
   if (configError || !config) {
+    // 404, not 401 — an unknown token means no account to attribute a
+    // signature-verification error to.
     return NextResponse.json({ error: 'Unknown webhook' }, { status: 404 })
   }
 
+  let secret: string
+  try {
+    secret = decrypt(config.webhook_secret)
+  } catch (err) {
+    console.error('[httpsms/webhook] webhook_secret decryption failed:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
+
+  if (!verifyHttpSmsWebhookAuth(request.headers.get('authorization'), secret)) {
+    console.warn('[httpsms/webhook] rejected request with invalid/missing Authorization')
+    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 })
+  }
+
+  // Channel paused via Settings → httpSMS. Still 200 (now that the
+  // caller is authenticated) so httpSMS doesn't retry-storm us — they
+  // retry up to 4 times on a non-2xx response.
   if (!config.enabled) {
     return NextResponse.json({ status: 'ignored', reason: 'httpsms_disabled' }, { status: 200 })
   }
 
-  let body: unknown
+  let event: HttpSmsCloudEvent
   try {
-    body = await request.json()
+    event = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
   // Ack immediately, process after the response — same rationale as
-  // every other webhook in this codebase (WhatsApp, SMS Gateway): a
-  // slow ack triggers sender-side retries, and a detached (non-after())
-  // promise can be frozen before its DB writes land on some platforms.
+  // every other webhook in this codebase: httpSMS gives only a 5
+  // second timeout before treating the request as failed and retrying.
   after(async () => {
     try {
-      await processEvent(body, config.id, config.account_id, config.user_id)
+      await processEvent(event, config.id, config.account_id, config.user_id)
     } catch (err) {
       console.error('[httpsms/webhook] error processing event:', err)
     }
@@ -77,60 +107,45 @@ export async function POST(request: Request, { params }: { params: Promise<{ tok
   return NextResponse.json({ status: 'received' }, { status: 200 })
 }
 
-interface ParsedInboundMessage {
-  from: string
-  content: string
-  providerMessageId: string | null
-  receivedAt: string | null
-}
-
-/** Best-effort extraction across the field-name shapes httpSMS's
- *  webhook plausibly uses — see the KNOWN GAP note above. */
-function parseInboundMessage(body: unknown): ParsedInboundMessage | null {
-  if (!body || typeof body !== 'object') return null
-  const root = body as Record<string, unknown>
-  // The message fields may be at the top level, or nested under
-  // `data`/`message`/`payload` if httpSMS wraps events like our own
-  // SMS Gateway webhook does ({ event, payload }).
-  const candidates = [root, root.data, root.message, root.payload].filter(
-    (c): c is Record<string, unknown> => !!c && typeof c === 'object',
-  )
-
-  for (const c of candidates) {
-    const from = c.from ?? c.contact ?? c.sender
-    const content = c.content ?? c.text ?? c.body ?? c.message
-    if (typeof from === 'string' && from.trim() && typeof content === 'string' && content.trim()) {
-      const id = c.id ?? c.message_id ?? c.messageId
-      const timestamp = c.timestamp ?? c.created_at ?? c.received_at
-      return {
-        from,
-        content,
-        providerMessageId: typeof id === 'string' ? id : null,
-        receivedAt: typeof timestamp === 'string' ? timestamp : null,
-      }
-    }
-  }
-  return null
-}
-
 async function processEvent(
-  body: unknown,
+  event: HttpSmsCloudEvent,
   httpsmsConfigId: string,
   accountId: string,
   configOwnerUserId: string,
 ) {
-  const parsed = parseInboundMessage(body)
-  if (!parsed) {
-    // Not a shape we recognize as an inbound message (could be a
-    // status-change event for an outbound send, or a shape we haven't
-    // seen yet) — log it so the exact contract can be confirmed and
-    // this handler tightened, rather than guessing further.
-    console.warn('[httpsms/webhook] unrecognized payload shape, ignoring:', JSON.stringify(body).slice(0, 2000))
+  const type = event.type
+  const data = event.data
+  if (!type || !data) return
+
+  if (type === 'message.phone.received') {
+    await handleReceived(data, httpsmsConfigId, accountId, configOwnerUserId)
     return
   }
 
-  const senderPhone = normalizePhone(parsed.from)
-  if (!senderPhone) return
+  const status = STATUS_BY_EVENT[type]
+  if (status) {
+    await handleStatusEvent(data, status)
+    return
+  }
+
+  // phone.heartbeat.online/offline, message.call.missed — nothing to
+  // do with SMS threading, no-op.
+}
+
+/** data: { contact, content, id, owner, sim, timestamp } per
+ *  docs.httpsms.com/webhooks/events#message-phone-received */
+async function handleReceived(
+  data: Record<string, unknown>,
+  httpsmsConfigId: string,
+  accountId: string,
+  configOwnerUserId: string,
+) {
+  const senderPhone = typeof data.contact === 'string' ? normalizePhone(data.contact) : ''
+  const content = typeof data.content === 'string' ? data.content : ''
+  if (!senderPhone || !content) return
+
+  const providerMessageId = typeof data.id === 'string' ? data.id : null
+  const receivedAt = typeof data.timestamp === 'string' ? data.timestamp : null
 
   const db = supabaseAdmin()
 
@@ -146,10 +161,10 @@ async function processEvent(
     httpsms_config_id: httpsmsConfigId,
     sender_type: 'customer',
     content_type: 'text',
-    content_text: parsed.content,
-    message_id: parsed.providerMessageId,
+    content_text: content,
+    message_id: providerMessageId,
     status: 'delivered',
-    created_at: parsed.receivedAt ? new Date(parsed.receivedAt).toISOString() : new Date().toISOString(),
+    created_at: receivedAt ? new Date(receivedAt).toISOString() : new Date().toISOString(),
   })
 
   if (msgError) {
@@ -160,12 +175,33 @@ async function processEvent(
   await db
     .from('conversations')
     .update({
-      last_message_text: parsed.content,
+      last_message_text: content,
       last_message_at: new Date().toISOString(),
       unread_count: (conversation.unread_count || 0) + 1,
       updated_at: new Date().toISOString(),
     })
     .eq('id', conversation.id)
+}
+
+/** data: { id, request_id, ... } — `id` is the provider message id we
+ *  stored as messages.message_id when the original send response came
+ *  back (see lib/httpsms/send-message.ts). Scoped to channel='httpsms'
+ *  for the same reason the SMS Gateway status handler scopes by
+ *  channel — provider message ids aren't guaranteed globally unique
+ *  across every channel/provider this app talks to. */
+async function handleStatusEvent(data: Record<string, unknown>, status: string) {
+  const providerMessageId = typeof data.id === 'string' ? data.id : null
+  if (!providerMessageId) return
+
+  const { error } = await supabaseAdmin()
+    .from('messages')
+    .update({ status })
+    .eq('message_id', providerMessageId)
+    .eq('channel', 'httpsms')
+
+  if (error) {
+    console.error('[httpsms/webhook] error updating message status:', error)
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

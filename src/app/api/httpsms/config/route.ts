@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
 import { encrypt } from '@/lib/httpsms/encryption'
-import { verifyHttpSmsApiKey, HttpSmsApiError } from '@/lib/httpsms/client'
+import { verifyHttpSmsApiKey, registerHttpSmsWebhook, HttpSmsApiError } from '@/lib/httpsms/client'
 import { normalizePhone, isValidE164 } from '@/lib/whatsapp/phone-utils'
 import { getBaseUrl } from '@/lib/http/base-url'
 
@@ -84,7 +84,26 @@ export async function POST(request: Request) {
     }
 
     const webhookToken = crypto.randomBytes(16).toString('hex')
-    const webhookSecret = encrypt(crypto.randomBytes(32).toString('hex'))
+    const webhookSecretRaw = crypto.randomBytes(32).toString('hex')
+    const resolvedWebhookUrl = webhookUrl(request, webhookToken)
+
+    // Auto-register the webhook against httpSMS's own API — saves the
+    // manual "copy this URL into your httpSMS dashboard" step (see
+    // lib/httpsms/client.ts's registerHttpSmsWebhook). Best-effort: a
+    // failure here doesn't block connecting the number, since sending
+    // still works without it — just note it in the response so the UI
+    // can tell the admin to register it manually as a fallback.
+    let webhookRegistered = true
+    try {
+      await registerHttpSmsWebhook(api_key, {
+        url: resolvedWebhookUrl,
+        signingKey: webhookSecretRaw,
+        phoneNumber: `+${normalizedPhone}`,
+      })
+    } catch (err) {
+      webhookRegistered = false
+      console.error('[httpsms/config POST] webhook auto-registration failed:', err)
+    }
 
     const { data: inserted, error: insertError } = await supabase
       .from('httpsms_config')
@@ -95,7 +114,7 @@ export async function POST(request: Request) {
         phone_number: `+${normalizedPhone}`,
         api_key: encrypt(api_key),
         webhook_token: webhookToken,
-        webhook_secret: webhookSecret,
+        webhook_secret: encrypt(webhookSecretRaw),
         status: 'connected',
         connected_at: new Date().toISOString(),
       })
@@ -114,7 +133,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       id: inserted.id,
-      webhook_url: webhookUrl(request, webhookToken),
+      webhook_url: resolvedWebhookUrl,
+      webhook_registered: webhookRegistered,
     })
   } catch (err) {
     return toErrorResponse(err)

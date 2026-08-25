@@ -80,7 +80,13 @@ export function HttpSmsConfig() {
         toast.error(`Failed to connect number: ${data.error || `HTTP ${res.status}`}`);
         return;
       }
-      toast.success('Number connected');
+      if (data.webhook_registered === false) {
+        toast.warning(
+          'Number connected, but the webhook could not be auto-registered — paste the URL below into httpsms.com → Settings → Webhooks manually to receive replies.',
+        );
+      } else {
+        toast.success('Number connected — replies will arrive automatically.');
+      }
       setNewLabel('');
       setNewPhoneNumber('');
       setNewApiKey('');
@@ -160,7 +166,7 @@ export function HttpSmsConfig() {
     <section className="animate-in fade-in-50 duration-200">
       <SettingsPanelHead
         title="httpSMS connection"
-        description="Connect a phone number registered on httpsms.com (github.com/NdoleStudio/httpsms) — a cloud-relay SMS channel, independent from the SMS Gateway integration. Sending works today; the webhook URL below is for receiving replies, which httpSMS forwards once you paste it into your httpsms.com webhook settings."
+        description="Connect a phone number registered on httpsms.com (github.com/NdoleStudio/httpsms) — a cloud-relay SMS channel, independent from the SMS Gateway integration. The webhook for receiving replies is registered automatically when you connect a number; the URL below is shown in case you ever need to re-register it manually in your httpsms.com dashboard."
       />
 
       <div className="space-y-4">
@@ -209,7 +215,7 @@ export function HttpSmsConfig() {
               </CardHeader>
               <CardContent>
                 <Label className="mb-1.5 block text-xs text-muted-foreground">
-                  Webhook URL — paste into httpsms.com → Settings → Webhooks
+                  Webhook URL (auto-registered) — only needed if you ever have to re-add it manually in httpsms.com → Settings → Webhooks
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input readOnly value={number.webhook_url} className="font-mono text-xs" />
