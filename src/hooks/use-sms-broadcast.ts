@@ -204,7 +204,7 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
       // conversations to whichever connected device has the most room
       // left today; existing conversations stick to their own assigned
       // device) are both enforced centrally per-recipient inside
-      // sendSmsToConversation, called via /api/whatsapp/send below —
+      // sendSmsToConversation, called via /api/sms/broadcast-send below —
       // nothing to pre-check here. A recipient whose device is at cap
       // (or who has none available) simply comes back as a per-recipient
       // failure from that call, same as any other send failure.
@@ -266,13 +266,11 @@ export function useSmsBroadcast(): UseSmsBroadcastReturn {
         await Promise.all(
           batch.map(async ({ id, contact }) => {
             try {
-              const res = await fetch('/api/whatsapp/send', {
+              const res = await fetch('/api/sms/broadcast-send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   contact_id: contact.id,
-                  channel: 'sms',
-                  message_type: 'text',
                   content_text: personalize(params.body, contact),
                 }),
               });

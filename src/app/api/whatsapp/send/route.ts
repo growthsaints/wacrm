@@ -11,7 +11,7 @@ import {
   SendMessageError,
 } from '@/lib/whatsapp/send-message'
 import { sendSmsToConversation, SmsSendError } from '@/lib/sms/send-message'
-import { listEnabledDevicesWithCapacity, pickLeastLoadedDevice } from '@/lib/sms/device-assignment'
+import { resolveSmsConversation, SmsConversationError } from '@/lib/sms/conversation'
 
 // The dashboard's outbound-send endpoint. It owns auth, per-user rate
 // limiting, and the two ways the UI targets a thread — an existing
@@ -161,53 +161,30 @@ export async function POST(request: Request) {
 
       channel = channelInput === 'sms' ? 'sms' : 'whatsapp'
 
-      // Multi-device SMS (migration 080): a brand-new conversation for
-      // this contact gets round-robin-assigned to whichever enabled
-      // device has the most capacity left today — an existing
-      // conversation already has its own device pinned and
-      // findOrCreateConversation below leaves it untouched. Resolved
-      // here (not inside findOrCreateConversation) so a reused
-      // conversation never pays for a device lookup it won't use.
-      let smsDeviceId: string | null = null
       if (channel === 'sms') {
-        const devices = await listEnabledDevicesWithCapacity(supabase, accountId)
-        const chosen = pickLeastLoadedDevice(devices)
-        if (!chosen) {
-          if (devices.length === 0) {
-            // Distinguishes "nothing configured/enabled" from "all at
-            // cap" below — the former needs Settings, the latter just
-            // needs to wait out the 24h window.
-            return NextResponse.json(
-              {
-                error:
-                  'No enabled SMS gateway device found. Connect (or re-enable) one in Settings → SMS.',
-              },
-              { status: 400 }
-            )
+        // Multi-device SMS (migration 080): device assignment/pinning
+        // lives in the shared resolver so this route and the bulk-SMS
+        // broadcast route (which can't share this route's per-user
+        // interactive-send rate limit — bulk traffic isn't "a human
+        // typing") apply identical rules rather than a second copy.
+        try {
+          conversationId = await resolveSmsConversation(supabase, accountId, user.id, contact_id)
+        } catch (err) {
+          if (err instanceof SmsConversationError) {
+            return NextResponse.json({ error: err.message }, { status: err.status })
           }
+          throw err
+        }
+      } else {
+        const resolved = await findOrCreateConversation(supabase, accountId, user.id, channel, contact_id)
+        if (!resolved) {
           return NextResponse.json(
-            { error: 'Every connected SMS device has reached its daily limit — try again after it resets.' },
-            { status: 429 }
+            { error: 'Failed to open a conversation for this contact' },
+            { status: 500 }
           )
         }
-        smsDeviceId = chosen.id
+        conversationId = resolved
       }
-
-      const resolved = await findOrCreateConversation(
-        supabase,
-        accountId,
-        user.id,
-        channel,
-        contact_id,
-        smsDeviceId
-      )
-      if (!resolved) {
-        return NextResponse.json(
-          { error: 'Failed to open a conversation for this contact' },
-          { status: 500 }
-        )
-      }
-      conversationId = resolved
     }
 
     if (!conversationId) {
@@ -283,12 +260,13 @@ export async function POST(request: Request) {
 type SendSupabase = Awaited<ReturnType<typeof createClient>>
 
 /**
- * Return the contact's conversation id in this account for `channel`,
+ * Return the contact's WhatsApp conversation id in this account,
  * creating one if it doesn't exist yet. Mirrors the webhook's
  * find-or-create so an inbound-then-outbound (or outbound-first)
- * sequence converges on a single thread per (contact, channel). Runs
- * under the caller's RLS — the conversations_insert policy requires
- * account agent membership, which the caller already is.
+ * sequence converges on a single thread per contact. Runs under the
+ * caller's RLS — the conversations_insert policy requires account
+ * agent membership, which the caller already is. SMS conversations use
+ * resolveSmsConversation instead (device pinning — see lib/sms/conversation.ts).
  */
 async function findOrCreateConversation(
   supabase: SendSupabase,
@@ -296,7 +274,6 @@ async function findOrCreateConversation(
   userId: string,
   channel: string,
   contactId: string,
-  smsDeviceId: string | null = null,
 ): Promise<string | null> {
   const { data: existing } = await supabase
     .from('conversations')
@@ -306,8 +283,6 @@ async function findOrCreateConversation(
     .eq('channel', channel)
     .maybeSingle()
 
-  // Already exists — its own sms_config_id (assigned when it was first
-  // created) stays authoritative, never reassigned here.
   if (existing) return existing.id
 
   const { data: created, error } = await supabase
@@ -317,7 +292,6 @@ async function findOrCreateConversation(
       user_id: userId,
       contact_id: contactId,
       channel,
-      ...(smsDeviceId ? { sms_config_id: smsDeviceId } : {}),
     })
     .select('id')
     .single()
