@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, CheckCircle2, Loader2, MessagesSquare, RefreshCw, XCircle } from 'lucide-react';
+import { ArrowLeft, Check, CheckCheck, Loader2, MessagesSquare, RefreshCw, XCircle } from 'lucide-react';
 import { useHttpSmsBroadcast } from '@/hooks/use-httpsms-broadcast';
 import { toast } from 'sonner';
 
@@ -21,7 +21,7 @@ interface HttpSmsBroadcastRow {
 
 interface HttpSmsRecipientRow {
   id: string;
-  status: 'pending' | 'sent' | 'failed';
+  status: 'pending' | 'sent' | 'delivered' | 'failed';
   error_message: string | null;
   sent_at: string | null;
   contact: { name: string | null; phone: string } | null;
@@ -31,6 +31,12 @@ interface HttpSmsRecipientRow {
 const STATUS_STYLES: Record<string, string> = {
   sending: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   sent: 'bg-primary/10 text-primary border-primary/20',
+  // httpSMS confirms real delivery asynchronously via webhook (see
+  // api/httpsms/webhook/[token]/route.ts) — 'sent' only means the send
+  // call was accepted, 'delivered' means the recipient's phone actually
+  // got it. Blue matches the same distinction WhatsApp/Inbox message
+  // ticks use (Check → CheckCheck) rather than inventing a new scheme.
+  delivered: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
   pending: 'bg-slate-500/10 text-muted-foreground border-slate-500/20',
 };
@@ -123,7 +129,7 @@ export default function HttpSmsBroadcastDetailPage() {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         <div className="rounded-xl border border-border bg-card/50 p-4">
           <p className="text-xs text-muted-foreground">Total</p>
           <p className="text-xl font-semibold text-foreground">{broadcast.total_recipients}</p>
@@ -133,10 +139,19 @@ export default function HttpSmsBroadcastDetailPage() {
           <p className="text-xl font-semibold text-primary">{broadcast.sent_count}</p>
         </div>
         <div className="rounded-xl border border-border bg-card/50 p-4">
+          <p className="text-xs text-muted-foreground">Delivered</p>
+          <p className="text-xl font-semibold text-blue-400">
+            {recipients.filter((r) => r.status === 'delivered').length}
+          </p>
+        </div>
+        <div className="rounded-xl border border-border bg-card/50 p-4">
           <p className="text-xs text-muted-foreground">Failed</p>
           <p className="text-xl font-semibold text-red-400">{broadcast.failed_count}</p>
         </div>
       </div>
+      <p className="text-xs text-muted-foreground">
+        httpSMS confirms delivery asynchronously — refresh this page to see updated statuses after sending.
+      </p>
 
       <div className="rounded-xl border border-border bg-card/50 p-4">
         <p className="mb-2 text-xs font-medium text-muted-foreground">Message</p>
@@ -162,7 +177,8 @@ export default function HttpSmsBroadcastDetailPage() {
                 <td className="px-4 py-2 text-xs text-muted-foreground">{r.httpsms_config?.label || '—'}</td>
                 <td className="px-4 py-2">
                   <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[r.status]}`}>
-                    {r.status === 'sent' && <CheckCircle2 className="h-3 w-3" />}
+                    {r.status === 'sent' && <Check className="h-3 w-3" />}
+                    {r.status === 'delivered' && <CheckCheck className="h-3 w-3" />}
                     {r.status === 'failed' && <XCircle className="h-3 w-3" />}
                     {r.status}
                   </span>

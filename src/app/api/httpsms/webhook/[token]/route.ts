@@ -188,19 +188,39 @@ async function handleReceived(
  *  back (see lib/httpsms/send-message.ts). Scoped to channel='httpsms'
  *  for the same reason the SMS Gateway status handler scopes by
  *  channel — provider message ids aren't guaranteed globally unique
- *  across every channel/provider this app talks to. */
+ *  across every channel/provider this app talks to.
+ *
+ *  Also flips the matching httpsms_broadcast_recipients row (if this
+ *  message was part of a bulk campaign) to the same status — otherwise
+ *  a broadcast's recipient list would show "sent" forever regardless
+ *  of whether httpSMS ever actually delivered it (migration 084). */
 async function handleStatusEvent(data: Record<string, unknown>, status: string) {
   const providerMessageId = typeof data.id === 'string' ? data.id : null
   if (!providerMessageId) return
 
-  const { error } = await supabaseAdmin()
+  const db = supabaseAdmin()
+
+  const { data: updated, error } = await db
     .from('messages')
     .update({ status })
     .eq('message_id', providerMessageId)
     .eq('channel', 'httpsms')
+    .select('id')
+    .maybeSingle()
 
   if (error) {
     console.error('[httpsms/webhook] error updating message status:', error)
+    return
+  }
+  if (!updated) return
+
+  const { error: recipientError } = await db
+    .from('httpsms_broadcast_recipients')
+    .update({ status })
+    .eq('message_id', updated.id)
+
+  if (recipientError) {
+    console.error('[httpsms/webhook] error updating broadcast recipient status:', recipientError)
   }
 }
 

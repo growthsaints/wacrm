@@ -117,6 +117,10 @@ async function runHttpSmsSendLoop(
               sent_at: new Date().toISOString(),
               error_message: null,
               httpsms_config_id: data.httpsms_config_id ?? null,
+              // Lets the inbound webhook later flip this row to
+              // 'delivered'/'failed' once httpSMS reports the real
+              // outcome — see api/httpsms/webhook/[token]/route.ts.
+              message_id: data.message_id ?? null,
             })
             .eq('id', id);
         } catch (err) {
