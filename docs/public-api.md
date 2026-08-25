@@ -5,8 +5,12 @@ scripts and automations — send messages, manage contacts, launch
 broadcasts — without going through the dashboard UI.
 
 > **Status:** stable. Authentication, scopes, rate limiting, the
-> messages / contacts / conversations / broadcasts endpoints, and
-> outbound event [webhooks](#webhooks) all ship now.
+> messages / contacts / conversations / broadcasts endpoints,
+> outbound event [webhooks](#webhooks), and the ecommerce
+> notification pipeline (notification rules, `/ecommerce/webhook`,
+> payment gateway and shipping receivers) all ship now. **Migration
+> required:** apply `supabase/migrations/037_ecommerce_integrations.sql`
+> before using any of the ecommerce endpoints.
 
 ## Authentication
 
@@ -41,15 +45,16 @@ key's next request. Revoked keys stay in the list as an audit trail.
 A key can do only what its scopes allow — independent of who created
 it. Grant the minimum.
 
-| Scope                | Allows                                   |
-| -------------------- | ---------------------------------------- |
-| `messages:send`      | Send WhatsApp messages                   |
-| `messages:read`      | Read messages and delivery status        |
-| `contacts:read`      | List and read contacts                   |
-| `contacts:write`     | Create and update contacts               |
-| `conversations:read` | List and read conversations              |
-| `broadcasts:send`    | Launch broadcast campaigns               |
-| `webhooks:manage`    | Register and manage outbound webhooks    |
+| Scope                  | Allows                                                                             |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `messages:send`        | Send WhatsApp messages                                                             |
+| `messages:read`        | Read messages and delivery status                                                  |
+| `contacts:read`        | List and read contacts                                                             |
+| `contacts:write`       | Create and update contacts                                                         |
+| `conversations:read`   | List and read conversations                                                        |
+| `broadcasts:send`      | Launch broadcast campaigns                                                         |
+| `webhooks:manage`      | Register and manage outbound webhooks                                              |
+| `notifications:manage` | Manage ecommerce notification rules, payment gateway, and shipping webhook configs |
 
 A key with **no scopes** still authenticates and can call
 `GET /api/v1/me` — useful for verifying a key works.
@@ -69,14 +74,14 @@ Every response uses one of two shapes:
 Branch on `error.code` (stable); `error.message` is for humans and
 may be reworded.
 
-| Status | `code`         | Meaning                                          |
-| ------ | -------------- | ------------------------------------------------ |
+| Status | `code`         | Meaning                                               |
+| ------ | -------------- | ----------------------------------------------------- |
 | 401    | `unauthorized` | Missing / malformed / unknown / revoked / expired key |
-| 403    | `forbidden`    | Valid key, but missing the required scope        |
-| 429    | `rate_limited` | Per-key rate limit exceeded                      |
-| 400    | `bad_request`  | Malformed input                                  |
-| 404    | `not_found`    | No such resource                                 |
-| 500    | `internal`     | Server error                                     |
+| 403    | `forbidden`    | Valid key, but missing the required scope             |
+| 429    | `rate_limited` | Per-key rate limit exceeded                           |
+| 400    | `bad_request`  | Malformed input                                       |
+| 404    | `not_found`    | No such resource                                      |
+| 500    | `internal`     | Server error                                          |
 
 ## Rate limits
 
@@ -140,9 +145,9 @@ curl -X POST https://your-crm.example.com/api/v1/messages \
   "template": {
     "name": "order_update",
     "language": "en_US",
-    "params": ["A123"]        // positional body vars, or a structured object
+    "params": ["A123"], // positional body vars, or a structured object
   },
-  "reply_to_message_id": "<uuid>"   // optional; must be in the same conversation
+  "reply_to_message_id": "<uuid>", // optional; must be in the same conversation
 }
 ```
 
@@ -174,10 +179,15 @@ or phone) and `?tag=<tagId>`.
 {
   "data": [
     {
-      "id": "…", "phone": "+14155550123", "name": "Jane Doe",
-      "email": null, "company": "Acme", "avatar_url": null,
+      "id": "…",
+      "phone": "+14155550123",
+      "name": "Jane Doe",
+      "email": null,
+      "company": "Acme",
+      "avatar_url": null,
       "tags": [{ "id": "…", "name": "vip", "color": "#3b82f6" }],
-      "created_at": "…", "updated_at": "…"
+      "created_at": "…",
+      "updated_at": "…"
     }
   ],
   "meta": { "next_cursor": "…" }
@@ -263,6 +273,134 @@ Broadcast status + counts. Scope: `broadcasts:send`. `status` moves
 `sending` → `sent`; `delivered_count` / `read_count` keep climbing as
 Meta delivery webhooks arrive. `404` for another account's broadcast.
 
+### Notification rules
+
+The event -> template mapping that drives every endpoint below and
+[`docs/ecommerce-integration.md`](./ecommerce-integration.md). All
+under scope `notifications:manage`.
+
+- `POST /api/v1/notification-rules` — create (or, if the event already
+  has a rule, replace) a mapping: `{ "event": "order.shipped",
+"template_name": "order_shipped", "template_language": "en",
+"param_mapping": ["order.number", "order.tracking_url"] }`.
+  `param_mapping` is the ordered list of dot-paths into the `data`
+  object of the triggering call that fill the template's `{{1}}`,
+  `{{2}}`, … body variables; `[]` for a template with no variables.
+  `event` is one of:
+
+  | Family   | Events                                                                                                                                       |
+  | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Order    | `order.created`, `order.paid`, `order.processing`, `order.shipped`, `order.delivered`, `order.cancelled`, `order.refunded`, `cart.abandoned` |
+  | Payment  | `payment.captured`, `payment.failed`, `payment.refunded`                                                                                     |
+  | Shipment | `shipment.created`, `shipment.in_transit`, `shipment.delivered`, `shipment.failed`                                                           |
+
+- `GET /api/v1/notification-rules` — list your rules.
+- `GET /api/v1/notification-rules/{id}` — read one.
+- `PATCH /api/v1/notification-rules/{id}` — update `template_name`,
+  `template_language`, or `param_mapping` (`event` is immutable —
+  delete and re-create to move a template to a different event).
+- `DELETE /api/v1/notification-rules/{id}` — remove one.
+
+```bash
+curl -X POST https://your-crm.example.com/api/v1/notification-rules \
+  -H "Authorization: Bearer wacrm_live_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{ "event": "order.shipped", "template_name": "order_shipped",
+        "template_language": "en", "param_mapping": ["order.number", "order.tracking_url"] }'
+```
+
+### `POST /api/v1/ecommerce/webhook`
+
+The generic integration point for a custom (non-Shopify/WooCommerce)
+storefront backend — full walkthrough in
+[`docs/ecommerce-integration.md`](./ecommerce-integration.md). Scope:
+`messages:send`. Your backend calls this once per order/cart
+lifecycle event; wacrm looks up the `notification_rules` row for
+`event`, maps `data` through its `param_mapping`, and sends the
+matching WhatsApp template — finding or creating the contact +
+conversation for `to` exactly like `POST /api/v1/messages`.
+
+```jsonc
+{
+  "event": "order.shipped", // order.created|paid|processing|shipped|delivered|cancelled|refunded, or cart.abandoned
+  "to": "+919876543210", // E.164
+  "name": "Customer Name", // optional, used only for a brand-new contact
+  "data": { "order": { "number": "ORD-1042", "tracking_url": "https://…" } },
+}
+```
+
+An optional `Idempotency-Key` header (any unique per-order/event
+string) makes a retried call replay the original response instead of
+sending the WhatsApp message twice; a concurrent call with the same
+key gets `409 idempotency_in_progress`.
+
+Response codes:
+
+- `201` — message sent (body: `message_id`, `whatsapp_message_id`,
+  `conversation_id`, `contact_id`, `contact_created`).
+- `200` with `{ "skipped": true, "reason": "no_rule_configured" }` —
+  not an error; this event has no rule configured yet.
+- `400` — a required field is missing/malformed, or `data` is missing
+  a field the rule's `param_mapping` needs.
+- `409 idempotency_in_progress` — a concurrent call with the same
+  `Idempotency-Key` is already processing.
+
+### Payment gateway notifications (Razorpay)
+
+If you use Razorpay, your backend doesn't need to call anything —
+Razorpay posts directly to wacrm. Management scope: `notifications:manage`.
+
+- `POST /api/v1/payment-gateways` — connect a gateway: `{ "gateway":
+"razorpay", "webhook_secret": "<your Razorpay webhook secret>" }`.
+  Unlike `POST /api/v1/webhooks`, `webhook_secret` is a **request**
+  field, not server-generated — Razorpay's dashboard requires you to
+  set a specific string, so wacrm stores exactly the one you give it
+  (encrypted at rest). Response: `{ "id", "gateway", "webhook_url",
+"created_at" }`.
+- `GET /api/v1/payment-gateways` / `GET /api/v1/payment-gateways/{id}`
+  — list / read (never returns the secret).
+- `DELETE /api/v1/payment-gateways/{id}` — disconnect. To rotate a
+  secret, `POST` again (it upserts on `gateway`).
+
+Paste the returned `webhook_url` into **Razorpay Dashboard → Settings
+→ Webhooks**, using the same secret, subscribed to `payment.captured`,
+`payment.failed`, and `refund.processed` (or `refund.created`). Then
+create `notification_rules` for `payment.captured`, `payment.failed`,
+`payment.refunded` — wacrm maps Razorpay's own event names onto those.
+`to` is taken from the payment's `contact` field; a delivery with no
+`contact` is acknowledged but not notified.
+
+Razorpay's signature scheme is `X-Razorpay-Signature: <hex HMAC-SHA256
+of the raw body>`, no timestamp component — see [Razorpay's
+docs](https://razorpay.com/docs/webhooks/validate-test/). The receiver
+always responds `200` once the signature checks out, even if the
+downstream notification fails, so Razorpay doesn't retry forever for a
+condition retrying can't fix (e.g. no matching rule).
+
+### Shipping / courier notifications
+
+No dominant courier API exists, so this is a generic receiver
+signed with wacrm's own outbound scheme, reused in the inbound
+direction. Management scope: `notifications:manage`.
+
+- `POST /api/v1/shipping-configs` — register a carrier: `{ "carrier":
+"delhivery", "webhook_secret": "<a secret you generate>" }`.
+  `webhook_secret` is chosen by you (not server-generated) — sign
+  every call to the returned `webhook_url` with it. Response: `{ "id",
+"carrier", "webhook_url", "created_at" }`.
+- `GET /api/v1/shipping-configs` / `GET /api/v1/shipping-configs/{id}`
+  — list / read.
+- `DELETE /api/v1/shipping-configs/{id}` — remove.
+
+Sign every call to `webhook_url` with `X-Wacrm-Signature:
+t=<unix_seconds>,v1=<hex>` (same scheme as wacrm's own outbound
+webhooks — see [Verifying the signature](#verifying-the-signature));
+`v1 = HMAC-SHA256(secret, "${t}.${rawBody}")`. Body shape is identical
+to `POST /api/v1/ecommerce/webhook` above, with `event` one of
+`shipment.created`, `shipment.in_transit`, `shipment.delivered`,
+`shipment.failed`. An optional `Idempotency-Key` header works the same
+way as the generic endpoint.
+
 ## Pagination
 
 Every list endpoint pages the same way. Request a page size with
@@ -289,11 +427,11 @@ things happen in your account. **Migration required:** apply
 
 ### Events
 
-| Event                    | Fires when                                        |
-| ------------------------ | ------------------------------------------------- |
-| `message.received`       | An inbound message arrives from a contact         |
-| `message.status_updated` | A message you sent changed delivery status        |
-| `conversation.created`   | A new conversation is opened for a contact        |
+| Event                    | Fires when                                 |
+| ------------------------ | ------------------------------------------ |
+| `message.received`       | An inbound message arrives from a contact  |
+| `message.status_updated` | A message you sent changed delivery status |
+| `conversation.created`   | A new conversation is opened for a contact |
 
 ### Managing endpoints
 
@@ -324,7 +462,7 @@ delivery uuid you can dedupe on, and `data` varies by `event`:
   "event": "message.received",
   "occurred_at": "2026-07-01T12:00:00.000Z",
   "account_id": "…",
-  "data": { /* per-event, see below */ }
+  "data": {/* per-event, see below */}
 }
 ```
 
@@ -350,8 +488,10 @@ a few minutes old (replay protection).
 
 ```js
 const [, t, v1] = header.match(/t=(\d+),v1=([0-9a-f]+)/);
-const expected = crypto.createHmac('sha256', secret)
-  .update(`${t}.${rawBody}`).digest('hex');
+const expected = crypto
+  .createHmac('sha256', secret)
+  .update(`${t}.${rawBody}`)
+  .digest('hex');
 const ok = crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(v1));
 ```
 
@@ -377,7 +517,10 @@ internal targets are refused at delivery time.
 ## Roadmap
 
 The public API now covers messaging, contacts, conversations,
-broadcasts, and outbound webhooks — the full scope of
-[#245](https://github.com/ArnasDon/wacrm/issues/245). Future ideas
-(deals/pipelines, templates, flows, a delivery queue for webhooks) are
-not yet scheduled.
+broadcasts, outbound webhooks, and the ecommerce notification pipeline
+— the full scope of [#245](https://github.com/ArnasDon/wacrm/issues/245)
+plus the custom-website onboarding guide
+([`docs/ecommerce-integration.md`](./ecommerce-integration.md)). Future
+ideas (deals/pipelines, templates, flows, a delivery queue for
+webhooks, additional payment gateways beyond Razorpay) are not yet
+scheduled.
