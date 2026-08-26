@@ -14,6 +14,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { sendHttpSms } from '@/lib/httpsms/client'
 import { decrypt } from '@/lib/httpsms/encryption'
 import { normalizePhone, isValidE164 } from '@/lib/whatsapp/phone-utils'
+import { listEnabledHttpSmsNumbers, pickLeastLoadedHttpSmsNumber } from '@/lib/httpsms/device-assignment'
 
 export class HttpSmsSendError extends Error {
   readonly code: string
@@ -93,39 +94,80 @@ export async function sendHttpSmsToConversation(
     throw new HttpSmsSendError('bad_request', 'Invalid phone number format', 400)
   }
 
-  const httpsmsConfigId: string | null = conversation.httpsms_config_id
-  if (!httpsmsConfigId) {
-    throw new HttpSmsSendError(
-      'httpsms_not_configured',
-      'This httpSMS conversation has no number assigned. Reconnect a number in Settings → httpSMS.',
-      400,
-    )
+  // A conversation's pinned number can go missing two ways: never
+  // assigned (shouldn't happen post-migration-082, but defends against
+  // a pre-existing row), or the httpsms_config row it pointed to was
+  // deleted since (ON DELETE SET NULL, migration 082) — e.g. the
+  // account disconnected and re-added a number, which gets a brand
+  // new id, orphaning any conversation still pointing at the old one.
+  // Unlike the SMS Gateway integration's cap-based reassignment (which
+  // is retry-only, since a busy device is a temporary condition), a
+  // missing/deleted/disabled pin here is a genuinely broken state with
+  // no way to "wait it out" — the original id can never come back — so
+  // every send path (not just retry) heals it by round-robin-picking
+  // whichever number is currently enabled, same as a brand-new
+  // conversation would get.
+  let httpsmsConfigId: string | null = conversation.httpsms_config_id
+  let config: Record<string, unknown> | null = null
+
+  if (httpsmsConfigId) {
+    const { data } = await db
+      .from('httpsms_config')
+      .select('*')
+      .eq('id', httpsmsConfigId)
+      .eq('account_id', accountId)
+      .single()
+    config = data ?? null
   }
 
-  const { data: config, error: configError } = await db
-    .from('httpsms_config')
-    .select('*')
-    .eq('id', httpsmsConfigId)
-    .eq('account_id', accountId)
-    .single()
+  if (!config || !config.enabled) {
+    const reassigned = pickLeastLoadedHttpSmsNumber(await listEnabledHttpSmsNumbers(db, accountId))
+    if (!reassigned) {
+      if (!httpsmsConfigId) {
+        throw new HttpSmsSendError(
+          'httpsms_not_configured',
+          'This httpSMS conversation has no number assigned. Reconnect a number in Settings → httpSMS.',
+          400,
+        )
+      }
+      if (!config) {
+        throw new HttpSmsSendError(
+          'httpsms_not_configured',
+          'This conversation\'s httpSMS number no longer exists. Reconnect a number in Settings → httpSMS.',
+          400,
+        )
+      }
+      throw new HttpSmsSendError(
+        'httpsms_disabled',
+        'This conversation\'s httpSMS number is currently disabled in Settings → httpSMS.',
+        403,
+      )
+    }
 
-  if (configError || !config) {
-    throw new HttpSmsSendError(
-      'httpsms_not_configured',
-      'This conversation\'s httpSMS number no longer exists. Reconnect a number in Settings → httpSMS.',
-      400,
-    )
+    const { data: newConfig, error: newConfigError } = await db
+      .from('httpsms_config')
+      .select('*')
+      .eq('id', reassigned.id)
+      .eq('account_id', accountId)
+      .single()
+    if (newConfigError || !newConfig) {
+      throw new HttpSmsSendError(
+        'httpsms_not_configured',
+        'No enabled httpSMS number connected. Connect one in Settings → httpSMS.',
+        400,
+      )
+    }
+
+    await db
+      .from('conversations')
+      .update({ httpsms_config_id: reassigned.id })
+      .eq('id', conversationId)
+
+    httpsmsConfigId = reassigned.id
+    config = newConfig
   }
 
-  if (!config.enabled) {
-    throw new HttpSmsSendError(
-      'httpsms_disabled',
-      'This conversation\'s httpSMS number is currently disabled in Settings → httpSMS.',
-      403,
-    )
-  }
-
-  const apiKey = decrypt(config.api_key)
+  const apiKey = decrypt(config!.api_key as string)
 
   const { data: messageRow, error: insertPendingError } = await db
     .from('messages')
@@ -149,7 +191,7 @@ export async function sendHttpSmsToConversation(
   let providerResult: { id: string; status: string }
   try {
     providerResult = await sendHttpSms(apiKey, {
-      from: toE164(config.phone_number),
+      from: toE164(config!.phone_number as string),
       to: toE164(sanitizedPhone),
       content: contentText!,
       requestId: messageRow.id,
@@ -175,5 +217,5 @@ export async function sendHttpSmsToConversation(
     })
     .eq('id', conversationId)
 
-  return { messageId: messageRow.id, providerMessageId: providerResult.id, httpsmsConfigId }
+  return { messageId: messageRow.id, providerMessageId: providerResult.id, httpsmsConfigId: httpsmsConfigId! }
 }
