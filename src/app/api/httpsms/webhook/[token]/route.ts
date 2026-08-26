@@ -124,7 +124,7 @@ async function processEvent(
 
   const status = STATUS_BY_EVENT[type]
   if (status) {
-    await handleStatusEvent(data, status)
+    await handleStatusEvent(data, status, type)
     return
   }
 
@@ -194,7 +194,7 @@ async function handleReceived(
  *  message was part of a bulk campaign) to the same status — otherwise
  *  a broadcast's recipient list would show "sent" forever regardless
  *  of whether httpSMS ever actually delivered it (migration 084). */
-async function handleStatusEvent(data: Record<string, unknown>, status: string) {
+async function handleStatusEvent(data: Record<string, unknown>, status: string, eventType: string) {
   const providerMessageId = typeof data.id === 'string' ? data.id : null
   if (!providerMessageId) return
 
@@ -214,9 +214,24 @@ async function handleStatusEvent(data: Record<string, unknown>, status: string) 
   }
   if (!updated) return
 
+  // httpSMS reports *why* a send failed on the Message entity's
+  // failure_reason field — surfaced here so the broadcast recipient
+  // list's Error column isn't a dead-end "—" for every failure.
+  // message.send.expired carries no failure_reason (the phone simply
+  // never acknowledged it in time), so it gets a fixed explanation
+  // instead of a blank.
+  const errorMessage =
+    status !== 'failed'
+      ? null
+      : typeof data.failure_reason === 'string' && data.failure_reason
+        ? data.failure_reason
+        : eventType === 'message.send.expired'
+          ? 'Message expired — the connected phone never confirmed sending it in time.'
+          : 'httpSMS reported this message failed to send.'
+
   const { error: recipientError } = await db
     .from('httpsms_broadcast_recipients')
-    .update({ status })
+    .update({ status, error_message: errorMessage })
     .eq('message_id', updated.id)
 
   if (recipientError) {
