@@ -196,11 +196,11 @@ export async function requireRole(min: AccountRole): Promise<AccountContext> {
   return ctx;
 }
 
-/** Broadcasts / Automations / Templates — admin+ by default, opened
- *  up for a specific 'agent' member only via an explicit row in
- *  `agent_feature_grants` (see migration 043). Viewer never qualifies
- *  regardless of grants. */
-export type GatedFeature = "broadcasts" | "automations" | "templates";
+/** Broadcasts / Automations / Templates / SMS — admin+ by default,
+ *  opened up for a specific 'agent' member only via an explicit row in
+ *  `agent_feature_grants` (see migrations 043, 085). Viewer never
+ *  qualifies regardless of grants. */
+export type GatedFeature = "broadcasts" | "automations" | "templates" | "sms";
 
 /**
  * Resolve the caller's account context and enforce access to a

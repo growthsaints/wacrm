@@ -32,7 +32,7 @@ import {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency, canEditSettings, isOwner, canAccessTemplates } = useAuth();
+  const { defaultCurrency, canEditSettings, isOwner, canAccessTemplates, canAccessSms } = useAuth();
   const { mode } = useTheme();
   const t = useTranslations('Settings');
 
@@ -42,13 +42,14 @@ export default function SettingsPage() {
   // resolve onto their new home; unknown/empty → the Overview landing.
   // A non-admin deep-linking straight to an adminOnly section, a
   // non-owner deep-linking to an ownerOnly section (Billing), or an
-  // ungranted agent deep-linking to Templates, falls back to Overview
-  // rather than rendering it.
+  // ungranted agent deep-linking to Templates or SMS/httpSMS, falls
+  // back to Overview rather than rendering it.
   const rawSection = resolveSection(searchParams.get('tab'));
   const blocked =
     (SECTION_META[rawSection].adminOnly && !canEditSettings) ||
     (SECTION_META[rawSection].ownerOnly && !isOwner) ||
-    (rawSection === 'templates' && !canAccessTemplates);
+    (rawSection === 'templates' && !canAccessTemplates) ||
+    ((rawSection === 'sms' || rawSection === 'httpsms') && !canAccessSms);
   const section = blocked ? 'overview' : rawSection;
 
   const go = (next: SettingsSection) => {
@@ -106,6 +107,7 @@ export default function SettingsPage() {
           isAdmin={canEditSettings}
           isOwner={isOwner}
           canAccessTemplates={canAccessTemplates}
+          canAccessSms={canAccessSms}
         />
         <div className="min-w-0">{panel[section]}</div>
       </div>

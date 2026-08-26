@@ -29,6 +29,7 @@ export function SettingsRail({
   isAdmin = true,
   isOwner = true,
   canAccessTemplates = true,
+  canAccessSms = true,
 }: {
   active: SettingsSection;
   onSelect: (section: SettingsSection) => void;
@@ -39,6 +40,8 @@ export function SettingsRail({
   isOwner?: boolean;
   /** Hides Templates for an 'agent' without the 'templates' grant. */
   canAccessTemplates?: boolean;
+  /** Hides SMS and httpSMS for an 'agent' without the 'sms' grant. */
+  canAccessSms?: boolean;
 }) {
   const t = useTranslations('Settings');
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -70,7 +73,8 @@ export function SettingsRail({
             SECTION_META[s].group === group &&
             (isAdmin || !SECTION_META[s].adminOnly) &&
             (isOwner || !SECTION_META[s].ownerOnly) &&
-            (s !== 'templates' || canAccessTemplates),
+            (s !== 'templates' || canAccessTemplates) &&
+            ((s !== 'sms' && s !== 'httpsms') || canAccessSms),
         );
         return (
           <div

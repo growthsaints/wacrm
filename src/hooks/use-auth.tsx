@@ -109,6 +109,9 @@ interface AuthContextValue {
   canAccessAutomations: boolean;
   /** Admin+ always; an 'agent' only if explicitly granted (see agent_feature_grants). */
   canAccessTemplates: boolean;
+  /** Gates Settings → SMS and Settings → httpSMS. Admin+ always; an
+   *  'agent' only if explicitly granted (see agent_feature_grants). */
+  canAccessSms: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -362,6 +365,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canAccessBroadcasts: hasFeature("broadcasts"),
       canAccessAutomations: hasFeature("automations"),
       canAccessTemplates: hasFeature("templates"),
+      canAccessSms: hasFeature("sms"),
     };
   }, [profile?.account_role, profile?.account_id, grantedFeatures]);
 
@@ -418,6 +422,7 @@ export function useAuth(): AuthContextValue {
       canAccessBroadcasts: false,
       canAccessAutomations: false,
       canAccessTemplates: false,
+      canAccessSms: false,
     };
   }
   return ctx;

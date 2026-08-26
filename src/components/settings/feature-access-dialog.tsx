@@ -3,9 +3,10 @@
 // ============================================================
 // Settings → Members → per-agent "Manage access" dialog.
 //
-// Broadcasts, Automations, and Templates are admin+ by default; an
-// 'agent' only gets one when explicitly granted here. Owner/admin
-// members never see this control (they already have everything).
+// Broadcasts, Automations, Templates, and SMS settings are admin+ by
+// default; an 'agent' only gets one when explicitly granted here.
+// Owner/admin members never see this control (they already have
+// everything).
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
@@ -23,13 +24,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-const GATED_FEATURES = ['broadcasts', 'automations', 'templates'] as const;
+const GATED_FEATURES = ['broadcasts', 'automations', 'templates', 'sms'] as const;
 type GatedFeature = (typeof GATED_FEATURES)[number];
 
 const FEATURE_LABEL: Record<GatedFeature, string> = {
   broadcasts: 'Broadcasts',
   automations: 'Automations',
   templates: 'Templates',
+  sms: 'SMS & httpSMS (Settings)',
 };
 
 export function FeatureAccessDialog({
@@ -104,8 +106,9 @@ export function FeatureAccessDialog({
             Manage access — {memberName}
           </DialogTitle>
           <DialogDescription>
-            Broadcasts, Automations, and Templates are hidden from agents by default. Turn
-            any of these on to give {memberName} access to that feature specifically.
+            Broadcasts, Automations, Templates, and SMS settings are hidden from agents by
+            default. Turn any of these on to give {memberName} access to that feature
+            specifically.
           </DialogDescription>
         </DialogHeader>
 

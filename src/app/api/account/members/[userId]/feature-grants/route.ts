@@ -27,6 +27,7 @@ const GATED_FEATURES: readonly GatedFeature[] = [
   "broadcasts",
   "automations",
   "templates",
+  "sms",
 ];
 
 function isGatedFeature(value: unknown): value is GatedFeature {
