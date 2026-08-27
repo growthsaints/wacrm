@@ -247,7 +247,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         </div>
 
         {/* Main navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 py-4 lg:px-2">
+        <nav className="flex-1 overflow-y-auto px-3 py-4 [scrollbar-width:none] lg:px-2 [&::-webkit-scrollbar]:hidden">
           <ul className="flex flex-col gap-1">
             {visibleNavItems.map((item) => {
               const isActive =
