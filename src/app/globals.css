@@ -106,7 +106,7 @@
     0 12px 24px -8px hsl(var(--shadow-color) / 0.12);
 }
 
-/* ---- SIDEBAR: always dark, independent of MODE ----
+/* ---- SIDEBAR: always dark teal, independent of MODE or ACCENT ----
  * The nav rail is app chrome, not page content — like Linear/Vercel/
  * Notion, it stays a fixed dark surface whether the user's chosen
  * mode is light or dark, so it doesn't wash out to white in light
@@ -115,15 +115,22 @@
  * always-applied definition since nothing else reads these tokens
  * (grep confirms only components/layout/sidebar.tsx uses them) so
  * there's no other consumer whose light-mode sidebar this could
- * silently change. --sidebar-primary and --sidebar-ring stay in the
- * ACCENT blocks further down — the active-item highlight still
- * follows whichever brand accent (teal/violet/…) is selected. */
+ * silently change.
+ *
+ * Deliberately hue-195 (teal/green) rather than neutral gray — a
+ * WhatsApp-adjacent identity color for the rail itself, same idea as
+ * --chart-2's "vivid WhatsApp-adjacent green" a few blocks down: a
+ * fixed brand cue, not something that should retint if the account
+ * switches its ACCENT theme. --sidebar-primary/--sidebar-ring do stay
+ * in the ACCENT blocks further down, so the active-item pill still
+ * follows whichever accent (teal/violet/…) is selected — only the
+ * base rail color is fixed. */
 :root {
-  --sidebar: oklch(0.16 0.01 260);
+  --sidebar: oklch(0.15 0.035 195);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.22 0.01 260);
+  --sidebar-accent: oklch(0.21 0.04 195);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.28 0.01 260);
+  --sidebar-border: oklch(0.27 0.035 195);
 }
 
 /* ---- MODE: neutral surfaces ---- */
