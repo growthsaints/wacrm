@@ -1,4 +1,5 @@
 import {
+  BellRing,
   Coins,
   FileText,
   KeyRound,
@@ -38,6 +39,7 @@ export const SETTINGS_SECTIONS = [
   'quick-replies',
   'whatsapp-flows',
   'commerce',
+  'notification-rules',
   'fields',
   'deals',
   'billing',
@@ -74,6 +76,13 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   'quick-replies': { id: 'quick-replies', label: 'Quick replies', icon: Zap, group: 'workspace' },
   'whatsapp-flows': { id: 'whatsapp-flows', label: 'WhatsApp Flows', icon: Workflow, group: 'workspace' },
   commerce: { id: 'commerce', label: 'Commerce', icon: ShoppingBag, group: 'workspace' },
+  'notification-rules': {
+    id: 'notification-rules',
+    label: 'Order & Payment Alerts',
+    icon: BellRing,
+    group: 'workspace',
+    adminOnly: true,
+  },
   fields: { id: 'fields', label: 'Fields & tags', icon: Tags, group: 'workspace' },
   deals: { id: 'deals', label: 'Deals & currency', icon: Coins, group: 'workspace' },
   billing: { id: 'billing', label: 'Billing', icon: Wallet, group: 'workspace', ownerOnly: true },
