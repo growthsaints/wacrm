@@ -48,6 +48,7 @@ import { AutomationAnalyticsTable } from '@/components/dashboard/automation-anal
 import { WalletBalanceCard } from '@/components/dashboard/wallet-balance-card'
 import { WhatsAppStatusCard } from '@/components/dashboard/whatsapp-status-card'
 import { WhatsAppQuotaCard } from '@/components/dashboard/whatsapp-quota-card'
+import { DashboardImageSlider } from '@/components/dashboard/dashboard-image-slider'
 import { GettingStartedSection } from '@/components/dashboard/getting-started-section'
 
 import { useTranslations } from 'next-intl'
@@ -190,13 +191,20 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
+      {/* Header — the title block is naturally shorter than the
+          wallet/WhatsApp-status column beside it, which left a bare gap
+          under the description on wide screens. The feature/guide
+          slider fills that space instead of sitting alone in its own
+          full-width row further down the page. */}
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0 flex-1">
           <h1 className="text-2xl font-bold text-foreground">{t('title')}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {t('description')}
           </p>
+          <div className="mt-4">
+            <DashboardImageSlider />
+          </div>
         </div>
         <div className="flex flex-col items-end gap-3">
           <WalletBalanceCard />

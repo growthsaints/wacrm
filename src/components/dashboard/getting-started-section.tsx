@@ -1,18 +1,20 @@
 'use client';
 
 // ============================================================
-// GettingStartedSection — wraps the feature/guide showcase
-// (DashboardImageSlider), the "how do I…" tips carousel
-// (DashboardGuideCarousel), and the WhatsApp setup checklist behind
-// one collapsible card at the bottom of the dashboard.
+// GettingStartedSection — wraps the "how do I…" tips carousel
+// (DashboardGuideCarousel) and the WhatsApp setup checklist behind
+// one collapsible card at the bottom of the dashboard. The
+// feature/guide image slider lives up in the page header instead (see
+// dashboard/page.tsx) — it fills the gap beside the wallet/WhatsApp
+// status cards rather than duplicating here.
 //
-// Previously these three rendered unconditionally at the very top of
-// the page, ahead of every live metric/chart — so a returning user
-// with an already-connected account saw the same onboarding/marketing
-// content above the data they actually opened the dashboard for, on
-// every visit. Collapsing it (and moving it below the real analytics)
-// keeps it one click away for someone who does want it, without
-// permanently costing everyone else the top of the page.
+// Previously these rendered unconditionally at the very top of the
+// page, ahead of every live metric/chart — so a returning user with
+// an already-connected account saw the same onboarding content above
+// the data they actually opened the dashboard for, on every visit.
+// Collapsing it (and moving it below the real analytics) keeps it one
+// click away for someone who does want it, without permanently
+// costing everyone else the top of the page.
 //
 // Expand/collapse state persists per-browser via localStorage, same
 // pattern as flow-editor-shell's view-mode toggle — defaults to
@@ -23,7 +25,6 @@
 import { useState } from 'react';
 import { ChevronDown, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { DashboardImageSlider } from './dashboard-image-slider';
 import { DashboardGuideCarousel } from './dashboard-guide-carousel';
 import { WhatsAppOnboardingChecklist } from './whatsapp-onboarding-checklist';
 
@@ -70,12 +71,9 @@ export function GettingStartedSection() {
       </button>
 
       {expanded ? (
-        <div className="space-y-4 border-t border-border p-4">
-          <DashboardImageSlider />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <DashboardGuideCarousel />
-            <WhatsAppOnboardingChecklist />
-          </div>
+        <div className="grid grid-cols-1 gap-4 border-t border-border p-4 lg:grid-cols-2">
+          <DashboardGuideCarousel />
+          <WhatsAppOnboardingChecklist />
         </div>
       ) : null}
     </div>
