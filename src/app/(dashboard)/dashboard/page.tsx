@@ -48,9 +48,7 @@ import { AutomationAnalyticsTable } from '@/components/dashboard/automation-anal
 import { WalletBalanceCard } from '@/components/dashboard/wallet-balance-card'
 import { WhatsAppStatusCard } from '@/components/dashboard/whatsapp-status-card'
 import { WhatsAppQuotaCard } from '@/components/dashboard/whatsapp-quota-card'
-import { WhatsAppOnboardingChecklist } from '@/components/dashboard/whatsapp-onboarding-checklist'
-import { DashboardGuideCarousel } from '@/components/dashboard/dashboard-guide-carousel'
-import { DashboardImageSlider } from '@/components/dashboard/dashboard-image-slider'
+import { GettingStartedSection } from '@/components/dashboard/getting-started-section'
 
 import { useTranslations } from 'next-intl'
 
@@ -208,15 +206,6 @@ export default function DashboardPage() {
 
       <WhatsAppQuotaCard />
 
-      {/* Feature & guide showcase */}
-      <DashboardImageSlider />
-
-      {/* Getting started: guide carousel + WhatsApp setup checklist */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <DashboardGuideCarousel />
-        <WhatsAppOnboardingChecklist />
-      </div>
-
       {/* Metric cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {metricsLoading || !metrics ? (
@@ -322,6 +311,12 @@ export default function DashboardPage() {
 
       {/* Activity feed */}
       <ActivityFeed items={activity} loading={activityLoading} />
+
+      {/* Feature tour, "how do I…" tips, and the WhatsApp setup
+          checklist — collapsed by default so a returning user's
+          dashboard opens straight into their data, not onboarding
+          content they've already seen. */}
+      <GettingStartedSection />
     </div>
   )
 }
