@@ -106,6 +106,26 @@
     0 12px 24px -8px hsl(var(--shadow-color) / 0.12);
 }
 
+/* ---- SIDEBAR: always dark, independent of MODE ----
+ * The nav rail is app chrome, not page content — like Linear/Vercel/
+ * Notion, it stays a fixed dark surface whether the user's chosen
+ * mode is light or dark, so it doesn't wash out to white in light
+ * mode. Was previously mode-conditional (identical values duplicated
+ * across the light/dark MODE blocks below); pulled out to one
+ * always-applied definition since nothing else reads these tokens
+ * (grep confirms only components/layout/sidebar.tsx uses them) so
+ * there's no other consumer whose light-mode sidebar this could
+ * silently change. --sidebar-primary and --sidebar-ring stay in the
+ * ACCENT blocks further down — the active-item highlight still
+ * follows whichever brand accent (teal/violet/…) is selected. */
+:root {
+  --sidebar: oklch(0.16 0.01 260);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.22 0.01 260);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.28 0.01 260);
+}
+
 /* ---- MODE: neutral surfaces ---- */
 
 :root,
@@ -131,11 +151,6 @@ html[data-mode="dark"] {
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.16 0.01 260);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.22 0.01 260);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.28 0.01 260);
 }
 
 html[data-mode="light"] {
@@ -160,11 +175,6 @@ html[data-mode="light"] {
   --chart-4: oklch(0.8 0.04 260);
   --chart-5: oklch(0.87 0.03 260);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0.002 260);
-  --sidebar-foreground: oklch(0.21 0.01 260);
-  --sidebar-accent: oklch(0.96 0.004 260);
-  --sidebar-accent-foreground: oklch(0.25 0.01 260);
-  --sidebar-border: oklch(0.922 0.004 260);
 }
 
 /* ---- ACCENT: primary color ---- */

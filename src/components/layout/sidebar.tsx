@@ -211,7 +211,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
       <aside
         className={cn(
           // Mobile: fixed drawer that slides in from the left.
-          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-border bg-card",
+          "fixed inset-y-0 left-0 z-40 flex h-full w-64 flex-col border-r border-sidebar-border bg-sidebar",
           "transition-transform duration-200 ease-out will-change-transform",
           open ? "translate-x-0" : "-translate-x-full",
           // Desktop: static, always-visible icon rail — reset all the
@@ -225,14 +225,14 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         {/* Logo row. On mobile: icon + wordmark + close button. On the
             desktop icon rail there's no room for the wordmark, so it's
             hidden and the icon centers. */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4 lg:justify-center lg:px-0">
+        <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-sidebar-border px-4 lg:justify-center lg:px-0">
           <Link href="/dashboard" className="flex items-center gap-2">
             <img
               src="/logo-mark.png"
               alt="Growth Saints"
               className="h-8 w-8 rounded-lg object-cover"
             />
-            <span className="text-sm font-semibold text-foreground lg:hidden">
+            <span className="text-sm font-semibold text-sidebar-foreground lg:hidden">
               {t("title")}
             </span>
           </Link>
@@ -240,7 +240,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             type="button"
             onClick={onClose}
             aria-label={t("closeMenu")}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+            className="flex h-9 w-9 items-center justify-center rounded-md text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
           >
             <X className="h-5 w-5" />
           </button>
@@ -277,8 +277,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       isActive
-                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                     )}
                   >
                     <span className="relative flex shrink-0 items-center justify-center">
@@ -325,8 +325,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
           {enterpriseEnabled && (
             <>
-              <div className="my-4 border-t border-border" />
-              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase lg:hidden">
+              <div className="my-4 border-t border-sidebar-border" />
+              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wider text-sidebar-foreground/50 uppercase lg:hidden">
                 Enterprise
               </p>
               <ul className="flex flex-col gap-1">
@@ -338,8 +338,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       pathname.startsWith("/campaign-intelligence")
-                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                     )}
                   >
                     <Building2 className="h-4 w-4 shrink-0" />
@@ -354,8 +354,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
 
           {businessWorkspaceEnabled && (
             <>
-              <div className="my-4 border-t border-border" />
-              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase lg:hidden">
+              <div className="my-4 border-t border-sidebar-border" />
+              <p className="mb-1.5 px-3 text-[10px] font-semibold tracking-wider text-sidebar-foreground/50 uppercase lg:hidden">
                 Business Workspace
               </p>
               <ul className="flex flex-col gap-1">
@@ -367,8 +367,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       pathname.startsWith("/business-workspace")
-                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                     )}
                   >
                     <Briefcase className="h-4 w-4 shrink-0" />
@@ -381,7 +381,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
             </>
           )}
 
-          <div className="my-4 border-t border-border" />
+          <div className="my-4 border-t border-sidebar-border" />
 
           <ul className="flex flex-col gap-1">
             {bottomNavItems.map((item) => {
@@ -398,8 +398,8 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                       "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
                       "lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight",
                       isActive
-                        ? "relative bg-primary/10 text-primary before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-primary lg:before:hidden"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground",
                     )}
                   >
                     <item.icon className="h-4 w-4 shrink-0" />
@@ -413,7 +413,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                 <Link
                   href="/platform"
                   title={t("superAdmin")}
-                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground lg:flex-col lg:gap-1 lg:rounded-xl lg:px-1.5 lg:py-2.5 lg:text-center lg:text-[10.5px] lg:leading-tight"
                 >
                   <Shield className="h-4 w-4 shrink-0" />
                   <span className="truncate lg:w-full lg:overflow-visible lg:whitespace-normal lg:text-clip">{t("superAdmin")}</span>
@@ -424,7 +424,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
         </nav>
 
         {/* User section */}
-        <div className="shrink-0 border-t border-border p-3 lg:p-2">
+        <div className="shrink-0 border-t border-sidebar-border p-3 lg:p-2">
           {/* Account name display — surfaced only when the account
               name differs from the user's own name (see
               `showAccountStrip`). For a default solo account the two
@@ -432,7 +432,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
               below; for renamed or shared accounts it tells the user
               which account they're acting in. */}
           {showAccountStrip && account?.name ? (
-            <div className="mb-2 flex items-center gap-2 px-3 text-xs text-muted-foreground lg:hidden">
+            <div className="mb-2 flex items-center gap-2 px-3 text-xs text-sidebar-foreground/60 lg:hidden">
               <UsersRound className="size-3.5 shrink-0" />
               {/* `title=` exposes the full name on hover when it
                   gets truncated (long account names + narrow
@@ -463,7 +463,7 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
           <DropdownMenu>
             <DropdownMenuTrigger
               title={profile?.full_name ?? profile?.email ?? t("defaultUser")}
-              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted/60 focus:bg-muted/60 focus:outline-none data-popup-open:bg-muted/60 lg:justify-center lg:px-0"
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-sidebar-accent focus:bg-sidebar-accent focus:outline-none data-popup-open:bg-sidebar-accent lg:justify-center lg:px-0"
             >
               <Avatar className="size-8 shrink-0">
                 {profile?.avatar_url ? (
@@ -472,17 +472,17 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
                     alt={profile.full_name ?? t("defaultAvatar")}
                   />
                 ) : null}
-                <AvatarFallback className="bg-primary/10 text-sm font-medium text-primary">
+                <AvatarFallback className="bg-sidebar-primary/20 text-sm font-medium text-sidebar-primary">
                   {profile?.full_name?.charAt(0)?.toUpperCase() ??
                     profile?.email?.charAt(0)?.toUpperCase() ??
                     "U"}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1 lg:hidden">
-                <p className="truncate text-sm font-medium text-foreground">
+                <p className="truncate text-sm font-medium text-sidebar-foreground">
                   {profile?.full_name ?? t("defaultUser")}
                 </p>
-                <p className="truncate text-xs text-muted-foreground">
+                <p className="truncate text-xs text-sidebar-foreground/60">
                   {profile?.email ?? ""}
                 </p>
               </div>
