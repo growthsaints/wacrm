@@ -106,6 +106,7 @@ export default function MetaAdsPage() {
   const [audiences, setAudiences] = useState<AudienceRow[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [pages, setPages] = useState<MetaPageOption[]>([]);
+  const [pagesError, setPagesError] = useState<string | null>(null);
   const [tags, setTags] = useState<Tag[]>([]);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,7 +148,15 @@ export default function MetaAdsPage() {
       if (isConnected) {
         const pagesRes = await fetch('/api/meta-ads/pages', { cache: 'no-store' });
         const pagesData = await pagesRes.json().catch(() => ({}));
-        if (pagesRes.ok) setPages((pagesData.pages as MetaPageOption[]) ?? []);
+        if (pagesRes.ok) {
+          setPages((pagesData.pages as MetaPageOption[]) ?? []);
+          setPagesError(null);
+        } else {
+          setPages([]);
+          setPagesError(typeof pagesData.error === 'string' ? pagesData.error : "Couldn't load Facebook Pages from Meta.");
+        }
+      } else {
+        setPagesError(null);
       }
     } finally {
       setLoading(false);
@@ -425,7 +434,12 @@ export default function MetaAdsPage() {
                 New campaign
               </Button>
             </div>
-            {pages.length === 0 && (
+            {pagesError && (
+              <p className="mb-3 text-xs text-destructive">
+                Couldn&apos;t load Facebook Pages from Meta: {pagesError}
+              </p>
+            )}
+            {!pagesError && pages.length === 0 && (
               <p className="mb-3 text-xs text-muted-foreground">
                 No Facebook Pages found for the connected token — a Page (with a WhatsApp number linked to
                 it in Business Manager) is required to launch a campaign.
