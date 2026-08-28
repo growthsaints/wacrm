@@ -59,7 +59,15 @@ interface NotificationRuleRow {
 // examples to nudge the input's placeholder/autocomplete, not an
 // enforced schema.
 const PAYMENT_PATHS = ['payment.id', 'payment.amount', 'payment.currency', 'payment.email', 'payment.contact', 'payment.order_id'];
-const DEFAULT_PATHS = ['order.number', 'order.total', 'customer.name', 'customer.phone', 'shipment.tracking_number'];
+const DEFAULT_PATHS = [
+  'order.number',
+  'order.total',
+  'customer.name',
+  'customer.phone',
+  'product.name',
+  'product.url',
+  'shipment.tracking_number',
+];
 
 function suggestedPaths(event: string): string[] {
   return event.startsWith('payment.') ? PAYMENT_PATHS : DEFAULT_PATHS;
