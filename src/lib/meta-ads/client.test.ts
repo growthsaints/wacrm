@@ -223,11 +223,13 @@ describe('createAdSet', () => {
         campaign_id: 'camp-1',
         optimization_goal: 'CONVERSATIONS',
         billing_event: 'IMPRESSIONS',
+        bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
         destination_type: 'WHATSAPP',
         promoted_object: { page_id: 'page-1' },
         targeting: {
           geo_locations: { countries: ['IN'] },
           publisher_platforms: ['facebook'],
+          targeting_automation: { advantage_audience: 0 },
           custom_audiences: [{ id: 'aud-1' }],
         },
         daily_budget: 10000,
@@ -255,6 +257,7 @@ describe('createAdSet', () => {
       expect(body.targeting).toEqual({
         geo_locations: { countries: ['IN'] },
         publisher_platforms: ['facebook'],
+        targeting_automation: { advantage_audience: 0 },
       })
       return jsonResponse({ id: 'adset-2' })
     })
@@ -285,6 +288,7 @@ describe('createAdCreative', () => {
           page_id: 'page-1',
           link_data: {
             message: 'Hello!',
+            link: 'https://wa.me/',
             call_to_action: { type: 'WHATSAPP_MESSAGE' },
             image_hash: 'img-hash-1',
           },

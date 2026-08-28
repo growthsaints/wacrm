@@ -262,6 +262,10 @@ export async function createAdSet(args: {
   const targeting: Record<string, unknown> = {
     geo_locations: { countries: [countryCode] },
     publisher_platforms: ['facebook'],
+    // Advantage+ audience would let Meta expand delivery beyond what's
+    // targeted below — explicitly disabled so a selected Custom Audience
+    // (or the plain geo targeting) is respected as-is, not broadened.
+    targeting_automation: { advantage_audience: 0 },
   }
   if (customAudienceId) {
     targeting.custom_audiences = [{ id: customAudienceId }]
@@ -275,6 +279,10 @@ export async function createAdSet(args: {
       campaign_id: campaignId,
       optimization_goal: 'CONVERSATIONS',
       billing_event: 'IMPRESSIONS',
+      // Budget lives on this ad set (see createCampaign), so Meta requires
+      // an explicit bid strategy — (#2490487) otherwise. LOWEST_COST_WITHOUT_CAP
+      // is Meta's "highest volume" default and needs no bid amount.
+      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
       destination_type: 'WHATSAPP',
       promoted_object: { page_id: pageId },
       targeting,
@@ -308,6 +316,11 @@ export async function createAdCreative(args: {
 
   const linkData: Record<string, unknown> = {
     message,
+    // `link` is required by link_data even for a WhatsApp-destination ad
+    // (#2061015) — the actual click destination is controlled by the ad
+    // set's destination_type/promoted_object, not this URL, so a fixed
+    // wa.me placeholder satisfies the schema without doing anything.
+    link: 'https://wa.me/',
     call_to_action: { type: 'WHATSAPP_MESSAGE' },
   }
   if (imageHash) linkData.image_hash = imageHash
