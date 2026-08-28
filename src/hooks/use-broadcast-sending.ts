@@ -28,12 +28,14 @@ export interface AudienceConfig {
  * "2", …) is resolved at send time. `field` maps to a built-in contact
  * field (name/phone/email/company); `custom_field` maps to a
  * contact_custom_values.value row keyed by the custom_fields.id stored
- * in `value`.
+ * in `value`. `fallback` (field/custom_field only) is substituted when
+ * that contact's own value is empty, rather than shipping a blank —
+ * e.g. "Hi ," for a contact with no name on file.
  */
 export type VariableMapping =
   | { type: 'static'; value: string }
-  | { type: 'field'; value: string }
-  | { type: 'custom_field'; value: string };
+  | { type: 'field'; value: string; fallback?: string }
+  | { type: 'custom_field'; value: string; fallback?: string };
 
 interface BroadcastPayload {
   name: string;
@@ -146,11 +148,11 @@ export function resolveVariables(
         email: contact.email,
         company: contact.company,
       };
-      return fieldMap[v.value] ?? '';
+      return fieldMap[v.value]?.trim() || v.fallback || '';
     }
 
     // custom_field
-    return customValues?.get(v.value) ?? '';
+    return customValues?.get(v.value)?.trim() || v.fallback || '';
   });
 }
 
