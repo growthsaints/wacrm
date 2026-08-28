@@ -64,6 +64,9 @@ export async function POST(request: Request) {
     if (!name) return NextResponse.json({ error: "'name' is required" }, { status: 400 })
     if (!pageId) return NextResponse.json({ error: "'page_id' is required" }, { status: 400 })
     if (!primaryText) return NextResponse.json({ error: "'primary_text' is required" }, { status: 400 })
+    if (!imageUrl) {
+      return NextResponse.json({ error: 'An image is required — Meta rejects this ad format without one' }, { status: 400 })
+    }
     if (!Number.isFinite(dailyBudget) || dailyBudget <= 0) {
       return NextResponse.json({ error: "'daily_budget' must be a positive number" }, { status: 400 })
     }

@@ -300,6 +300,10 @@ export default function MetaAdsPage() {
       toast.error('Write the ad text.');
       return;
     }
+    if (!campaignDraft.imageUrl) {
+      toast.error('Add an image — Meta requires one for this ad format.');
+      return;
+    }
     const dailyBudget = Number(campaignDraft.dailyBudget);
     if (!Number.isFinite(dailyBudget) || dailyBudget <= 0) {
       toast.error('Enter a valid daily budget.');
@@ -318,7 +322,7 @@ export default function MetaAdsPage() {
           custom_audience_id: campaignDraft.customAudienceId || undefined,
           daily_budget: dailyBudget,
           primary_text: campaignDraft.primaryText.trim(),
-          image_url: campaignDraft.imageUrl || undefined,
+          image_url: campaignDraft.imageUrl,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -665,7 +669,7 @@ export default function MetaAdsPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Image (optional)</label>
+                <label className="mb-1 block text-xs text-muted-foreground">Image — Meta requires one for this ad format</label>
                 <input
                   ref={imageInputRef}
                   type="file"
