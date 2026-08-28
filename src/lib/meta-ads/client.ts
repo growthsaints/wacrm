@@ -436,3 +436,154 @@ export async function getCampaignInsights(args: {
     clicks: Number(row?.clicks ?? 0),
   }
 }
+
+// ============================================================
+// Video and Carousel formats — ground-truth confirmed against real
+// objects built in this account's own Ads Manager (a manually-created
+// video ad and carousel ad), the same process used for the original
+// image-format work above. See migration 090's header comment for the
+// full verification notes.
+// ============================================================
+
+/**
+ * Uploads a video to Meta from a URL wacrm already hosts — Meta fetches
+ * it server-side (`file_url`), so there's no need to download/re-upload
+ * bytes ourselves the way `uploadAdImageFromUrl` has to for images
+ * (which have no such endpoint). Processing is asynchronous; the
+ * returned id isn't usable in a creative until `getVideoStatus` reports
+ * `ready` (see that function's comment).
+ *
+ * This POST uses form-encoding (`URLSearchParams`), not JSON — that's
+ * what the ground-truth curl test against this exact endpoint used
+ * successfully; unlike every other endpoint in this module, `/advideos`
+ * wasn't verified to also accept a JSON body.
+ */
+export async function uploadAdVideoFromUrl(args: {
+  accessToken: string
+  adAccountId: string
+  videoUrl: string
+  title: string
+}): Promise<{ videoId: string }> {
+  const { accessToken, adAccountId, videoUrl, title } = args
+  const id = adAccountPath(adAccountId)
+  const body = new URLSearchParams({ file_url: videoUrl, title })
+  const response = await fetch(`${META_API_BASE}/${id}/advideos`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body,
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { id: string }
+  return { videoId: data.id }
+}
+
+export interface VideoStatus {
+  ready: boolean
+  /** Meta auto-generates a thumbnail once processing completes — used
+   *  as the creative's required `image_url` without wacrm needing its
+   *  own thumbnail-extraction step. Null until ready. */
+  thumbnailUrl: string | null
+}
+
+/** Polls this once — callers loop (see lib/meta-ads/launch.ts) since processing takes anywhere from a few seconds to a couple of minutes depending on video length/size. */
+export async function getVideoStatus(args: { accessToken: string; videoId: string }): Promise<VideoStatus> {
+  const { accessToken, videoId } = args
+  const url = new URL(`${META_API_BASE}/${videoId}`)
+  url.searchParams.set('fields', 'status,picture')
+  const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { status?: { video_status?: string }; picture?: string }
+  return {
+    ready: data.status?.video_status === 'ready',
+    thumbnailUrl: data.picture ?? null,
+  }
+}
+
+/** Classic object_story_spec.video_data — see module comment for ground-truth verification notes. Always PAUSED via createAd, same as the image/carousel paths. */
+export async function createVideoAdCreative(args: {
+  accessToken: string
+  adAccountId: string
+  name: string
+  pageId: string
+  videoId: string
+  thumbnailUrl: string
+  message: string
+}): Promise<{ id: string }> {
+  const { accessToken, adAccountId, name, pageId, videoId, thumbnailUrl, message } = args
+  const id = adAccountPath(adAccountId)
+  const response = await fetch(`${META_API_BASE}/${id}/adcreatives`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      object_story_spec: {
+        page_id: pageId,
+        video_data: {
+          video_id: videoId,
+          image_url: thumbnailUrl,
+          message,
+          call_to_action: { type: 'WHATSAPP_MESSAGE' },
+        },
+      },
+    }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}
+
+export interface CarouselCard {
+  imageHash: string
+  headline: string
+  description?: string
+}
+
+/**
+ * object_story_spec.link_data.child_attachments — confirmed to exactly
+ * match a real carousel ad built directly in this account's Ads
+ * Manager (see migration 090). Meta's own UI also sets a
+ * `call_to_action` on each child individually (this does too, for
+ * consistency) even though the top-level one already applies.
+ */
+export async function createCarouselAdCreative(args: {
+  accessToken: string
+  adAccountId: string
+  name: string
+  pageId: string
+  message: string
+  cards: CarouselCard[]
+}): Promise<{ id: string }> {
+  const { accessToken, adAccountId, name, pageId, message, cards } = args
+  const id = adAccountPath(adAccountId)
+  const response = await fetch(`${META_API_BASE}/${id}/adcreatives`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name,
+      object_story_spec: {
+        page_id: pageId,
+        link_data: {
+          message,
+          link: 'https://wa.me/',
+          call_to_action: { type: 'WHATSAPP_MESSAGE' },
+          child_attachments: cards.map((card) => ({
+            link: 'https://wa.me/',
+            image_hash: card.imageHash,
+            name: card.headline,
+            description: card.description ?? '',
+            call_to_action: { type: 'WHATSAPP_MESSAGE' },
+          })),
+        },
+      },
+    }),
+  })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  return response.json()
+}

@@ -15,7 +15,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { launchCampaign } from '@/lib/meta-ads/launch'
 
 const CAMPAIGN_COLUMNS =
-  'id, name, page_id, page_name, daily_budget, currency, primary_text, image_url, custom_audience_id, meta_campaign_id, meta_adset_id, meta_ad_id, status, error_message, created_at, updated_at'
+  'id, name, page_id, page_name, daily_budget, currency, primary_text, image_url, ad_format, video_url, carousel_cards, custom_audience_id, meta_campaign_id, meta_adset_id, meta_ad_id, status, error_message, created_at, updated_at'
 
 export async function GET() {
   try {
@@ -55,6 +55,18 @@ export async function POST(request: Request) {
     const pageName = typeof body.page_name === 'string' ? body.page_name.trim() : null
     const primaryText = typeof body.primary_text === 'string' ? body.primary_text.trim() : ''
     const imageUrl = typeof body.image_url === 'string' && body.image_url.trim() ? body.image_url.trim() : null
+    const videoUrl = typeof body.video_url === 'string' && body.video_url.trim() ? body.video_url.trim() : null
+    const adFormat = body.ad_format === 'video' || body.ad_format === 'carousel' ? body.ad_format : 'image'
+    const carouselCards = Array.isArray(body.carousel_cards)
+      ? (body.carousel_cards as unknown[])
+          .map((c) => (c && typeof c === 'object' ? (c as Record<string, unknown>) : null))
+          .filter((c): c is Record<string, unknown> => c !== null)
+          .map((c) => ({
+            image_url: typeof c.image_url === 'string' ? c.image_url.trim() : '',
+            headline: typeof c.headline === 'string' ? c.headline.trim() : '',
+            description: typeof c.description === 'string' ? c.description.trim() : undefined,
+          }))
+      : []
     const customAudienceId =
       typeof body.custom_audience_id === 'string' && body.custom_audience_id.trim()
         ? body.custom_audience_id.trim()
@@ -64,7 +76,16 @@ export async function POST(request: Request) {
     if (!name) return NextResponse.json({ error: "'name' is required" }, { status: 400 })
     if (!pageId) return NextResponse.json({ error: "'page_id' is required" }, { status: 400 })
     if (!primaryText) return NextResponse.json({ error: "'primary_text' is required" }, { status: 400 })
-    if (!imageUrl) {
+    if (adFormat === 'video') {
+      if (!videoUrl) return NextResponse.json({ error: 'A video is required for the video format' }, { status: 400 })
+    } else if (adFormat === 'carousel') {
+      if (carouselCards.length < 2 || carouselCards.some((c) => !c.image_url || !c.headline)) {
+        return NextResponse.json(
+          { error: 'Carousel format needs at least 2 cards, each with an image and headline' },
+          { status: 400 },
+        )
+      }
+    } else if (!imageUrl) {
       return NextResponse.json({ error: 'An image is required — Meta rejects this ad format without one' }, { status: 400 })
     }
     if (!Number.isFinite(dailyBudget) || dailyBudget <= 0) {
@@ -97,7 +118,10 @@ export async function POST(request: Request) {
         daily_budget: dailyBudget,
         currency: config.currency ?? 'INR',
         primary_text: primaryText,
-        image_url: imageUrl,
+        image_url: adFormat === 'image' ? imageUrl : null,
+        ad_format: adFormat,
+        video_url: adFormat === 'video' ? videoUrl : null,
+        carousel_cards: adFormat === 'carousel' ? carouselCards : null,
         status: 'launching',
         created_by: ctx.userId,
       })

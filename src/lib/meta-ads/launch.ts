@@ -21,7 +21,11 @@ import {
   createAdCreative,
   createAdSet,
   createCampaign,
+  createCarouselAdCreative,
+  createVideoAdCreative,
+  getVideoStatus,
   uploadAdImageFromUrl,
+  uploadAdVideoFromUrl,
 } from '@/lib/meta-ads/client'
 
 async function markFailed(db: SupabaseClient, campaignRowId: string, message: string): Promise<void> {
@@ -34,12 +38,38 @@ async function markFailed(db: SupabaseClient, campaignRowId: string, message: st
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Video processing on Meta's side is asynchronous — polls until ready
+ * or gives up. wacrm runs on a persistent Node process (not a
+ * serverless function with a hard timeout), so blocking here for up
+ * to a few minutes is fine; a short clip in ground-truth testing was
+ * ready almost immediately, but length/size can push this out.
+ */
+async function waitForVideoReady(args: {
+  accessToken: string
+  videoId: string
+  maxAttempts?: number
+  delayMs?: number
+}): Promise<string> {
+  const { accessToken, videoId, maxAttempts = 40, delayMs = 3000 } = args
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const status = await getVideoStatus({ accessToken, videoId })
+    if (status.ready && status.thumbnailUrl) return status.thumbnailUrl
+    await sleep(delayMs)
+  }
+  throw new Error('Video is still processing on Meta — try again in a minute')
+}
+
 export async function launchCampaign(db: SupabaseClient, campaignRowId: string): Promise<void> {
   try {
     const { data: row, error: rowError } = await db
       .from('meta_ad_campaigns')
       .select(
-        'id, meta_ads_config_id, custom_audience_id, name, page_id, daily_budget, primary_text, image_url',
+        'id, meta_ads_config_id, custom_audience_id, name, page_id, daily_budget, primary_text, image_url, ad_format, video_url, carousel_cards',
       )
       .eq('id', campaignRowId)
       .maybeSingle()
@@ -81,16 +111,6 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
       metaAudienceId = audience.meta_audience_id
     }
 
-    let imageHash: string | undefined
-    if (row.image_url) {
-      const uploaded = await uploadAdImageFromUrl({
-        accessToken,
-        adAccountId: config.ad_account_id,
-        imageUrl: row.image_url,
-      })
-      imageHash = uploaded.hash
-    }
-
     const campaign = await createCampaign({ accessToken, adAccountId: config.ad_account_id, name: row.name })
     await db.from('meta_ad_campaigns').update({ meta_campaign_id: campaign.id }).eq('id', campaignRowId)
 
@@ -105,14 +125,68 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
     })
     await db.from('meta_ad_campaigns').update({ meta_adset_id: adSet.id }).eq('id', campaignRowId)
 
-    const creative = await createAdCreative({
-      accessToken,
-      adAccountId: config.ad_account_id,
-      name: `${row.name} — creative`,
-      pageId: row.page_id,
-      message: row.primary_text,
-      imageHash,
-    })
+    // Creative shape branches on ad_format — see client.ts's module
+    // comments for how each format's schema was ground-truth verified.
+    const adFormat: 'image' | 'video' | 'carousel' = row.ad_format ?? 'image'
+    let creative: { id: string }
+    if (adFormat === 'video') {
+      if (!row.video_url) throw new Error('Video format selected but no video was uploaded')
+      const { videoId } = await uploadAdVideoFromUrl({
+        accessToken,
+        adAccountId: config.ad_account_id,
+        videoUrl: row.video_url,
+        title: row.name,
+      })
+      const thumbnailUrl = await waitForVideoReady({ accessToken, videoId })
+      creative = await createVideoAdCreative({
+        accessToken,
+        adAccountId: config.ad_account_id,
+        name: `${row.name} — creative`,
+        pageId: row.page_id,
+        videoId,
+        thumbnailUrl,
+        message: row.primary_text,
+      })
+    } else if (adFormat === 'carousel') {
+      const cards = (row.carousel_cards ?? []) as Array<{ image_url: string; headline: string; description?: string }>
+      if (cards.length < 2) throw new Error('Carousel format needs at least 2 cards')
+      const uploadedCards = await Promise.all(
+        cards.map(async (card) => {
+          const { hash } = await uploadAdImageFromUrl({
+            accessToken,
+            adAccountId: config.ad_account_id,
+            imageUrl: card.image_url,
+          })
+          return { imageHash: hash, headline: card.headline, description: card.description }
+        }),
+      )
+      creative = await createCarouselAdCreative({
+        accessToken,
+        adAccountId: config.ad_account_id,
+        name: `${row.name} — creative`,
+        pageId: row.page_id,
+        message: row.primary_text,
+        cards: uploadedCards,
+      })
+    } else {
+      let imageHash: string | undefined
+      if (row.image_url) {
+        const uploaded = await uploadAdImageFromUrl({
+          accessToken,
+          adAccountId: config.ad_account_id,
+          imageUrl: row.image_url,
+        })
+        imageHash = uploaded.hash
+      }
+      creative = await createAdCreative({
+        accessToken,
+        adAccountId: config.ad_account_id,
+        name: `${row.name} — creative`,
+        pageId: row.page_id,
+        message: row.primary_text,
+        imageHash,
+      })
+    }
     await db.from('meta_ad_campaigns').update({ meta_creative_id: creative.id }).eq('id', campaignRowId)
 
     const ad = await createAd({

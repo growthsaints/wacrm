@@ -6,11 +6,15 @@ import {
   createAdCreative,
   createAdSet,
   createCampaign,
+  createCarouselAdCreative,
   createCustomAudience,
+  createVideoAdCreative,
+  getVideoStatus,
   hashPhoneForCustomAudience,
   listPages,
   setCampaignDeliveryStatus,
   uploadAdImageFromUrl,
+  uploadAdVideoFromUrl,
   verifyAdAccount,
 } from './client'
 
@@ -386,5 +390,144 @@ describe('setCampaignDeliveryStatus', () => {
       }),
     ).rejects.toThrow('Ad account is restricted')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('uploadAdVideoFromUrl', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('form-encodes file_url and title, returning the video id', async () => {
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      expect(url).toContain('/advideos')
+      const body = init.body as URLSearchParams
+      expect(body.get('file_url')).toBe('https://example.com/clip.mp4')
+      expect(body.get('title')).toBe('My video')
+      return jsonResponse({ id: 'video-1' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await uploadAdVideoFromUrl({
+      accessToken: 'tok',
+      adAccountId: 'act_1',
+      videoUrl: 'https://example.com/clip.mp4',
+      title: 'My video',
+    })
+    expect(result.videoId).toBe('video-1')
+  })
+})
+
+describe('getVideoStatus', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('reports ready with a thumbnail once processing completes', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({ status: { video_status: 'ready' }, picture: 'https://example.com/thumb.jpg' }),
+      ),
+    )
+    const status = await getVideoStatus({ accessToken: 'tok', videoId: 'video-1' })
+    expect(status).toEqual({ ready: true, thumbnailUrl: 'https://example.com/thumb.jpg' })
+  })
+
+  it('reports not ready while still processing', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ status: { video_status: 'processing' } })))
+    const status = await getVideoStatus({ accessToken: 'tok', videoId: 'video-1' })
+    expect(status).toEqual({ ready: false, thumbnailUrl: null })
+  })
+})
+
+describe('createVideoAdCreative', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('builds video_data with the WhatsApp call_to_action', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string)
+      expect(body).toEqual({
+        name: 'Video creative',
+        object_story_spec: {
+          page_id: 'page-1',
+          video_data: {
+            video_id: 'video-1',
+            image_url: 'https://example.com/thumb.jpg',
+            message: 'Hello!',
+            call_to_action: { type: 'WHATSAPP_MESSAGE' },
+          },
+        },
+      })
+      return jsonResponse({ id: 'creative-video-1' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await createVideoAdCreative({
+      accessToken: 'tok',
+      adAccountId: 'act_1',
+      name: 'Video creative',
+      pageId: 'page-1',
+      videoId: 'video-1',
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+      message: 'Hello!',
+    })
+    expect(result.id).toBe('creative-video-1')
+  })
+})
+
+describe('createCarouselAdCreative', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('builds link_data.child_attachments matching the ground-truth schema', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string)
+      expect(body).toEqual({
+        name: 'Carousel creative',
+        object_story_spec: {
+          page_id: 'page-1',
+          link_data: {
+            message: 'Hello!',
+            link: 'https://wa.me/',
+            call_to_action: { type: 'WHATSAPP_MESSAGE' },
+            child_attachments: [
+              {
+                link: 'https://wa.me/',
+                image_hash: 'hash-1',
+                name: 'Card one',
+                description: 'First',
+                call_to_action: { type: 'WHATSAPP_MESSAGE' },
+              },
+              {
+                link: 'https://wa.me/',
+                image_hash: 'hash-2',
+                name: 'Card two',
+                description: '',
+                call_to_action: { type: 'WHATSAPP_MESSAGE' },
+              },
+            ],
+          },
+        },
+      })
+      return jsonResponse({ id: 'creative-carousel-1' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await createCarouselAdCreative({
+      accessToken: 'tok',
+      adAccountId: 'act_1',
+      name: 'Carousel creative',
+      pageId: 'page-1',
+      message: 'Hello!',
+      cards: [
+        { imageHash: 'hash-1', headline: 'Card one', description: 'First' },
+        { imageHash: 'hash-2', headline: 'Card two' },
+      ],
+    })
+    expect(result.id).toBe('creative-carousel-1')
   })
 })

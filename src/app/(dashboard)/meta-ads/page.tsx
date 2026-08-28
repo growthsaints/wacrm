@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
-import { uploadAccountMedia } from '@/lib/storage/upload-media';
+import { MEDIA_MAX_BYTES_BY_KIND, uploadAccountMedia } from '@/lib/storage/upload-media';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -87,6 +87,14 @@ function emptyAudienceDraft(): AudienceDraftState {
   return { name: '', type: 'all', tagIds: [], customFieldId: '', customFieldOperator: 'is', customFieldValue: '' };
 }
 
+type AdFormat = 'image' | 'video' | 'carousel';
+
+interface CarouselCardDraft {
+  imageUrl: string;
+  headline: string;
+  description: string;
+}
+
 interface CampaignDraftState {
   name: string;
   pageId: string;
@@ -94,11 +102,28 @@ interface CampaignDraftState {
   customAudienceId: string;
   dailyBudget: string;
   primaryText: string;
+  adFormat: AdFormat;
   imageUrl: string;
+  videoUrl: string;
+  carouselCards: CarouselCardDraft[];
 }
 
 function emptyCampaignDraft(): CampaignDraftState {
-  return { name: '', pageId: '', pageName: '', customAudienceId: '', dailyBudget: '', primaryText: '', imageUrl: '' };
+  return {
+    name: '',
+    pageId: '',
+    pageName: '',
+    customAudienceId: '',
+    dailyBudget: '',
+    primaryText: '',
+    adFormat: 'image',
+    imageUrl: '',
+    videoUrl: '',
+    carouselCards: [
+      { imageUrl: '', headline: '', description: '' },
+      { imageUrl: '', headline: '', description: '' },
+    ],
+  };
 }
 
 export default function MetaAdsPage() {
@@ -119,6 +144,10 @@ export default function MetaAdsPage() {
   const [savingCampaign, setSavingCampaign] = useState(false);
   const [uploadingImage, setUploadingImage] = useState(false);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
+  const videoInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingCardIndex, setUploadingCardIndex] = useState<number | null>(null);
+  const cardInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -276,6 +305,10 @@ export default function MetaAdsPage() {
       toast.error('Please choose an image file.');
       return;
     }
+    if (file.size > MEDIA_MAX_BYTES_BY_KIND.image) {
+      toast.error('Image is too large (max 5 MB).');
+      return;
+    }
     setUploadingImage(true);
     try {
       const { publicUrl } = await uploadAccountMedia('chat-media', file);
@@ -285,6 +318,68 @@ export default function MetaAdsPage() {
     } finally {
       setUploadingImage(false);
     }
+  }, []);
+
+  const handleCampaignVideo = useCallback(async (file: File) => {
+    if (!file.type.startsWith('video/')) {
+      toast.error('Please choose a video file.');
+      return;
+    }
+    if (file.size > MEDIA_MAX_BYTES_BY_KIND.video) {
+      toast.error('Video is too large (max 16 MB).');
+      return;
+    }
+    setUploadingVideo(true);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      setCampaignDraft((d) => (d ? { ...d, videoUrl: publicUrl } : d));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't upload the video.");
+    } finally {
+      setUploadingVideo(false);
+    }
+  }, []);
+
+  const handleCarouselCardImage = useCallback(async (index: number, file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file.');
+      return;
+    }
+    if (file.size > MEDIA_MAX_BYTES_BY_KIND.image) {
+      toast.error('Image is too large (max 5 MB).');
+      return;
+    }
+    setUploadingCardIndex(index);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      setCampaignDraft((d) => {
+        if (!d) return d;
+        const carouselCards = d.carouselCards.map((card, i) => (i === index ? { ...card, imageUrl: publicUrl } : card));
+        return { ...d, carouselCards };
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't upload the image.");
+    } finally {
+      setUploadingCardIndex(null);
+    }
+  }, []);
+
+  const updateCarouselCard = useCallback((index: number, patch: Partial<CarouselCardDraft>) => {
+    setCampaignDraft((d) => {
+      if (!d) return d;
+      const carouselCards = d.carouselCards.map((card, i) => (i === index ? { ...card, ...patch } : card));
+      return { ...d, carouselCards };
+    });
+  }, []);
+
+  const addCarouselCard = useCallback(() => {
+    setCampaignDraft((d) =>
+      d ? { ...d, carouselCards: [...d.carouselCards, { imageUrl: '', headline: '', description: '' }] } : d,
+    );
+  }, []);
+
+  const removeCarouselCard = useCallback((index: number) => {
+    setCampaignDraft((d) => (d ? { ...d, carouselCards: d.carouselCards.filter((_, i) => i !== index) } : d));
   }, []);
 
   const saveCampaign = useCallback(async () => {
@@ -301,9 +396,20 @@ export default function MetaAdsPage() {
       toast.error('Write the ad text.');
       return;
     }
-    if (!campaignDraft.imageUrl) {
+    if (campaignDraft.adFormat === 'image' && !campaignDraft.imageUrl) {
       toast.error('Add an image — Meta requires one for this ad format.');
       return;
+    }
+    if (campaignDraft.adFormat === 'video' && !campaignDraft.videoUrl) {
+      toast.error('Upload a video.');
+      return;
+    }
+    if (campaignDraft.adFormat === 'carousel') {
+      const validCards = campaignDraft.carouselCards.filter((c) => c.imageUrl && c.headline.trim());
+      if (validCards.length < 2) {
+        toast.error('Add at least 2 carousel cards, each with an image and headline.');
+        return;
+      }
     }
     const dailyBudget = Number(campaignDraft.dailyBudget);
     if (!Number.isFinite(dailyBudget) || dailyBudget <= 0) {
@@ -323,7 +429,15 @@ export default function MetaAdsPage() {
           custom_audience_id: campaignDraft.customAudienceId || undefined,
           daily_budget: dailyBudget,
           primary_text: campaignDraft.primaryText.trim(),
-          image_url: campaignDraft.imageUrl,
+          ad_format: campaignDraft.adFormat,
+          image_url: campaignDraft.adFormat === 'image' ? campaignDraft.imageUrl : undefined,
+          video_url: campaignDraft.adFormat === 'video' ? campaignDraft.videoUrl : undefined,
+          carousel_cards:
+            campaignDraft.adFormat === 'carousel'
+              ? campaignDraft.carouselCards
+                  .filter((c) => c.imageUrl && c.headline.trim())
+                  .map((c) => ({ image_url: c.imageUrl, headline: c.headline.trim(), description: c.description.trim() || undefined }))
+              : undefined,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -807,30 +921,146 @@ export default function MetaAdsPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Image — Meta requires one for this ad format</label>
-                <input
-                  ref={imageInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void handleCampaignImage(f);
-                    e.target.value = '';
-                  }}
-                />
-                <Button type="button" variant="outline" size="sm" disabled={uploadingImage} onClick={() => imageInputRef.current?.click()}>
-                  {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                  Upload image
-                </Button>
-                {campaignDraft.imageUrl && (
-                  <div className="mt-2 flex items-center gap-2">
-                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={campaignDraft.imageUrl} alt="Ad preview" className="h-16 rounded-md border border-border object-cover" />
-                  </div>
-                )}
+                <label className="mb-1 block text-xs text-muted-foreground">Ad format</label>
+                <div className="flex gap-2">
+                  {(['image', 'video', 'carousel'] as const).map((format) => (
+                    <Button
+                      key={format}
+                      type="button"
+                      size="sm"
+                      variant={campaignDraft.adFormat === format ? 'default' : 'outline'}
+                      onClick={() => setCampaignDraft({ ...campaignDraft, adFormat: format })}
+                      className="capitalize"
+                    >
+                      {format}
+                    </Button>
+                  ))}
+                </div>
               </div>
+
+              {campaignDraft.adFormat === 'image' && (
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">Image — Meta requires one for this ad format</label>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleCampaignImage(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button type="button" variant="outline" size="sm" disabled={uploadingImage} onClick={() => imageInputRef.current?.click()}>
+                    {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                    Upload image
+                  </Button>
+                  {campaignDraft.imageUrl && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={campaignDraft.imageUrl} alt="Ad preview" className="h-16 rounded-md border border-border object-cover" />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {campaignDraft.adFormat === 'video' && (
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">Video (max 16 MB) — Meta processes it after upload, so launching may take a minute</label>
+                  <input
+                    ref={videoInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void handleCampaignVideo(f);
+                      e.target.value = '';
+                    }}
+                  />
+                  <Button type="button" variant="outline" size="sm" disabled={uploadingVideo} onClick={() => videoInputRef.current?.click()}>
+                    {uploadingVideo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                    Upload video
+                  </Button>
+                  {campaignDraft.videoUrl && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <video src={campaignDraft.videoUrl} className="h-16 rounded-md border border-border object-cover" muted />
+                      <span className="text-xs text-muted-foreground">Video uploaded</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {campaignDraft.adFormat === 'carousel' && (
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">Carousel cards (at least 2, each with an image and headline)</label>
+                  <div className="flex flex-col gap-3">
+                    {campaignDraft.carouselCards.map((card, index) => (
+                      <div key={index} className="rounded-md border border-border p-2">
+                        <div className="mb-2 flex items-center justify-between">
+                          <span className="text-xs font-medium text-muted-foreground">Card {index + 1}</span>
+                          {campaignDraft.carouselCards.length > 2 && (
+                            <Button type="button" variant="ghost" size="icon" onClick={() => removeCarouselCard(index)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          )}
+                        </div>
+                        <input
+                          ref={(el) => {
+                            cardInputRefs.current[index] = el;
+                          }}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) void handleCarouselCardImage(index, f);
+                            e.target.value = '';
+                          }}
+                        />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={uploadingCardIndex === index}
+                            onClick={() => cardInputRefs.current[index]?.click()}
+                          >
+                            {uploadingCardIndex === index ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Upload className="h-3.5 w-3.5" />
+                            )}
+                            Upload image
+                          </Button>
+                          {card.imageUrl && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={card.imageUrl} alt="" className="h-10 w-10 rounded-md border border-border object-cover" />
+                          )}
+                        </div>
+                        <Input
+                          className="mt-2 bg-muted text-foreground"
+                          placeholder="Headline"
+                          value={card.headline}
+                          onChange={(e) => updateCarouselCard(index, { headline: e.target.value })}
+                        />
+                        <Input
+                          className="mt-2 bg-muted text-foreground"
+                          placeholder="Description (optional)"
+                          value={card.description}
+                          onChange={(e) => updateCarouselCard(index, { description: e.target.value })}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <Button type="button" variant="outline" size="sm" className="mt-2" onClick={addCarouselCard}>
+                    <Plus className="mr-1 h-3.5 w-3.5" />
+                    Add card
+                  </Button>
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
