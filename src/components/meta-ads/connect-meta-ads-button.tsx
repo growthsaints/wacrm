@@ -56,6 +56,51 @@ export function ConnectMetaAdsButton({ onConnected }: { onConnected: () => void 
     popupWindowRef.current = null;
   }, []);
 
+  // Split out from handleConnect because the FB SDK validates its login
+  // callback with something like `typeof cb === 'function'` and throws
+  // "Expression is of type asyncfunction, not function" synchronously
+  // (before ever opening the popup) if handed an `async` function
+  // directly — this must stay a plain function that fires an async
+  // helper without awaiting it.
+  function finishConnect(response: { authResponse?: { code?: string } | null }) {
+    stopPolling();
+    const code = response.authResponse?.code;
+    if (!code) {
+      toast('Connection cancelled.');
+      setConnecting(false);
+      return;
+    }
+    completingRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch('/api/meta-ads/oauth/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error ?? "Couldn't connect the ad account.");
+          return;
+        }
+        const name = data.config?.connected_name ?? 'your ad account';
+        if (data.totalAdAccounts > 1) {
+          toast.success(`Connected "${name}" — you administer ${data.totalAdAccounts} ad accounts; this was picked automatically. Use the manual field below to switch to a different one.`, {
+            duration: 10000,
+          });
+        } else {
+          toast.success(`Connected "${name}".`);
+        }
+        onConnected();
+      } catch {
+        toast.error('Network error connecting the ad account.');
+      } finally {
+        setConnecting(false);
+        completingRef.current = false;
+      }
+    })();
+  }
+
   function handleConnect() {
     if (!window.FB || !appId || !configId) return;
     setConnecting(true);
@@ -70,55 +115,12 @@ export function ConnectMetaAdsButton({ onConnected }: { onConnected: () => void 
       return popup;
     };
 
-    window.FB.login(
-      async (response) => {
-        stopPolling();
-        const code = response.authResponse?.code;
-        if (!code) {
-          toast('Connection cancelled.');
-          setConnecting(false);
-          return;
-        }
-        completingRef.current = true;
-        try {
-          const res = await fetch('/api/meta-ads/oauth/complete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code }),
-          });
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            toast.error(data.error ?? "Couldn't connect the ad account.");
-            return;
-          }
-          const name = data.config?.connected_name ?? 'your ad account';
-          if (data.totalAdAccounts > 1) {
-            toast.success(`Connected "${name}" — you administer ${data.totalAdAccounts} ad accounts; this was picked automatically. Use the manual field below to switch to a different one.`, {
-              duration: 10000,
-            });
-          } else {
-            toast.success(`Connected "${name}".`);
-          }
-          onConnected();
-        } catch {
-          toast.error('Network error connecting the ad account.');
-        } finally {
-          setConnecting(false);
-          completingRef.current = false;
-        }
-      },
-      {
-        config_id: configId,
-        response_type: 'code',
-        override_default_response_type: true,
-      },
-    );
-
     // If a popup blocker silently ate the window, window.open's return
     // value is null/undefined rather than a Window that later becomes
     // `.closed` — the interval below would never catch that, so this
     // one-shot check after FB.login has had time to open it separately
-    // resets the button with an actionable message.
+    // resets the button with an actionable message. Also the backstop
+    // if FB.login itself throws synchronously for any reason.
     setTimeout(() => {
       if (!completingRef.current && !popupWindowRef.current) {
         stopPolling();
@@ -126,6 +128,19 @@ export function ConnectMetaAdsButton({ onConnected }: { onConnected: () => void 
         toast.error('Facebook login popup was blocked — allow popups for this site and try again.');
       }
     }, 1500);
+
+    try {
+      window.FB.login(finishConnect, {
+        config_id: configId,
+        response_type: 'code',
+        override_default_response_type: true,
+      });
+    } catch (err) {
+      window.open = originalWindowOpen;
+      setConnecting(false);
+      toast.error(err instanceof Error ? err.message : "Couldn't open the Facebook login popup.");
+      return;
+    }
 
     // Fallback for the rare case FB.login's own callback never fires
     // after the user manually closes the popup.
