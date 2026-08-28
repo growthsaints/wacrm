@@ -50,7 +50,7 @@ interface CampaignRow {
   daily_budget: number;
   currency: string;
   meta_campaign_id: string | null;
-  status: 'draft' | 'launching' | 'paused' | 'failed';
+  status: 'draft' | 'launching' | 'paused' | 'active' | 'failed';
   error_message: string | null;
 }
 
@@ -70,6 +70,7 @@ const CAMPAIGN_STATUS_STYLES: Record<CampaignRow['status'], string> = {
   draft: 'bg-slate-500/10 text-muted-foreground border-slate-500/20',
   launching: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   paused: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
@@ -340,6 +341,33 @@ export default function MetaAdsPage() {
     }
   }, [campaignDraft, load]);
 
+  const [togglingCampaignId, setTogglingCampaignId] = useState<string | null>(null);
+
+  const toggleCampaignStatus = useCallback(
+    async (id: string, nextStatus: 'active' | 'paused') => {
+      setTogglingCampaignId(id);
+      try {
+        const res = await fetch(`/api/meta-ads/campaigns/${id}/status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: nextStatus }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error ?? "Couldn't update the campaign status.");
+          return;
+        }
+        toast.success(nextStatus === 'active' ? 'Campaign activated on Meta.' : 'Campaign paused on Meta.');
+        await load();
+      } catch {
+        toast.error("Couldn't update the campaign status.");
+      } finally {
+        setTogglingCampaignId(null);
+      }
+    },
+    [load],
+  );
+
   const removeCampaign = useCallback(
     async (id: string) => {
       if (
@@ -488,6 +516,23 @@ export default function MetaAdsPage() {
                         {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
                       </p>
                     </div>
+                    {(row.status === 'paused' || row.status === 'active') && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        disabled={togglingCampaignId === row.id}
+                        onClick={() => toggleCampaignStatus(row.id, row.status === 'active' ? 'paused' : 'active')}
+                      >
+                        {togglingCampaignId === row.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : row.status === 'active' ? (
+                          'Pause'
+                        ) : (
+                          'Activate'
+                        )}
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" className="shrink-0" onClick={() => removeCampaign(row.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>

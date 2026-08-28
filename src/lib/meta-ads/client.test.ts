@@ -9,6 +9,7 @@ import {
   createCustomAudience,
   hashPhoneForCustomAudience,
   listPages,
+  setCampaignDeliveryStatus,
   uploadAdImageFromUrl,
   verifyAdAccount,
 } from './client'
@@ -336,5 +337,54 @@ describe('createAd', () => {
       name: 'Ad',
     })
     expect(result.id).toBe('ad-1')
+  })
+})
+
+describe('setCampaignDeliveryStatus', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('sets status on the campaign, ad set, and ad', async () => {
+    const calledUrls: string[] = []
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calledUrls.push(url)
+      const body = JSON.parse(init.body as string)
+      expect(body).toEqual({ status: 'ACTIVE' })
+      return jsonResponse({ success: true })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await setCampaignDeliveryStatus({
+      accessToken: 'tok',
+      campaignId: 'camp-1',
+      adSetId: 'adset-1',
+      adId: 'ad-1',
+      status: 'ACTIVE',
+    })
+
+    expect(calledUrls).toEqual([
+      `${'https://graph.facebook.com/v21.0'}/camp-1`,
+      `${'https://graph.facebook.com/v21.0'}/adset-1`,
+      `${'https://graph.facebook.com/v21.0'}/ad-1`,
+    ])
+  })
+
+  it("throws Meta's own error and stops on the first failure", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ error: { message: 'Ad account is restricted' } }, false, 403),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      setCampaignDeliveryStatus({
+        accessToken: 'tok',
+        campaignId: 'camp-1',
+        adSetId: 'adset-1',
+        adId: 'ad-1',
+        status: 'PAUSED',
+      }),
+    ).rejects.toThrow('Ad account is restricted')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

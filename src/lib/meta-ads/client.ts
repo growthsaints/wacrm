@@ -364,3 +364,32 @@ export async function createAd(args: {
   }
   return response.json()
 }
+
+/**
+ * Turns a launched campaign on or off — this is the "Activate" /
+ * "Pause" button in wacrm's own UI, so it never has to send someone
+ * back out to Ads Manager just to flip delivery on. Meta requires the
+ * campaign, ad set, AND ad to all be ACTIVE for delivery to actually
+ * happen, so activating sets status on all three; pausing only needs
+ * one, but all three are set for symmetry (so the objects agree with
+ * each other if inspected individually in Ads Manager).
+ */
+export async function setCampaignDeliveryStatus(args: {
+  accessToken: string
+  campaignId: string
+  adSetId: string
+  adId: string
+  status: 'ACTIVE' | 'PAUSED'
+}): Promise<void> {
+  const { accessToken, campaignId, adSetId, adId, status } = args
+  for (const objectId of [campaignId, adSetId, adId]) {
+    const response = await fetch(`${META_API_BASE}/${objectId}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    })
+    if (!response.ok) {
+      await throwMetaError(response, `Meta API error: ${response.status}`)
+    }
+  }
+}
