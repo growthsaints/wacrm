@@ -217,6 +217,10 @@ export async function createCampaign(args: {
       objective: 'OUTCOME_ENGAGEMENT',
       status: 'PAUSED',
       special_ad_categories: [],
+      // Budget lives on the ad set (see createAdSet), not the campaign, so
+      // Meta requires this to be explicit — (#4834011) "Must specify True
+      // or False in is_adset_budget_sharing_enabled field" otherwise.
+      is_adset_budget_sharing_enabled: false,
     }),
   })
   if (!response.ok) {

@@ -199,6 +199,7 @@ describe('createCampaign', () => {
         objective: 'OUTCOME_ENGAGEMENT',
         status: 'PAUSED',
         special_ad_categories: [],
+        is_adset_budget_sharing_enabled: false,
       })
       return jsonResponse({ id: 'camp-1' })
     })
