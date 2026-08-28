@@ -18,6 +18,7 @@ import {
   isTemplateWebhookField,
 } from '@/lib/whatsapp/template-webhook'
 import { handleQualityRatingChange } from '@/lib/whatsapp/quality-alert'
+import { recheckAccountAlert } from '@/lib/whatsapp/account-alert-recheck'
 
 // The `after()` callback in POST runs within this route's max duration.
 // Inbound processing can fan out to per-media Meta verification calls, so
@@ -290,6 +291,18 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         // this payload's own quality value.
         if (change.field === 'phone_number_quality_update' && accountId) {
           await handleQualityRatingChange(supabaseAdmin(), accountId)
+        }
+
+        // Real-time auto-clear for the account alert banner: any
+        // account-level event (not just this one) is a reasonable
+        // moment to re-verify, since it means Meta is actively talking
+        // to us about this number again. recheckAccountAlert no-ops
+        // (skips the Graph API call) unless the account actually has
+        // an unresolved flagged row. api/whatsapp/account-alerts/recheck
+        // is the periodic backstop for a restriction that lifts with
+        // no further webhook from Meta at all.
+        if (accountId) {
+          await recheckAccountAlert(supabaseAdmin(), accountId)
         }
       }
 
