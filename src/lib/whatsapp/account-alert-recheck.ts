@@ -21,7 +21,7 @@ import { verifyPhoneNumber } from '@/lib/whatsapp/meta-api'
  *
  * Called two ways: in real time from the webhook handler right after
  * any account-level event is logged (api/whatsapp/webhook/route.ts),
- * and from a periodic cron (api/whatsapp/account-alerts/recheck) that
+ * and from a periodic cron (api/whatsapp-account-alerts/recheck) that
  * catches an account whose restriction lifted with no further webhook
  * from Meta at all.
  */

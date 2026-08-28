@@ -298,7 +298,7 @@ async function processWebhook(body: { entry?: WhatsAppWebhookEntry[] }) {
         // moment to re-verify, since it means Meta is actively talking
         // to us about this number again. recheckAccountAlert no-ops
         // (skips the Graph API call) unless the account actually has
-        // an unresolved flagged row. api/whatsapp/account-alerts/recheck
+        // an unresolved flagged row. api/whatsapp-account-alerts/recheck
         // is the periodic backstop for a restriction that lifts with
         // no further webhook from Meta at all.
         if (accountId) {

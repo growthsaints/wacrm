@@ -16,6 +16,11 @@ import { recheckAccountAlert } from '@/lib/whatsapp/account-alert-recheck'
  * where a restriction lifts with no further webhook from Meta at all
  * (e.g. the customer fixed it directly in Meta Business Suite).
  *
+ * Deliberately NOT under /api/whatsapp/ — middleware.ts blocks every
+ * unauthenticated request under that prefix except the webhook path,
+ * which would 401 this cron before it ever reached the handler below
+ * (the x-cron-secret check here is a separate, second layer).
+ *
  * Auth: re-uses `AUTOMATION_CRON_SECRET` so operators only have one
  * secret to provision, same convention as flows/cron.
  */
