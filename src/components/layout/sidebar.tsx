@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   LifeBuoy,
   LogOut,
+  Megaphone,
   MessageSquare,
   Radio,
   Settings,
@@ -99,6 +100,12 @@ interface NavItem {
    * matching agent_feature_grants row (see useAuth's canAccessX).
    */
   requiredFeature?: "broadcasts" | "automations";
+  /**
+   * Hidden entirely for non-admins — unlike requiredFeature, there's
+   * no per-agent grant for this (real ad spend, not something to
+   * delegate the way a broadcast send might be).
+   */
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -111,6 +118,7 @@ const navItems: NavItem[] = [
   { href: "/automations", labelKey: "automations", icon: Zap, requiredFeature: "automations" },
   { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
+  { href: "/meta-ads", labelKey: "metaAds", icon: Megaphone, adminOnly: true, beta: true },
 ];
 
 const bottomNavItems = [
@@ -142,8 +150,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     signOut,
     canAccessBroadcasts,
     canAccessAutomations,
+    canEditSettings,
   } = useAuth();
   const visibleNavItems = navItems.filter((item) => {
+    if (item.adminOnly && !canEditSettings) return false;
     if (item.requiredFeature === "broadcasts") return canAccessBroadcasts;
     if (item.requiredFeature === "automations") return canAccessAutomations;
     return true;
