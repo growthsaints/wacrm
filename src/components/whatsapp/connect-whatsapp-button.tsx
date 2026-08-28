@@ -23,31 +23,6 @@ function celebrateWabaLive() {
   confetti({ particleCount: 60, angle: 120, spread: 55, origin: { x: 1, y: 0.7 }, colors });
 }
 
-// Minimal ambient shape for the Facebook JS SDK — we only use the two
-// calls Embedded Signup needs, not the full SDK surface.
-declare global {
-  interface Window {
-    FB?: {
-      init: (params: {
-        appId: string;
-        autoLogAppEvents?: boolean;
-        xfbml?: boolean;
-        version: string;
-      }) => void;
-      login: (
-        callback: (response: { authResponse?: { code?: string } | null }) => void,
-        options: {
-          config_id: string;
-          response_type: 'code';
-          override_default_response_type: true;
-          extras?: Record<string, unknown>;
-        },
-      ) => void;
-    };
-    fbAsyncInit?: () => void;
-  }
-}
-
 // Meta's WhatsApp Embedded Signup posts progress/result to the parent
 // window via `message` events shaped like:
 //   { type: 'WA_EMBEDDED_SIGNUP', event: 'FINISH' | 'CANCEL' | 'ERROR',

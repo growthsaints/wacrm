@@ -80,6 +80,22 @@ export async function verifyAdAccount(args: {
 }
 
 /**
+ * Ad accounts the OAuth'd user administers — backs the "Connect with
+ * Facebook" flow (see api/meta-ads/oauth/complete/route.ts), so wacrm
+ * can pick one automatically instead of asking the admin to go find
+ * and paste an Ad Account ID by hand.
+ */
+export async function listAdAccounts(accessToken: string): Promise<MetaAdAccountInfo[]> {
+  const url = `${META_API_BASE}/me/adaccounts?fields=id,name,account_status,currency&limit=200`
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as { data?: MetaAdAccountInfo[] }
+  return data.data ?? []
+}
+
+/**
  * Meta's required normalization for a PHONE-schema Custom Audience
  * match key: digits only (country code included, no leading '+' or
  * delimiters), then SHA-256 hex digest. `normalizePhone` already

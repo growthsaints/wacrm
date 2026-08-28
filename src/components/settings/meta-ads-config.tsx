@@ -1,13 +1,19 @@
 'use client';
 
 // ============================================================
-// Settings → Meta Ads — connect a Meta Ad Account via a System User
-// access token (see migration 086's header comment for why this is a
-// paste-a-token form rather than an OAuth "Connect" button: Advanced
-// Access for third-party ad accounts needs an App Review this app
-// doesn't have yet — a manually-generated System User token works
-// today for any ad account willing to add this app as a Business
-// partner). Same BYO-credential pattern as httpSMS/AI config.
+// Settings → Meta Ads — connect a Meta Ad Account either via
+// "Connect with Facebook" (OAuth, self-serve — see
+// components/meta-ads/connect-meta-ads-button.tsx and
+// api/meta-ads/oauth/complete/route.ts) or by pasting a System User
+// access token generated manually. Both paths store the same thing
+// (an encrypted token + ad_account_id) — OAuth just automates
+// generating and verifying it. The OAuth button only shows once
+// NEXT_PUBLIC_META_ADS_CONFIG_ID is set (see .env.local.example); it
+// requires Meta App Review (Advanced Access) to work for ad accounts
+// outside this Meta App's own admins/testers — until then, or for any
+// admin who'd rather not grant wacrm's Meta App OAuth access at all,
+// the manual field below always works (same BYO-credential pattern as
+// httpSMS/AI config).
 // ============================================================
 
 import { useCallback, useEffect, useState } from 'react';
@@ -16,6 +22,7 @@ import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ConnectMetaAdsButton } from '@/components/meta-ads/connect-meta-ads-button';
 import { SettingsPanelHead } from './settings-panel-head';
 
 interface MetaAdsConfigRow {
@@ -124,6 +131,11 @@ export function MetaAdsConfig() {
         </div>
       ) : (
         <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+          <ConnectMetaAdsButton onConnected={load} />
+          <div className="relative py-1 text-center text-[11px] text-muted-foreground">
+            <span className="relative bg-card px-2">or connect manually</span>
+            <div className="absolute inset-x-0 top-1/2 -z-10 h-px bg-border" />
+          </div>
           <div>
             <label className="mb-1 block text-xs text-muted-foreground">Ad Account ID</label>
             <Input
