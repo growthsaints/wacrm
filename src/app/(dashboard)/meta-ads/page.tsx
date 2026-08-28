@@ -1,23 +1,25 @@
 'use client';
 
 // ============================================================
-// Meta Ads — Custom Audiences built from CRM contact segments, for
-// retargeting via Facebook/Instagram (Click-to-WhatsApp) ads.
-// Campaign creation/launch isn't here yet — see lib/meta-ads/client.ts's
-// header comment for why (Meta's current campaign schema for a
-// WhatsApp-destination ad couldn't be confirmed against live docs from
-// this environment, and guessing it risks real ad spend).
+// Meta Ads — Custom Audiences built from CRM contact segments, and
+// launching a Click-to-WhatsApp campaign targeting them. Every
+// campaign this page creates lands PAUSED on Meta — see
+// lib/meta-ads/client.ts's header comment for why (one field in the
+// ad creative schema isn't independently ground-truth confirmed);
+// review it in Ads Manager and activate manually when ready.
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Loader2, Megaphone, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { ImageIcon, Loader2, Megaphone, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/hooks/use-auth';
 import { createClient } from '@/lib/supabase/client';
+import { uploadAccountMedia } from '@/lib/storage/upload-media';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -41,14 +43,37 @@ interface AudienceRow {
   created_at: string;
 }
 
-const STATUS_STYLES: Record<AudienceRow['status'], string> = {
+interface CampaignRow {
+  id: string;
+  name: string;
+  page_name: string | null;
+  daily_budget: number;
+  currency: string;
+  meta_campaign_id: string | null;
+  status: 'draft' | 'launching' | 'paused' | 'failed';
+  error_message: string | null;
+}
+
+interface MetaPageOption {
+  id: string;
+  name: string;
+}
+
+const AUDIENCE_STATUS_STYLES: Record<AudienceRow['status'], string> = {
   pending: 'bg-slate-500/10 text-muted-foreground border-slate-500/20',
   creating: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   ready: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
-interface DraftState {
+const CAMPAIGN_STATUS_STYLES: Record<CampaignRow['status'], string> = {
+  draft: 'bg-slate-500/10 text-muted-foreground border-slate-500/20',
+  launching: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  paused: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  failed: 'bg-red-500/10 text-red-400 border-red-500/20',
+};
+
+interface AudienceDraftState {
   name: string;
   type: AudienceType;
   tagIds: string[];
@@ -57,33 +82,60 @@ interface DraftState {
   customFieldValue: string;
 }
 
-function emptyDraft(): DraftState {
+function emptyAudienceDraft(): AudienceDraftState {
   return { name: '', type: 'all', tagIds: [], customFieldId: '', customFieldOperator: 'is', customFieldValue: '' };
+}
+
+interface CampaignDraftState {
+  name: string;
+  pageId: string;
+  pageName: string;
+  customAudienceId: string;
+  dailyBudget: string;
+  primaryText: string;
+  imageUrl: string;
+}
+
+function emptyCampaignDraft(): CampaignDraftState {
+  return { name: '', pageId: '', pageName: '', customAudienceId: '', dailyBudget: '', primaryText: '', imageUrl: '' };
 }
 
 export default function MetaAdsPage() {
   const { canEditSettings } = useAuth();
   const [connected, setConnected] = useState<boolean | null>(null);
   const [audiences, setAudiences] = useState<AudienceRow[]>([]);
+  const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
+  const [pages, setPages] = useState<MetaPageOption[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [loading, setLoading] = useState(true);
-  const [draft, setDraft] = useState<DraftState | null>(null);
-  const [saving, setSaving] = useState(false);
+
+  const [audienceDraft, setAudienceDraft] = useState<AudienceDraftState | null>(null);
+  const [savingAudience, setSavingAudience] = useState(false);
+
+  const [campaignDraft, setCampaignDraft] = useState<CampaignDraftState | null>(null);
+  const [savingCampaign, setSavingCampaign] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [configRes, audiencesRes, supabase] = [
+      const [configRes, audiencesRes, campaignsRes, supabase] = [
         await fetch('/api/meta-ads/config', { cache: 'no-store' }),
         await fetch('/api/meta-ads/audiences', { cache: 'no-store' }),
+        await fetch('/api/meta-ads/campaigns', { cache: 'no-store' }),
         createClient(),
       ];
       const configData = await configRes.json().catch(() => ({}));
-      setConnected(configRes.ok ? Boolean(configData.config) : false);
+      const isConnected = configRes.ok ? Boolean(configData.config) : false;
+      setConnected(isConnected);
 
       const audiencesData = await audiencesRes.json().catch(() => ({}));
       if (audiencesRes.ok) setAudiences((audiencesData.audiences as AudienceRow[]) ?? []);
+
+      const campaignsData = await campaignsRes.json().catch(() => ({}));
+      if (campaignsRes.ok) setCampaigns((campaignsData.campaigns as CampaignRow[]) ?? []);
 
       const [{ data: tagRows }, { data: fieldRows }] = await Promise.all([
         supabase.from('tags').select('*').order('name'),
@@ -91,6 +143,12 @@ export default function MetaAdsPage() {
       ]);
       setTags(tagRows ?? []);
       setCustomFields(fieldRows ?? []);
+
+      if (isConnected) {
+        const pagesRes = await fetch('/api/meta-ads/pages', { cache: 'no-store' });
+        const pagesData = await pagesRes.json().catch(() => ({}));
+        if (pagesRes.ok) setPages((pagesData.pages as MetaPageOption[]) ?? []);
+      }
     } finally {
       setLoading(false);
     }
@@ -100,50 +158,56 @@ export default function MetaAdsPage() {
     void load();
   }, [load]);
 
-  // Polls while any audience is still 'creating' — the sync runs in
-  // the background (after()), so this is how the row's status catches
-  // up to 'ready'/'failed' without a manual refresh.
+  // Polls while an audience or campaign is still mid-flight — both
+  // sync in the background (after()), so this is how their status
+  // catches up without a manual refresh.
   useEffect(() => {
-    if (!audiences.some((a) => a.status === 'creating')) return;
+    const pending =
+      audiences.some((a) => a.status === 'creating') || campaigns.some((c) => c.status === 'launching');
+    if (!pending) return;
     const id = setInterval(() => void load(), 4000);
     return () => clearInterval(id);
-  }, [audiences, load]);
+  }, [audiences, campaigns, load]);
 
-  const save = useCallback(async () => {
-    if (!draft) return;
-    if (!draft.name.trim()) {
+  const readyAudiences = useMemo(() => audiences.filter((a) => a.status === 'ready'), [audiences]);
+
+  // ---- Audiences ----
+
+  const saveAudience = useCallback(async () => {
+    if (!audienceDraft) return;
+    if (!audienceDraft.name.trim()) {
       toast.error('Give the audience a name.');
       return;
     }
-    if (draft.type === 'tags' && draft.tagIds.length === 0) {
+    if (audienceDraft.type === 'tags' && audienceDraft.tagIds.length === 0) {
       toast.error('Pick at least one tag.');
       return;
     }
-    if (draft.type === 'custom_field' && (!draft.customFieldId || !draft.customFieldValue.trim())) {
+    if (audienceDraft.type === 'custom_field' && (!audienceDraft.customFieldId || !audienceDraft.customFieldValue.trim())) {
       toast.error('Pick a custom field and a value.');
       return;
     }
 
     const audience_filter =
-      draft.type === 'all'
+      audienceDraft.type === 'all'
         ? { type: 'all' as const }
-        : draft.type === 'tags'
-          ? { type: 'tags' as const, tagIds: draft.tagIds }
+        : audienceDraft.type === 'tags'
+          ? { type: 'tags' as const, tagIds: audienceDraft.tagIds }
           : {
               type: 'custom_field' as const,
               customField: {
-                fieldId: draft.customFieldId,
-                operator: draft.customFieldOperator,
-                value: draft.customFieldValue.trim(),
+                fieldId: audienceDraft.customFieldId,
+                operator: audienceDraft.customFieldOperator,
+                value: audienceDraft.customFieldValue.trim(),
               },
             };
 
-    setSaving(true);
+    setSavingAudience(true);
     try {
       const res = await fetch('/api/meta-ads/audiences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: draft.name.trim(), audience_filter }),
+        body: JSON.stringify({ name: audienceDraft.name.trim(), audience_filter }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -151,16 +215,16 @@ export default function MetaAdsPage() {
         return;
       }
       toast.success('Audience created — syncing to Meta now.');
-      setDraft(null);
+      setAudienceDraft(null);
       await load();
     } catch {
       toast.error("Couldn't create the audience.");
     } finally {
-      setSaving(false);
+      setSavingAudience(false);
     }
-  }, [draft, load]);
+  }, [audienceDraft, load]);
 
-  const resync = useCallback(
+  const resyncAudience = useCallback(
     async (id: string) => {
       const res = await fetch(`/api/meta-ads/audiences/${id}/resync`, { method: 'POST' });
       if (!res.ok) {
@@ -172,7 +236,7 @@ export default function MetaAdsPage() {
     [load],
   );
 
-  const remove = useCallback(
+  const removeAudience = useCallback(
     async (id: string) => {
       if (!window.confirm('Remove this audience from wacrm? It stays on Meta unless you also delete it in Ads Manager.'))
         return;
@@ -195,6 +259,74 @@ export default function MetaAdsPage() {
     [],
   );
 
+  // ---- Campaigns ----
+
+  const handleCampaignImage = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please choose an image file.');
+      return;
+    }
+    setUploadingImage(true);
+    try {
+      const { publicUrl } = await uploadAccountMedia('chat-media', file);
+      setCampaignDraft((d) => (d ? { ...d, imageUrl: publicUrl } : d));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't upload the image.");
+    } finally {
+      setUploadingImage(false);
+    }
+  }, []);
+
+  const saveCampaign = useCallback(async () => {
+    if (!campaignDraft) return;
+    if (!campaignDraft.name.trim()) {
+      toast.error('Give the campaign a name.');
+      return;
+    }
+    if (!campaignDraft.pageId) {
+      toast.error('Pick which Facebook Page (and its linked WhatsApp number) this ad should use.');
+      return;
+    }
+    if (!campaignDraft.primaryText.trim()) {
+      toast.error('Write the ad text.');
+      return;
+    }
+    const dailyBudget = Number(campaignDraft.dailyBudget);
+    if (!Number.isFinite(dailyBudget) || dailyBudget <= 0) {
+      toast.error('Enter a valid daily budget.');
+      return;
+    }
+
+    setSavingCampaign(true);
+    try {
+      const res = await fetch('/api/meta-ads/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: campaignDraft.name.trim(),
+          page_id: campaignDraft.pageId,
+          page_name: campaignDraft.pageName,
+          custom_audience_id: campaignDraft.customAudienceId || undefined,
+          daily_budget: dailyBudget,
+          primary_text: campaignDraft.primaryText.trim(),
+          image_url: campaignDraft.imageUrl || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Couldn't create the campaign.");
+        return;
+      }
+      toast.success('Campaign created — launching on Meta, PAUSED, now.');
+      setCampaignDraft(null);
+      await load();
+    } catch {
+      toast.error("Couldn't create the campaign.");
+    } finally {
+      setSavingCampaign(false);
+    }
+  }, [campaignDraft, load]);
+
   if (!canEditSettings) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
@@ -205,20 +337,14 @@ export default function MetaAdsPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Meta Ads</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Build Custom Audiences from your CRM contacts to retarget them with Facebook/Instagram ads.
-          </p>
-        </div>
-        {connected && (
-          <Button onClick={() => setDraft(emptyDraft())}>
-            <Plus className="mr-1 h-4 w-4" />
-            New audience
-          </Button>
-        )}
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">Meta Ads</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Build Custom Audiences from your CRM contacts and launch Click-to-WhatsApp campaigns targeting
+          them. New campaigns are always created <span className="font-medium text-foreground">paused</span>
+          — review and activate them in Meta Ads Manager.
+        </p>
       </div>
 
       {loading ? (
@@ -233,71 +359,120 @@ export default function MetaAdsPage() {
             Connect one in Settings → Meta Ads →
           </Link>
         </div>
-      ) : audiences.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-          No audiences yet. Create one from a contact segment to start retargeting on Meta.
-        </p>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {audiences.map((row) => (
-            <li key={row.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-              <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-foreground">{row.name}</span>
-                  <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[row.status]}`}>
-                    {row.status}
-                  </span>
-                </div>
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {audienceSummary(row)} · {row.contact_count.toLocaleString()} contacts
-                  {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
-                </p>
-              </div>
-              <div className="flex shrink-0 gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => resync(row.id)}
-                  disabled={row.status === 'creating'}
-                  title="Resync from CRM"
-                >
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => remove(row.id)}
-                  className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          {/* Audiences */}
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">Custom Audiences</h2>
+              <Button size="sm" onClick={() => setAudienceDraft(emptyAudienceDraft())}>
+                <Plus className="mr-1 h-4 w-4" />
+                New audience
+              </Button>
+            </div>
+            {audiences.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
+                No audiences yet. Create one from a contact segment to start retargeting on Meta.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {audiences.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                    <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-foreground">{row.name}</span>
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${AUDIENCE_STATUS_STYLES[row.status]}`}>
+                          {row.status}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {audienceSummary(row)} · {row.contact_count.toLocaleString()} contacts
+                        {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => resyncAudience(row.id)}
+                        disabled={row.status === 'creating'}
+                        title="Resync from CRM"
+                      >
+                        <RefreshCw className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => removeAudience(row.id)}
+                        className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {/* Campaigns */}
+          <div>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">Campaigns</h2>
+              <Button size="sm" onClick={() => setCampaignDraft(emptyCampaignDraft())} disabled={pages.length === 0}>
+                <Plus className="mr-1 h-4 w-4" />
+                New campaign
+              </Button>
+            </div>
+            {pages.length === 0 && (
+              <p className="mb-3 text-xs text-muted-foreground">
+                No Facebook Pages found for the connected token — a Page (with a WhatsApp number linked to
+                it in Business Manager) is required to launch a campaign.
+              </p>
+            )}
+            {campaigns.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border py-8 text-center text-sm text-muted-foreground">
+                No campaigns yet.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {campaigns.map((row) => (
+                  <li key={row.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
+                    <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-foreground">{row.name}</span>
+                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${CAMPAIGN_STATUS_STYLES[row.status]}`}>
+                          {row.status}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {row.page_name ?? 'Page'} · {row.currency} {row.daily_budget}/day
+                        {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
       )}
 
-      <div className="rounded-xl border border-dashed border-border bg-card/50 p-6 text-center">
-        <p className="text-sm font-medium text-foreground">Campaigns — coming soon</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Launching a Click-to-WhatsApp ad campaign directly from wacrm is next, once Meta&apos;s current
-          campaign schema is confirmed.
-        </p>
-      </div>
-
-      <Dialog open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
+      {/* New audience dialog */}
+      <Dialog open={!!audienceDraft} onOpenChange={(o) => !o && setAudienceDraft(null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>New audience</DialogTitle>
           </DialogHeader>
-          {draft && (
+          {audienceDraft && (
             <div className="space-y-4">
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Name</label>
                 <Input
-                  value={draft.name}
-                  onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                  value={audienceDraft.name}
+                  onChange={(e) => setAudienceDraft({ ...audienceDraft, name: e.target.value })}
                   placeholder="e.g. Repeat customers Q1"
                   className="bg-muted text-foreground"
                 />
@@ -310,9 +485,9 @@ export default function MetaAdsPage() {
                     <button
                       key={t}
                       type="button"
-                      onClick={() => setDraft({ ...draft, type: t })}
+                      onClick={() => setAudienceDraft({ ...audienceDraft, type: t })}
                       className={
-                        draft.type === t
+                        audienceDraft.type === t
                           ? 'flex-1 rounded-md border border-primary bg-primary/10 px-3 py-1.5 text-sm font-medium text-primary'
                           : 'flex-1 rounded-md border border-border bg-muted px-3 py-1.5 text-sm font-medium text-muted-foreground hover:text-foreground'
                       }
@@ -323,7 +498,7 @@ export default function MetaAdsPage() {
                 </div>
               </div>
 
-              {draft.type === 'tags' && (
+              {audienceDraft.type === 'tags' && (
                 <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-lg border border-border p-2">
                   {tags.length === 0 ? (
                     <p className="px-1 py-2 text-xs text-muted-foreground">No tags yet.</p>
@@ -332,13 +507,13 @@ export default function MetaAdsPage() {
                       <label key={tag.id} className="flex items-center gap-2 px-1 py-1 text-sm text-foreground">
                         <input
                           type="checkbox"
-                          checked={draft.tagIds.includes(tag.id)}
+                          checked={audienceDraft.tagIds.includes(tag.id)}
                           onChange={(e) =>
-                            setDraft({
-                              ...draft,
+                            setAudienceDraft({
+                              ...audienceDraft,
                               tagIds: e.target.checked
-                                ? [...draft.tagIds, tag.id]
-                                : draft.tagIds.filter((id) => id !== tag.id),
+                                ? [...audienceDraft.tagIds, tag.id]
+                                : audienceDraft.tagIds.filter((id) => id !== tag.id),
                             })
                           }
                         />
@@ -349,11 +524,11 @@ export default function MetaAdsPage() {
                 </div>
               )}
 
-              {draft.type === 'custom_field' && (
+              {audienceDraft.type === 'custom_field' && (
                 <div className="space-y-2 rounded-lg border border-border p-3">
                   <select
-                    value={draft.customFieldId}
-                    onChange={(e) => setDraft({ ...draft, customFieldId: e.target.value })}
+                    value={audienceDraft.customFieldId}
+                    onChange={(e) => setAudienceDraft({ ...audienceDraft, customFieldId: e.target.value })}
                     className="w-full rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm text-foreground"
                   >
                     <option value="">Select a field…</option>
@@ -365,8 +540,10 @@ export default function MetaAdsPage() {
                   </select>
                   <div className="flex gap-2">
                     <select
-                      value={draft.customFieldOperator}
-                      onChange={(e) => setDraft({ ...draft, customFieldOperator: e.target.value as CustomFieldOperator })}
+                      value={audienceDraft.customFieldOperator}
+                      onChange={(e) =>
+                        setAudienceDraft({ ...audienceDraft, customFieldOperator: e.target.value as CustomFieldOperator })
+                      }
                       className="rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm text-foreground"
                     >
                       <option value="is">is</option>
@@ -374,8 +551,8 @@ export default function MetaAdsPage() {
                       <option value="contains">contains</option>
                     </select>
                     <Input
-                      value={draft.customFieldValue}
-                      onChange={(e) => setDraft({ ...draft, customFieldValue: e.target.value })}
+                      value={audienceDraft.customFieldValue}
+                      onChange={(e) => setAudienceDraft({ ...audienceDraft, customFieldValue: e.target.value })}
                       placeholder="Value"
                       className="bg-muted text-foreground"
                     />
@@ -385,12 +562,128 @@ export default function MetaAdsPage() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDraft(null)} disabled={saving}>
+            <Button variant="outline" onClick={() => setAudienceDraft(null)} disabled={savingAudience}>
               Cancel
             </Button>
-            <Button onClick={save} disabled={saving}>
-              {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            <Button onClick={saveAudience} disabled={savingAudience}>
+              {savingAudience && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New campaign dialog */}
+      <Dialog open={!!campaignDraft} onOpenChange={(o) => !o && setCampaignDraft(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>New campaign (Click-to-WhatsApp)</DialogTitle>
+          </DialogHeader>
+          {campaignDraft && (
+            <div className="max-h-[70vh] space-y-4 overflow-y-auto">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Campaign name</label>
+                <Input
+                  value={campaignDraft.name}
+                  onChange={(e) => setCampaignDraft({ ...campaignDraft, name: e.target.value })}
+                  placeholder="e.g. Repeat customers — August"
+                  className="bg-muted text-foreground"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">
+                  Facebook Page (its linked WhatsApp number receives the chats)
+                </label>
+                <select
+                  value={campaignDraft.pageId}
+                  onChange={(e) => {
+                    const page = pages.find((p) => p.id === e.target.value);
+                    setCampaignDraft({ ...campaignDraft, pageId: e.target.value, pageName: page?.name ?? '' });
+                  }}
+                  className="w-full rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm text-foreground"
+                >
+                  <option value="">Select a Page…</option>
+                  {pages.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Audience (optional)</label>
+                <select
+                  value={campaignDraft.customAudienceId}
+                  onChange={(e) => setCampaignDraft({ ...campaignDraft, customAudienceId: e.target.value })}
+                  className="w-full rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm text-foreground"
+                >
+                  <option value="">No Custom Audience (broad targeting)</option>
+                  {readyAudiences.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} ({a.contact_count.toLocaleString()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Daily budget (₹)</label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={campaignDraft.dailyBudget}
+                  onChange={(e) => setCampaignDraft({ ...campaignDraft, dailyBudget: e.target.value })}
+                  placeholder="100"
+                  className="bg-muted text-foreground"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Ad text</label>
+                <Textarea
+                  value={campaignDraft.primaryText}
+                  onChange={(e) => setCampaignDraft({ ...campaignDraft, primaryText: e.target.value })}
+                  placeholder="What the ad says…"
+                  className="min-h-20 bg-muted text-foreground"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Image (optional)</label>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void handleCampaignImage(f);
+                    e.target.value = '';
+                  }}
+                />
+                <Button type="button" variant="outline" size="sm" disabled={uploadingImage} onClick={() => imageInputRef.current?.click()}>
+                  {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                  Upload image
+                </Button>
+                {campaignDraft.imageUrl && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <ImageIcon className="h-4 w-4 text-muted-foreground" />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={campaignDraft.imageUrl} alt="Ad preview" className="h-16 rounded-md border border-border object-cover" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCampaignDraft(null)} disabled={savingCampaign}>
+              Cancel
+            </Button>
+            <Button onClick={saveCampaign} disabled={savingCampaign}>
+              {savingCampaign && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              Create (paused)
             </Button>
           </DialogFooter>
         </DialogContent>
