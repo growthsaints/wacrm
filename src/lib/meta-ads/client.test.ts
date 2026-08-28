@@ -79,6 +79,30 @@ describe('verifyAdAccount', () => {
       'Invalid OAuth access token',
     )
   })
+
+  it("prefers Meta's end-user-facing error_user_msg/title over the generic message", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse(
+          {
+            error: {
+              message: 'Permissions error',
+              error_subcode: 1870090,
+              error_user_title: 'Custom audience terms not accepted',
+              error_user_msg: 'You must accept the terms at https://business.facebook.com/ads/manage/customaudiences/tos/?act=123',
+            },
+          },
+          false,
+          400,
+        ),
+      ),
+    )
+
+    await expect(verifyAdAccount({ accessToken: 'tok', adAccountId: '1' })).rejects.toThrow(
+      'Custom audience terms not accepted: You must accept the terms at https://business.facebook.com/ads/manage/customaudiences/tos/?act=123',
+    )
+  })
 })
 
 describe('createCustomAudience', () => {

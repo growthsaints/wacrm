@@ -29,14 +29,38 @@ import { normalizePhone } from '@/lib/whatsapp/phone-utils'
 const META_API_BASE = 'https://graph.facebook.com/v21.0'
 
 interface MetaErrorResponse {
-  error?: { message?: string; code?: number; type?: string; error_subcode?: number }
+  error?: {
+    message?: string
+    code?: number
+    type?: string
+    error_subcode?: number
+    /** Meta's own end-user-facing explanation — written for a business
+     *  owner, not a developer, and often includes a direct actionable
+     *  link (e.g. the exact Custom Audience Terms of Service URL for
+     *  the ad account that hit it: (#1870090) "Custom audience terms
+     *  not accepted"). Prefer this over `message` (which is terse and
+     *  developer-facing, e.g. just "Permissions error") whenever Meta
+     *  provides it, so every client sees a self-serve, actionable
+     *  reason instead of a generic error that only someone reading
+     *  server logs could decode.
+     */
+    error_user_msg?: string
+    error_user_title?: string
+  }
 }
 
 async function throwMetaError(response: Response, fallback: string): Promise<never> {
   let message = fallback
   try {
     const data = (await response.json()) as MetaErrorResponse
-    if (data.error?.message) message = data.error.message
+    const err = data.error
+    if (err?.error_user_title && err.error_user_msg) {
+      message = `${err.error_user_title}: ${err.error_user_msg}`
+    } else if (err?.error_user_msg) {
+      message = err.error_user_msg
+    } else if (err?.message) {
+      message = err.message
+    }
   } catch {
     // response body wasn't JSON — keep the fallback
   }
