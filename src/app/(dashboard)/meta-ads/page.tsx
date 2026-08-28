@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ImageIcon, Loader2, Megaphone, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { BarChart3, ImageIcon, Loader2, Megaphone, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '@/hooks/use-auth';
@@ -343,6 +343,37 @@ export default function MetaAdsPage() {
 
   const [togglingCampaignId, setTogglingCampaignId] = useState<string | null>(null);
 
+  const [insightsOpenId, setInsightsOpenId] = useState<string | null>(null);
+  const [insightsById, setInsightsById] = useState<
+    Record<string, { spend: number; reach: number; impressions: number; clicks: number } | 'loading' | 'error'>
+  >({});
+
+  const toggleInsights = useCallback(
+    async (id: string) => {
+      if (insightsOpenId === id) {
+        setInsightsOpenId(null);
+        return;
+      }
+      setInsightsOpenId(id);
+      if (insightsById[id] && insightsById[id] !== 'error') return;
+      setInsightsById((prev) => ({ ...prev, [id]: 'loading' }));
+      try {
+        const res = await fetch(`/api/meta-ads/campaigns/${id}/insights`, { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setInsightsById((prev) => ({ ...prev, [id]: 'error' }));
+          toast.error(data.error ?? "Couldn't load insights.");
+          return;
+        }
+        setInsightsById((prev) => ({ ...prev, [id]: data.insights }));
+      } catch {
+        setInsightsById((prev) => ({ ...prev, [id]: 'error' }));
+        toast.error("Couldn't load insights.");
+      }
+    },
+    [insightsOpenId, insightsById],
+  );
+
   const toggleCampaignStatus = useCallback(
     async (id: string, nextStatus: 'active' | 'paused') => {
       setTogglingCampaignId(id);
@@ -501,43 +532,84 @@ export default function MetaAdsPage() {
               </p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {campaigns.map((row) => (
-                  <li key={row.id} className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
-                    <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-foreground">{row.name}</span>
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${CAMPAIGN_STATUS_STYLES[row.status]}`}>
-                          {row.status}
-                        </span>
+                {campaigns.map((row) => {
+                  const insights = insightsById[row.id];
+                  return (
+                  <li key={row.id} className="rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-center gap-3">
+                      <Megaphone className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-medium text-foreground">{row.name}</span>
+                          <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${CAMPAIGN_STATUS_STYLES[row.status]}`}>
+                            {row.status}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                          {row.page_name ?? 'Page'} · {row.currency} {row.daily_budget}/day
+                          {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
+                        </p>
                       </div>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {row.page_name ?? 'Page'} · {row.currency} {row.daily_budget}/day
-                        {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
-                      </p>
-                    </div>
-                    {(row.status === 'paused' || row.status === 'active') && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0"
-                        disabled={togglingCampaignId === row.id}
-                        onClick={() => toggleCampaignStatus(row.id, row.status === 'active' ? 'paused' : 'active')}
-                      >
-                        {togglingCampaignId === row.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : row.status === 'active' ? (
-                          'Pause'
-                        ) : (
-                          'Activate'
-                        )}
+                      {(row.status === 'paused' || row.status === 'active') && (
+                        <>
+                          <Button variant="outline" size="sm" className="shrink-0" onClick={() => toggleInsights(row.id)}>
+                            <BarChart3 className="mr-1 h-3.5 w-3.5" />
+                            Insights
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            disabled={togglingCampaignId === row.id}
+                            onClick={() => toggleCampaignStatus(row.id, row.status === 'active' ? 'paused' : 'active')}
+                          >
+                            {togglingCampaignId === row.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : row.status === 'active' ? (
+                              'Pause'
+                            ) : (
+                              'Activate'
+                            )}
+                          </Button>
+                        </>
+                      )}
+                      <Button variant="ghost" size="icon" className="shrink-0" onClick={() => removeCampaign(row.id)}>
+                        <Trash2 className="h-4 w-4" />
                       </Button>
+                    </div>
+                    {insightsOpenId === row.id && (
+                      <div className="mt-3 border-t border-border pt-3">
+                        {insights === 'loading' || insights === undefined ? (
+                          <p className="text-xs text-muted-foreground">Loading insights…</p>
+                        ) : insights === 'error' ? (
+                          <p className="text-xs text-destructive">Couldn&apos;t load insights from Meta.</p>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div>
+                              <p className="text-xs text-muted-foreground">Spent</p>
+                              <p className="text-sm font-medium text-foreground">
+                                {row.currency} {insights.spend.toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">Reach</p>
+                              <p className="text-sm font-medium text-foreground">{insights.reach.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">Impressions</p>
+                              <p className="text-sm font-medium text-foreground">{insights.impressions.toLocaleString()}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-muted-foreground">Clicks</p>
+                              <p className="text-sm font-medium text-foreground">{insights.clicks.toLocaleString()}</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     )}
-                    <Button variant="ghost" size="icon" className="shrink-0" onClick={() => removeCampaign(row.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </div>

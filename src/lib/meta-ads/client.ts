@@ -393,3 +393,46 @@ export async function setCampaignDeliveryStatus(args: {
     }
   }
 }
+
+export interface MetaCampaignInsights {
+  spend: number
+  reach: number
+  impressions: number
+  clicks: number
+}
+
+/**
+ * Lifetime delivery stats for a campaign — the numbers wacrm's own
+ * dashboard shows instead of sending an admin back to Ads Manager to
+ * check reach/spend. `spend`/`reach`/`impressions`/`clicks` are
+ * long-stable, universally-documented Insights fields (unlike the
+ * exact `actions` action_type key for "conversations started", which
+ * this deliberately doesn't parse — no real delivery data existed
+ * yet to ground-truth verify that key against, and guessing it wrong
+ * would silently show a $0/0 metric that looks like a real answer).
+ * Meta returns an empty `data` array (not an error) for a campaign
+ * with no delivery yet — treated as all-zero stats, not a failure.
+ */
+export async function getCampaignInsights(args: {
+  accessToken: string
+  campaignId: string
+}): Promise<MetaCampaignInsights> {
+  const { accessToken, campaignId } = args
+  const url = new URL(`${META_API_BASE}/${campaignId}/insights`)
+  url.searchParams.set('fields', 'spend,reach,impressions,clicks')
+  url.searchParams.set('date_preset', 'maximum')
+  const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as {
+    data?: Array<{ spend?: string; reach?: string; impressions?: string; clicks?: string }>
+  }
+  const row = data.data?.[0]
+  return {
+    spend: Number(row?.spend ?? 0),
+    reach: Number(row?.reach ?? 0),
+    impressions: Number(row?.impressions ?? 0),
+    clicks: Number(row?.clicks ?? 0),
+  }
+}
