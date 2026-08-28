@@ -75,6 +75,18 @@ interface WhatsAppMessage {
   button?: { text: string; payload: string }
   /** Present when the customer swipe-replies to one of our messages. */
   context?: { id: string }
+  /**
+   * Present when this message is the customer's response to tapping a
+   * Click-to-WhatsApp ad's CTA — Meta's stable, documented
+   * WhatsApp Cloud API webhook field (distinct from the Marketing
+   * API's own less-stable surfaces). `source_id` is the ad's id.
+   */
+  referral?: {
+    source_id?: string
+    source_type?: string
+    headline?: string
+    body?: string
+  }
 }
 
 interface WhatsAppWebhookEntry {
@@ -756,6 +768,28 @@ async function processMessage(
   )
   if (!contactOutcome) return
   const contactRecord = contactOutcome.contact
+
+  // Ad attribution — first-touch only. `referral` is only present on
+  // the message that resulted from tapping a Click-to-WhatsApp ad; a
+  // contact with `ad_id` already set has already been attributed once,
+  // and we deliberately don't overwrite it on a later ad click.
+  if (message.referral?.source_id && !contactRecord.ad_id) {
+    const { error: attributionError } = await supabaseAdmin()
+      .from('contacts')
+      .update({
+        ad_id: message.referral.source_id,
+        ad_headline: message.referral.headline ?? null,
+        source: contactRecord.source === 'whatsapp_inbound' ? 'whatsapp_ad' : contactRecord.source,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', contactRecord.id)
+    if (attributionError) {
+      console.error('[webhook] failed to record ad attribution:', attributionError.message)
+    } else {
+      contactRecord.ad_id = message.referral.source_id
+      contactRecord.ad_headline = message.referral.headline ?? null
+    }
+  }
 
   // Find or create conversation
   const convResult = await findOrCreateConversation(

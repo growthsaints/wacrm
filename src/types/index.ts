@@ -113,12 +113,23 @@ export interface Contact {
    * migration 039 — rendered as "Unknown" rather than guessed.
    * Migration 039.
    */
-  source?: 'manual' | 'import' | 'api' | 'whatsapp_inbound' | null;
+  source?: 'manual' | 'import' | 'api' | 'whatsapp_inbound' | 'whatsapp_ad' | null;
   /**
    * Reserved for a future lead-scoring model. No scoring logic exists
    * yet — always null until that engine ships. Migration 039.
    */
   lead_score?: number | null;
+  /**
+   * Set from the WhatsApp webhook's `referral` object the first time
+   * this contact's inbound message came from tapping a Click-to-
+   * WhatsApp ad — `ad_id` is Meta's ad id (matches
+   * meta_ad_campaigns.meta_ad_id when the ad was launched from
+   * wacrm), `ad_headline` is the ad's own headline text as a
+   * human-readable fallback when it wasn't. Never overwritten once
+   * set, so it stays a first-touch record. Migration 089.
+   */
+  ad_id?: string | null;
+  ad_headline?: string | null;
   /**
    * True once the contact has opted out of marketing/broadcast
    * messages — either by replying STOP/UNSUBSCRIBE on WhatsApp, or via

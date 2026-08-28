@@ -50,6 +50,7 @@ import {
   History,
   Gauge,
   MessageSquare,
+  Megaphone,
 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { formatDistanceToNow } from 'date-fns';
@@ -627,6 +628,15 @@ export function ContactDetailView({
                       <span className="flex items-center gap-1">
                         <Building2 className="size-3" />
                         {contact.company}
+                      </span>
+                    )}
+                    {contact.ad_headline && (
+                      <span
+                        className="flex items-center gap-1"
+                        title="This contact's first message came from clicking a WhatsApp ad"
+                      >
+                        <Megaphone className="size-3" />
+                        {t('cameFromAd', { headline: contact.ad_headline })}
                       </span>
                     )}
                   </div>

@@ -444,6 +444,7 @@
       "phoneRequired": "Phone number is required"
     },
     "detailView": {
+      "cameFromAd": "From ad: {headline}",
       "tabs": {
         "details": "Details",
         "activity": "Activity",
