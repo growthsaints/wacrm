@@ -340,6 +340,24 @@ export default function MetaAdsPage() {
     }
   }, [campaignDraft, load]);
 
+  const removeCampaign = useCallback(
+    async (id: string) => {
+      if (
+        !window.confirm(
+          'Remove this campaign from wacrm? Any Campaign/Ad Set/Ad already created on Meta stays there (PAUSED) unless you also delete it in Ads Manager.',
+        )
+      )
+        return;
+      const res = await fetch(`/api/meta-ads/campaigns/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        toast.error("Couldn't remove the campaign.");
+        return;
+      }
+      await load();
+    },
+    [load],
+  );
+
   if (!canEditSettings) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
@@ -470,6 +488,9 @@ export default function MetaAdsPage() {
                         {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
                       </p>
                     </div>
+                    <Button variant="ghost" size="icon" className="shrink-0" onClick={() => removeCampaign(row.id)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </li>
                 ))}
               </ul>
