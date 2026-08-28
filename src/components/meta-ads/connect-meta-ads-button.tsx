@@ -17,7 +17,7 @@
 // since they request different permissions for a different purpose.
 // ============================================================
 
-import { useState, useSyncExternalStore } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore } from 'react';
 import Script from 'next/script';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -39,18 +39,47 @@ export function ConnectMetaAdsButton({ onConnected }: { onConnected: () => void 
   const configId = process.env.NEXT_PUBLIC_META_ADS_CONFIG_ID;
   const configured = Boolean(appId && configId);
 
+  // Belt-and-suspenders for a popup the user closes by hand, or one a
+  // popup blocker silently swallows — FB.login's own callback usually
+  // still fires even then, but not always (same rare gap
+  // ConnectWhatsAppButton defends against), which otherwise leaves
+  // `connecting` stuck true forever with no way back to an idle button.
+  const popupWindowRef = useRef<Window | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const completingRef = useRef(false);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current !== null) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    popupWindowRef.current = null;
+  }, []);
+
   function handleConnect() {
     if (!window.FB || !appId || !configId) return;
     setConnecting(true);
+    completingRef.current = false;
+    stopPolling();
+
+    const originalWindowOpen = window.open;
+    window.open = (...args: Parameters<typeof window.open>) => {
+      const popup = originalWindowOpen.apply(window, args);
+      popupWindowRef.current = popup;
+      window.open = originalWindowOpen;
+      return popup;
+    };
 
     window.FB.login(
       async (response) => {
+        stopPolling();
         const code = response.authResponse?.code;
         if (!code) {
           toast('Connection cancelled.');
           setConnecting(false);
           return;
         }
+        completingRef.current = true;
         try {
           const res = await fetch('/api/meta-ads/oauth/complete', {
             method: 'POST',
@@ -75,6 +104,7 @@ export function ConnectMetaAdsButton({ onConnected }: { onConnected: () => void 
           toast.error('Network error connecting the ad account.');
         } finally {
           setConnecting(false);
+          completingRef.current = false;
         }
       },
       {
@@ -83,6 +113,32 @@ export function ConnectMetaAdsButton({ onConnected }: { onConnected: () => void 
         override_default_response_type: true,
       },
     );
+
+    // If a popup blocker silently ate the window, window.open's return
+    // value is null/undefined rather than a Window that later becomes
+    // `.closed` — the interval below would never catch that, so this
+    // one-shot check after FB.login has had time to open it separately
+    // resets the button with an actionable message.
+    setTimeout(() => {
+      if (!completingRef.current && !popupWindowRef.current) {
+        stopPolling();
+        setConnecting(false);
+        toast.error('Facebook login popup was blocked — allow popups for this site and try again.');
+      }
+    }, 1500);
+
+    // Fallback for the rare case FB.login's own callback never fires
+    // after the user manually closes the popup.
+    pollTimerRef.current = setInterval(() => {
+      if (completingRef.current) {
+        stopPolling();
+        return;
+      }
+      if (popupWindowRef.current?.closed) {
+        stopPolling();
+        setConnecting(false);
+      }
+    }, 500);
   }
 
   if (!configured) {
