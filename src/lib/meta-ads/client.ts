@@ -232,6 +232,15 @@ export async function createCampaign(args: {
  * currency/market) since Meta's targeting object requires
  * geo_locations regardless of whether a Custom Audience narrows it
  * further.
+ *
+ * Placements are pinned to Facebook only rather than left on Meta's
+ * "Advantage+ / automatic placements" default, which pulls in
+ * Instagram — and fails outright ((#1815199) "Ad account does not
+ * have access to Instagram account") for any ad account with no
+ * Instagram account authorized. Facebook-only sidesteps that
+ * requirement entirely; it doesn't affect where the resulting chat
+ * lands (that's destination_type/promoted_object above, not
+ * placements — placements only control where the ad itself is shown).
  */
 export async function createAdSet(args: {
   accessToken: string
@@ -248,6 +257,7 @@ export async function createAdSet(args: {
 
   const targeting: Record<string, unknown> = {
     geo_locations: { countries: [countryCode] },
+    publisher_platforms: ['facebook'],
   }
   if (customAudienceId) {
     targeting.custom_audiences = [{ id: customAudienceId }]

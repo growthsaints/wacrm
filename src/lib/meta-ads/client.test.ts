@@ -224,7 +224,11 @@ describe('createAdSet', () => {
         billing_event: 'IMPRESSIONS',
         destination_type: 'WHATSAPP',
         promoted_object: { page_id: 'page-1' },
-        targeting: { geo_locations: { countries: ['IN'] }, custom_audiences: [{ id: 'aud-1' }] },
+        targeting: {
+          geo_locations: { countries: ['IN'] },
+          publisher_platforms: ['facebook'],
+          custom_audiences: [{ id: 'aud-1' }],
+        },
         daily_budget: 10000,
         status: 'PAUSED',
       })
@@ -247,7 +251,10 @@ describe('createAdSet', () => {
   it('omits custom_audiences when none is given', async () => {
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(init.body as string)
-      expect(body.targeting).toEqual({ geo_locations: { countries: ['IN'] } })
+      expect(body.targeting).toEqual({
+        geo_locations: { countries: ['IN'] },
+        publisher_platforms: ['facebook'],
+      })
       return jsonResponse({ id: 'adset-2' })
     })
     vi.stubGlobal('fetch', fetchMock)
