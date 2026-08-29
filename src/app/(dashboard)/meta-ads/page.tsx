@@ -74,6 +74,18 @@ const CAMPAIGN_STATUS_STYLES: Record<CampaignRow['status'], string> = {
   failed: 'bg-red-500/10 text-red-400 border-red-500/20',
 };
 
+// Meta's own ad-review outcome (effective_status) — a distinct concept
+// from CAMPAIGN_STATUS_STYLES above, which only ever reflects wacrm's
+// own launch steps succeeding, never Meta's asynchronous review.
+const REVIEW_STATUS_STYLES: Record<string, string> = {
+  ACTIVE: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  PAUSED: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  PENDING_REVIEW: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
+  DISAPPROVED: 'bg-red-500/10 text-red-400 border-red-500/20',
+  WITH_ISSUES: 'bg-red-500/10 text-red-400 border-red-500/20',
+  default: 'bg-slate-500/10 text-muted-foreground border-slate-500/20',
+};
+
 interface AudienceDraftState {
   name: string;
   type: AudienceType;
@@ -496,10 +508,15 @@ export default function MetaAdsPage() {
 
   const [togglingCampaignId, setTogglingCampaignId] = useState<string | null>(null);
 
+  interface InsightsData {
+    spend: number;
+    reach: number;
+    impressions: number;
+    clicks: number;
+    reviewStatus: { effectiveStatus: string; reviewFeedback: Record<string, unknown> | null } | null;
+  }
   const [insightsOpenId, setInsightsOpenId] = useState<string | null>(null);
-  const [insightsById, setInsightsById] = useState<
-    Record<string, { spend: number; reach: number; impressions: number; clicks: number } | 'loading' | 'error'>
-  >({});
+  const [insightsById, setInsightsById] = useState<Record<string, InsightsData | 'loading' | 'error'>>({});
 
   const toggleInsights = useCallback(
     async (id: string) => {
@@ -518,7 +535,7 @@ export default function MetaAdsPage() {
           toast.error(data.error ?? "Couldn't load insights.");
           return;
         }
-        setInsightsById((prev) => ({ ...prev, [id]: data.insights }));
+        setInsightsById((prev) => ({ ...prev, [id]: { ...data.insights, reviewStatus: data.reviewStatus ?? null } }));
       } catch {
         setInsightsById((prev) => ({ ...prev, [id]: 'error' }));
         toast.error("Couldn't load insights.");
@@ -747,26 +764,45 @@ export default function MetaAdsPage() {
                         ) : insights === 'error' ? (
                           <p className="text-xs text-destructive">Couldn&apos;t load insights from Meta.</p>
                         ) : (
-                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                            <div>
-                              <p className="text-xs text-muted-foreground">Spent</p>
-                              <p className="text-sm font-medium text-foreground">
-                                {row.currency} {insights.spend.toFixed(2)}
-                              </p>
+                          <>
+                            {insights.reviewStatus && (
+                              <div className="mb-3 flex flex-col gap-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-muted-foreground">Meta review:</span>
+                                  <span
+                                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${REVIEW_STATUS_STYLES[insights.reviewStatus.effectiveStatus] ?? REVIEW_STATUS_STYLES.default}`}
+                                  >
+                                    {insights.reviewStatus.effectiveStatus}
+                                  </span>
+                                </div>
+                                {insights.reviewStatus.reviewFeedback && (
+                                  <p className="break-words text-xs text-destructive">
+                                    {JSON.stringify(insights.reviewStatus.reviewFeedback)}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                              <div>
+                                <p className="text-xs text-muted-foreground">Spent</p>
+                                <p className="text-sm font-medium text-foreground">
+                                  {row.currency} {insights.spend.toFixed(2)}
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Reach</p>
+                                <p className="text-sm font-medium text-foreground">{insights.reach.toLocaleString()}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Impressions</p>
+                                <p className="text-sm font-medium text-foreground">{insights.impressions.toLocaleString()}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-muted-foreground">Clicks</p>
+                                <p className="text-sm font-medium text-foreground">{insights.clicks.toLocaleString()}</p>
+                              </div>
                             </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">Reach</p>
-                              <p className="text-sm font-medium text-foreground">{insights.reach.toLocaleString()}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">Impressions</p>
-                              <p className="text-sm font-medium text-foreground">{insights.impressions.toLocaleString()}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-muted-foreground">Clicks</p>
-                              <p className="text-sm font-medium text-foreground">{insights.clicks.toLocaleString()}</p>
-                            </div>
-                          </div>
+                          </>
                         )}
                       </div>
                     )}

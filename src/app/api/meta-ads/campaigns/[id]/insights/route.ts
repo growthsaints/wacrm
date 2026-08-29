@@ -1,16 +1,18 @@
 // ============================================================
 // GET /api/meta-ads/campaigns/{id}/insights — lifetime spend/reach/
-// impressions/clicks for a launched campaign, read from Meta on
-// demand (not cached/stored — always live). Any account member can
-// view (same viewer+ pattern as GET config/audiences/campaigns),
-// only admin+ can change anything.
+// impressions/clicks for a launched campaign, plus Meta's ad review
+// outcome (effective_status/ad_review_feedback) — read from Meta on
+// demand (not cached/stored — always live). Meta's own review runs
+// asynchronously after wacrm's launch steps succeed, so this is the
+// only way an admin finds out an ad was disapproved or flagged;
+// there's no webhook wired up for it.
 // ============================================================
 
 import { NextResponse } from 'next/server'
 
 import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/meta-ads/encryption'
-import { getCampaignInsights } from '@/lib/meta-ads/client'
+import { getAdReviewStatus, getCampaignInsights } from '@/lib/meta-ads/client'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -19,7 +21,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     const { data: row, error: rowError } = await supabase
       .from('meta_ad_campaigns')
-      .select('meta_ads_config_id, meta_campaign_id')
+      .select('meta_ads_config_id, meta_campaign_id, meta_ad_id')
       .eq('id', id)
       .eq('account_id', accountId)
       .maybeSingle()
@@ -48,7 +50,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     try {
       const insights = await getCampaignInsights({ accessToken, campaignId: row.meta_campaign_id })
-      return NextResponse.json({ insights })
+      // Review status is per-ad, not per-campaign — only fetched if the
+      // ad step actually finished. Failure here doesn't fail the whole
+      // request; insights are still useful without it.
+      let reviewStatus = null
+      if (row.meta_ad_id) {
+        try {
+          reviewStatus = await getAdReviewStatus({ accessToken, adId: row.meta_ad_id })
+        } catch (err) {
+          console.error('[meta-ads/insights] review status fetch failed:', err instanceof Error ? err.message : err)
+        }
+      }
+      return NextResponse.json({ insights, reviewStatus })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not load insights from Meta'
       return NextResponse.json({ error: message }, { status: 502 })

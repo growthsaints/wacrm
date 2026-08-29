@@ -484,6 +484,47 @@ export async function getCampaignInsights(args: {
   }
 }
 
+export interface AdReviewStatus {
+  /** ACTIVE, PAUSED, PENDING_REVIEW, DISAPPROVED, WITH_ISSUES, etc. —
+   *  ground-truth confirmed field name against a real ad in this
+   *  account (never guessed). Meta only actually runs its ad review
+   *  once an ad has been activated at least once; a never-activated
+   *  PAUSED ad reports its configured status here with no feedback. */
+  effectiveStatus: string
+  /** Present only once Meta's review has flagged something — shape
+   *  varies by rejection reason, so this is surfaced as-is (raw)
+   *  rather than parsed into a specific field, to avoid guessing a
+   *  structure with no rejected example to verify against. */
+  reviewFeedback: Record<string, unknown> | null
+}
+
+/**
+ * wacrm only ever sees the outcome of its OWN launch steps
+ * (campaign/ad set/creative/ad creation succeeding) — Meta's actual ad
+ * review (policy compliance, image guidelines, etc.) runs
+ * asynchronously afterward, entirely on Meta's side, and can approve,
+ * reject, or flag the ad well after wacrm already marked it 'paused'/
+ * 'active'. This is how an admin finds out — checked on demand
+ * alongside Insights, not polled continuously.
+ */
+export async function getAdReviewStatus(args: { accessToken: string; adId: string }): Promise<AdReviewStatus> {
+  const { accessToken, adId } = args
+  const url = new URL(`${META_API_BASE}/${adId}`)
+  url.searchParams.set('fields', 'effective_status,ad_review_feedback')
+  const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } })
+  if (!response.ok) {
+    await throwMetaError(response, `Meta API error: ${response.status}`)
+  }
+  const data = (await response.json()) as {
+    effective_status?: string
+    ad_review_feedback?: Record<string, unknown>
+  }
+  return {
+    effectiveStatus: data.effective_status ?? 'UNKNOWN',
+    reviewFeedback: data.ad_review_feedback ?? null,
+  }
+}
+
 // ============================================================
 // Video and Carousel formats — ground-truth confirmed against real
 // objects built in this account's own Ads Manager (a manually-created

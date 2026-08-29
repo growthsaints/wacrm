@@ -9,6 +9,7 @@ import {
   createCarouselAdCreative,
   createCustomAudience,
   createVideoAdCreative,
+  getAdReviewStatus,
   getVideoStatus,
   hashPhoneForCustomAudience,
   listPages,
@@ -606,5 +607,41 @@ describe('createCarouselAdCreative', () => {
       ],
     })
     expect(result.id).toBe('creative-carousel-1')
+  })
+})
+
+describe('getAdReviewStatus', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('returns effective_status with no feedback when the ad has none', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        expect(url).toContain('/ad-1')
+        expect(url).toContain('ad_review_feedback')
+        return jsonResponse({ effective_status: 'PAUSED', id: 'ad-1' })
+      }),
+    )
+    const result = await getAdReviewStatus({ accessToken: 'tok', adId: 'ad-1' })
+    expect(result).toEqual({ effectiveStatus: 'PAUSED', reviewFeedback: null })
+  })
+
+  it('surfaces review feedback when present', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          effective_status: 'DISAPPROVED',
+          ad_review_feedback: { global: 'AD_DISAPPROVED_TARGETING' },
+        }),
+      ),
+    )
+    const result = await getAdReviewStatus({ accessToken: 'tok', adId: 'ad-1' })
+    expect(result).toEqual({
+      effectiveStatus: 'DISAPPROVED',
+      reviewFeedback: { global: 'AD_DISAPPROVED_TARGETING' },
+    })
   })
 })
