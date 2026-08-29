@@ -110,24 +110,39 @@ export function MetaAdsConfig() {
       />
 
       {config ? (
-        <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-4">
-          <Megaphone className="h-5 w-5 shrink-0 text-primary" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground">
-              {config.connected_name ?? config.ad_account_id}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">
-              {config.ad_account_id} · {config.currency ?? '—'}
-            </p>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-4">
+            <Megaphone className="h-5 w-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-foreground">
+                {config.connected_name ?? config.ad_account_id}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {config.ad_account_id} · {config.currency ?? '—'}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={disconnect}
+              className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={disconnect}
-            className="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+            One-time step: before creating your first Custom Audience, Meta requires this ad account to
+            accept its Customer List Terms —{' '}
+            <a
+              href={`https://business.facebook.com/ads/manage/customaudiences/tos/?act=${config.ad_account_id.replace(/^act_/, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium underline underline-offset-2"
+            >
+              accept them here
+            </a>{' '}
+            (only needed once per ad account — skip this if you&apos;ve already done it).
+          </p>
         </div>
       ) : (
         <div className="space-y-3 rounded-lg border border-border bg-card p-4">

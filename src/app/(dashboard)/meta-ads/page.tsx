@@ -126,6 +126,39 @@ function emptyCampaignDraft(): CampaignDraftState {
   };
 }
 
+// Meta's own error messages (see lib/meta-ads/client.ts's throwMetaError)
+// often include a direct actionable URL — e.g. the exact Custom
+// Audience Terms of Service acceptance link for the ad account that
+// hit it. Rendering it as a clickable link instead of plain text means
+// an admin can act on the error immediately instead of copying it out
+// of raw JSON to open it.
+const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
+const IS_URL = /^https?:\/\//;
+
+function LinkifiedText({ text }: { text: string }) {
+  const parts = text.split(URL_PATTERN);
+  return (
+    <>
+      {parts.map((part, i) =>
+        IS_URL.test(part) ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-2"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 export default function MetaAdsPage() {
   const { canEditSettings } = useAuth();
   const [connected, setConnected] = useState<boolean | null>(null);
@@ -592,8 +625,12 @@ export default function MetaAdsPage() {
                       </div>
                       <p className="mt-0.5 truncate text-xs text-muted-foreground">
                         {audienceSummary(row)} · {row.contact_count.toLocaleString()} contacts
-                        {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
                       </p>
+                      {row.status === 'failed' && row.error_message && (
+                        <p className="mt-0.5 break-words text-xs text-destructive">
+                          <LinkifiedText text={row.error_message} />
+                        </p>
+                      )}
                     </div>
                     <div className="flex shrink-0 gap-1">
                       <Button
@@ -661,8 +698,12 @@ export default function MetaAdsPage() {
                         </div>
                         <p className="mt-0.5 truncate text-xs text-muted-foreground">
                           {row.page_name ?? 'Page'} · {row.currency} {row.daily_budget}/day
-                          {row.status === 'failed' && row.error_message ? ` · ${row.error_message}` : ''}
                         </p>
+                        {row.status === 'failed' && row.error_message && (
+                          <p className="mt-0.5 break-words text-xs text-destructive">
+                            <LinkifiedText text={row.error_message} />
+                          </p>
+                        )}
                       </div>
                       {(row.status === 'paused' || row.status === 'active') && (
                         <>
