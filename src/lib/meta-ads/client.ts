@@ -350,8 +350,10 @@ export async function createAdCreative(args: {
   pageId: string
   message: string
   imageHash?: string
+  headline?: string
+  description?: string
 }): Promise<{ id: string }> {
-  const { accessToken, adAccountId, name, pageId, message, imageHash } = args
+  const { accessToken, adAccountId, name, pageId, message, imageHash, headline, description } = args
   const id = adAccountPath(adAccountId)
 
   const linkData: Record<string, unknown> = {
@@ -364,6 +366,11 @@ export async function createAdCreative(args: {
     call_to_action: { type: 'WHATSAPP_MESSAGE' },
   }
   if (imageHash) linkData.image_hash = imageHash
+  // `name` is link_data's field for the ad's headline — ground-truth
+  // confirmed alongside `description` against a real creative in this
+  // account.
+  if (headline) linkData.name = headline
+  if (description) linkData.description = description
 
   const response = await fetch(`${META_API_BASE}/${id}/adcreatives`, {
     method: 'POST',
@@ -552,9 +559,20 @@ export async function createVideoAdCreative(args: {
   videoId: string
   thumbnailUrl: string
   message: string
+  headline?: string
 }): Promise<{ id: string }> {
-  const { accessToken, adAccountId, name, pageId, videoId, thumbnailUrl, message } = args
+  const { accessToken, adAccountId, name, pageId, videoId, thumbnailUrl, message, headline } = args
   const id = adAccountPath(adAccountId)
+  const videoData: Record<string, unknown> = {
+    video_id: videoId,
+    image_url: thumbnailUrl,
+    message,
+    call_to_action: { type: 'WHATSAPP_MESSAGE' },
+  }
+  // `title` is video_data's field for the ad's headline — ground-truth
+  // confirmed against a real creative in this account. video_data has
+  // no separate description field, unlike link_data.
+  if (headline) videoData.title = headline
   const response = await fetch(`${META_API_BASE}/${id}/adcreatives`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -562,12 +580,7 @@ export async function createVideoAdCreative(args: {
       name,
       object_story_spec: {
         page_id: pageId,
-        video_data: {
-          video_id: videoId,
-          image_url: thumbnailUrl,
-          message,
-          call_to_action: { type: 'WHATSAPP_MESSAGE' },
-        },
+        video_data: videoData,
       },
     }),
   })

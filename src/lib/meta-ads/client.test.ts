@@ -337,6 +337,33 @@ describe('createAdCreative', () => {
     })
     expect(result.id).toBe('creative-1')
   })
+
+  it('adds name/description when a headline/description is given', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.object_story_spec.link_data).toEqual({
+        message: 'Hello!',
+        link: 'https://wa.me/',
+        call_to_action: { type: 'WHATSAPP_MESSAGE' },
+        image_hash: 'img-hash-1',
+        name: 'Big Sale',
+        description: '20% off this week',
+      })
+      return jsonResponse({ id: 'creative-2' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createAdCreative({
+      accessToken: 'tok',
+      adAccountId: 'act_1',
+      name: 'Creative',
+      pageId: 'page-1',
+      message: 'Hello!',
+      imageHash: 'img-hash-1',
+      headline: 'Big Sale',
+      description: '20% off this week',
+    })
+  })
 })
 
 describe('createAd', () => {
@@ -499,6 +526,32 @@ describe('createVideoAdCreative', () => {
       message: 'Hello!',
     })
     expect(result.id).toBe('creative-video-1')
+  })
+
+  it('adds title when a headline is given', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.object_story_spec.video_data).toEqual({
+        video_id: 'video-1',
+        image_url: 'https://example.com/thumb.jpg',
+        message: 'Hello!',
+        call_to_action: { type: 'WHATSAPP_MESSAGE' },
+        title: 'Big Sale',
+      })
+      return jsonResponse({ id: 'creative-video-2' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createVideoAdCreative({
+      accessToken: 'tok',
+      adAccountId: 'act_1',
+      name: 'Video creative',
+      pageId: 'page-1',
+      videoId: 'video-1',
+      thumbnailUrl: 'https://example.com/thumb.jpg',
+      message: 'Hello!',
+      headline: 'Big Sale',
+    })
   })
 })
 

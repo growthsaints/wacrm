@@ -69,7 +69,7 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
     const { data: row, error: rowError } = await db
       .from('meta_ad_campaigns')
       .select(
-        'id, meta_ads_config_id, custom_audience_id, name, page_id, daily_budget, primary_text, image_url, ad_format, video_url, carousel_cards',
+        'id, meta_ads_config_id, custom_audience_id, name, page_id, daily_budget, primary_text, image_url, ad_format, video_url, carousel_cards, headline, description',
       )
       .eq('id', campaignRowId)
       .maybeSingle()
@@ -146,6 +146,7 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
         videoId,
         thumbnailUrl,
         message: row.primary_text,
+        headline: row.headline ?? undefined,
       })
     } else if (adFormat === 'carousel') {
       const cards = (row.carousel_cards ?? []) as Array<{ image_url: string; headline: string; description?: string }>
@@ -185,6 +186,8 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
         pageId: row.page_id,
         message: row.primary_text,
         imageHash,
+        headline: row.headline ?? undefined,
+        description: row.description ?? undefined,
       })
     }
     await db.from('meta_ad_campaigns').update({ meta_creative_id: creative.id }).eq('id', campaignRowId)

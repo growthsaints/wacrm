@@ -15,7 +15,7 @@ import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { launchCampaign } from '@/lib/meta-ads/launch'
 
 const CAMPAIGN_COLUMNS =
-  'id, name, page_id, page_name, daily_budget, currency, primary_text, image_url, ad_format, video_url, carousel_cards, custom_audience_id, meta_campaign_id, meta_adset_id, meta_ad_id, status, error_message, created_at, updated_at'
+  'id, name, page_id, page_name, daily_budget, currency, primary_text, headline, description, image_url, ad_format, video_url, carousel_cards, custom_audience_id, meta_campaign_id, meta_adset_id, meta_ad_id, status, error_message, created_at, updated_at'
 
 export async function GET() {
   try {
@@ -54,6 +54,8 @@ export async function POST(request: Request) {
     const pageId = typeof body.page_id === 'string' ? body.page_id.trim() : ''
     const pageName = typeof body.page_name === 'string' ? body.page_name.trim() : null
     const primaryText = typeof body.primary_text === 'string' ? body.primary_text.trim() : ''
+    const headline = typeof body.headline === 'string' && body.headline.trim() ? body.headline.trim() : null
+    const description = typeof body.description === 'string' && body.description.trim() ? body.description.trim() : null
     const imageUrl = typeof body.image_url === 'string' && body.image_url.trim() ? body.image_url.trim() : null
     const videoUrl = typeof body.video_url === 'string' && body.video_url.trim() ? body.video_url.trim() : null
     const adFormat = body.ad_format === 'video' || body.ad_format === 'carousel' ? body.ad_format : 'image'
@@ -118,6 +120,8 @@ export async function POST(request: Request) {
         daily_budget: dailyBudget,
         currency: config.currency ?? 'INR',
         primary_text: primaryText,
+        headline,
+        description: adFormat === 'video' ? null : description,
         image_url: adFormat === 'image' ? imageUrl : null,
         ad_format: adFormat,
         video_url: adFormat === 'video' ? videoUrl : null,

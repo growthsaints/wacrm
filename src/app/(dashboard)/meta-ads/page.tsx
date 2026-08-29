@@ -102,6 +102,8 @@ interface CampaignDraftState {
   customAudienceId: string;
   dailyBudget: string;
   primaryText: string;
+  headline: string;
+  description: string;
   adFormat: AdFormat;
   imageUrl: string;
   videoUrl: string;
@@ -116,6 +118,8 @@ function emptyCampaignDraft(): CampaignDraftState {
     customAudienceId: '',
     dailyBudget: '',
     primaryText: '',
+    headline: '',
+    description: '',
     adFormat: 'image',
     imageUrl: '',
     videoUrl: '',
@@ -462,6 +466,8 @@ export default function MetaAdsPage() {
           custom_audience_id: campaignDraft.customAudienceId || undefined,
           daily_budget: dailyBudget,
           primary_text: campaignDraft.primaryText.trim(),
+          headline: campaignDraft.headline.trim() || undefined,
+          description: campaignDraft.description.trim() || undefined,
           ad_format: campaignDraft.adFormat,
           image_url: campaignDraft.adFormat === 'image' ? campaignDraft.imageUrl : undefined,
           video_url: campaignDraft.adFormat === 'video' ? campaignDraft.videoUrl : undefined,
@@ -962,6 +968,30 @@ export default function MetaAdsPage() {
                   className="min-h-20 bg-muted text-foreground"
                 />
               </div>
+
+              {campaignDraft.adFormat !== 'carousel' && (
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">Headline (optional)</label>
+                  <Input
+                    value={campaignDraft.headline}
+                    onChange={(e) => setCampaignDraft({ ...campaignDraft, headline: e.target.value })}
+                    placeholder="Short bold text shown with the ad"
+                    className="bg-muted text-foreground"
+                  />
+                </div>
+              )}
+
+              {campaignDraft.adFormat === 'image' && (
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground">Description (optional)</label>
+                  <Input
+                    value={campaignDraft.description}
+                    onChange={(e) => setCampaignDraft({ ...campaignDraft, description: e.target.value })}
+                    placeholder="Extra detail shown below the headline"
+                    className="bg-muted text-foreground"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="mb-1 block text-xs text-muted-foreground">Ad format</label>
