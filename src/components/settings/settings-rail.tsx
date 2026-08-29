@@ -30,6 +30,7 @@ export function SettingsRail({
   isOwner = true,
   canAccessTemplates = true,
   canAccessSms = true,
+  canAccessMetaAds = false,
 }: {
   active: SettingsSection;
   onSelect: (section: SettingsSection) => void;
@@ -42,6 +43,11 @@ export function SettingsRail({
   canAccessTemplates?: boolean;
   /** Hides SMS and httpSMS for an 'agent' without the 'sms' grant. */
   canAccessSms?: boolean;
+  /** Hides Meta Ads for anyone without access — owner always; admin/
+   *  agent/viewer only with an explicit meta_ads_access_grants row.
+   *  Defaults to false (fail closed), unlike every other prop here
+   *  which defaults to visible. */
+  canAccessMetaAds?: boolean;
 }) {
   const t = useTranslations('Settings');
   const activeRef = useRef<HTMLButtonElement>(null);
@@ -74,7 +80,8 @@ export function SettingsRail({
             (isAdmin || !SECTION_META[s].adminOnly) &&
             (isOwner || !SECTION_META[s].ownerOnly) &&
             (s !== 'templates' || canAccessTemplates) &&
-            ((s !== 'sms' && s !== 'httpsms') || canAccessSms),
+            ((s !== 'sms' && s !== 'httpsms') || canAccessSms) &&
+            (s !== 'meta-ads' || canAccessMetaAds),
         );
         return (
           <div

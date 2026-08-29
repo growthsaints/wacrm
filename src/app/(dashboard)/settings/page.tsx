@@ -34,7 +34,7 @@ import {
 export default function SettingsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { defaultCurrency, canEditSettings, isOwner, canAccessTemplates, canAccessSms } = useAuth();
+  const { defaultCurrency, canEditSettings, isOwner, canAccessTemplates, canAccessSms, canAccessMetaAds } = useAuth();
   const { mode } = useTheme();
   const t = useTranslations('Settings');
 
@@ -51,7 +51,8 @@ export default function SettingsPage() {
     (SECTION_META[rawSection].adminOnly && !canEditSettings) ||
     (SECTION_META[rawSection].ownerOnly && !isOwner) ||
     (rawSection === 'templates' && !canAccessTemplates) ||
-    ((rawSection === 'sms' || rawSection === 'httpsms') && !canAccessSms);
+    ((rawSection === 'sms' || rawSection === 'httpsms') && !canAccessSms) ||
+    (rawSection === 'meta-ads' && !canAccessMetaAds);
   const section = blocked ? 'overview' : rawSection;
 
   const go = (next: SettingsSection) => {
@@ -112,6 +113,7 @@ export default function SettingsPage() {
           isOwner={isOwner}
           canAccessTemplates={canAccessTemplates}
           canAccessSms={canAccessSms}
+          canAccessMetaAds={canAccessMetaAds}
         />
         <div className="min-w-0">{panel[section]}</div>
       </div>

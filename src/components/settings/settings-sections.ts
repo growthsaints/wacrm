@@ -85,7 +85,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     group: 'workspace',
     adminOnly: true,
   },
-  'meta-ads': { id: 'meta-ads', label: 'Meta Ads', icon: Megaphone, group: 'workspace', adminOnly: true },
+  'meta-ads': { id: 'meta-ads', label: 'Meta Ads', icon: Megaphone, group: 'workspace' },
   fields: { id: 'fields', label: 'Fields & tags', icon: Tags, group: 'workspace' },
   deals: { id: 'deals', label: 'Deals & currency', icon: Coins, group: 'workspace' },
   billing: { id: 'billing', label: 'Billing', icon: Wallet, group: 'workspace', ownerOnly: true },

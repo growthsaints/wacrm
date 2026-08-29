@@ -232,3 +232,27 @@ export async function requireFeature(
     `Access to '${feature}' hasn't been granted to your account — ask an owner or admin.`,
   );
 }
+
+/**
+ * Meta Ads — owner-only by default (migration 091), unlike every other
+ * gated feature in this file, because it can spend a connected
+ * client's ad budget. Admin/agent/viewer only pass with an explicit
+ * row in `meta_ads_access_grants`; there is no admin+ automatic floor
+ * the way `requireFeature`/module-access have.
+ */
+export async function requireMetaAdsAccess(): Promise<AccountContext> {
+  const ctx = await getCurrentAccount();
+  if (ctx.role === "owner") return ctx;
+
+  const { data } = await ctx.supabase
+    .from("meta_ads_access_grants")
+    .select("id")
+    .eq("account_id", ctx.accountId)
+    .eq("user_id", ctx.userId)
+    .maybeSingle();
+  if (data) return ctx;
+
+  throw new ForbiddenError(
+    "Meta Ads hasn't been granted to your account — ask the account owner.",
+  );
+}

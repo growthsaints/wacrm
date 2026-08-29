@@ -8,13 +8,13 @@
 
 import { NextResponse } from 'next/server'
 
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/meta-ads/encryption'
 import { getCampaignInsights } from '@/lib/meta-ads/client'
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { supabase, accountId } = await getCurrentAccount()
+    const { supabase, accountId } = await requireMetaAdsAccess()
     const { id } = await params
 
     const { data: row, error: rowError } = await supabase

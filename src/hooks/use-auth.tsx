@@ -112,6 +112,11 @@ interface AuthContextValue {
   /** Gates Settings → SMS and Settings → httpSMS. Admin+ always; an
    *  'agent' only if explicitly granted (see agent_feature_grants). */
   canAccessSms: boolean;
+  /** Owner always; admin/agent/viewer only if explicitly granted (see
+   *  meta_ads_access_grants, migration 091) — unlike every other
+   *  canAccessX above, admin gets NO automatic floor here, since Meta
+   *  Ads can spend a connected client's ad budget. */
+  canAccessMetaAds: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -128,6 +133,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Only ever populated for an 'agent' role — owner/admin/viewer don't
   // consult this (see the derived canAccessX booleans below).
   const [grantedFeatures, setGrantedFeatures] = useState<string[]>([]);
+  // Meta Ads is owner-only by default (migration 091) — populated for
+  // any non-owner role, since admin/agent/viewer all need an explicit
+  // grant here (unlike agent_feature_grants, which only ever matters
+  // for 'agent').
+  const [hasMetaAdsGrant, setHasMetaAdsGrant] = useState(false);
   const [loading, setLoading] = useState(true);
   // Tracked separately from `loading`. The session settles fast (one
   // local cookie read); the profile fetch crosses the network and
@@ -240,6 +250,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setGrantedFeatures([]);
         }
+
+        if (accountRole && accountRole !== "owner" && data.account_id) {
+          const { data: metaAdsGrant } = await supabase
+            .from("meta_ads_access_grants")
+            .select("id")
+            .eq("account_id", data.account_id)
+            .eq("user_id", userId)
+            .maybeSingle();
+          setHasMetaAdsGrant(Boolean(metaAdsGrant));
+        } else {
+          setHasMetaAdsGrant(false);
+        }
       } else {
         lastFetchedUserIdRef.current = null;
       }
@@ -314,6 +336,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setAccount(null);
         setGrantedFeatures([]);
+        setHasMetaAdsGrant(false);
         setProfileLoading(false);
       }
 
@@ -334,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
     setAccount(null);
     setGrantedFeatures([]);
+    setHasMetaAdsGrant(false);
     window.location.href = "/login";
   }, []);
 
@@ -366,8 +390,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       canAccessAutomations: hasFeature("automations"),
       canAccessTemplates: hasFeature("templates"),
       canAccessSms: hasFeature("sms"),
+      canAccessMetaAds: role === "owner" || hasMetaAdsGrant,
     };
-  }, [profile?.account_role, profile?.account_id, grantedFeatures]);
+  }, [profile?.account_role, profile?.account_id, grantedFeatures, hasMetaAdsGrant]);
 
   return (
     <AuthContext.Provider
@@ -423,6 +448,7 @@ export function useAuth(): AuthContextValue {
       canAccessAutomations: false,
       canAccessTemplates: false,
       canAccessSms: false,
+      canAccessMetaAds: false,
     };
   }
   return ctx;

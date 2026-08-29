@@ -8,13 +8,13 @@
 
 import { NextResponse, after } from 'next/server'
 
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { syncCustomAudience } from '@/lib/meta-ads/sync'
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
     const { id } = await params
 
     const { data, error } = await ctx.supabase

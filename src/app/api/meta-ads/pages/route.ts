@@ -8,13 +8,13 @@
 
 import { NextResponse } from 'next/server'
 
-import { getCurrentAccount, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/meta-ads/encryption'
 import { listPages } from '@/lib/meta-ads/client'
 
 export async function GET() {
   try {
-    const { supabase } = await getCurrentAccount()
+    const { supabase } = await requireMetaAdsAccess()
 
     const { data: config, error: configError } = await supabase
       .from('meta_ads_config')

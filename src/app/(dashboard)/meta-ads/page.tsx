@@ -160,7 +160,7 @@ function LinkifiedText({ text }: { text: string }) {
 }
 
 export default function MetaAdsPage() {
-  const { canEditSettings } = useAuth();
+  const { canAccessMetaAds } = useAuth();
   const [connected, setConnected] = useState<boolean | null>(null);
   const [audiences, setAudiences] = useState<AudienceRow[]>([]);
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
@@ -564,11 +564,13 @@ export default function MetaAdsPage() {
     [load],
   );
 
-  if (!canEditSettings) {
+  if (!canAccessMetaAds) {
     return (
       <div className="flex h-64 flex-col items-center justify-center gap-2 text-center">
         <Megaphone className="h-6 w-6 text-muted-foreground" />
-        <p className="text-sm text-muted-foreground">Only admins and owners can manage Meta Ads.</p>
+        <p className="text-sm text-muted-foreground">
+          Meta Ads hasn&apos;t been granted to your account — ask the account owner.
+        </p>
       </div>
     );
   }

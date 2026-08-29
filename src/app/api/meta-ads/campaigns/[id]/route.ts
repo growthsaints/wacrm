@@ -8,11 +8,11 @@
 
 import { NextResponse } from 'next/server'
 
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
     const { id } = await params
 
     const { data, error } = await ctx.supabase

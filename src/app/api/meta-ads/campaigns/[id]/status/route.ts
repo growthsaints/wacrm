@@ -9,13 +9,13 @@
 
 import { NextResponse } from 'next/server'
 
-import { requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { decrypt } from '@/lib/meta-ads/encryption'
 import { setCampaignDeliveryStatus } from '@/lib/meta-ads/client'
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
     const { id } = await params
 
     const body = (await request.json().catch(() => null)) as { status?: string } | null

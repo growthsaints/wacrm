@@ -29,6 +29,7 @@ import {
   Loader2,
   Mail,
   MailX,
+  Megaphone,
   Plus,
   ShieldCheck,
   Trash2,
@@ -81,6 +82,7 @@ import { InviteMemberDialog } from './invite-member-dialog';
 import { CreateMemberDialog } from './create-member-dialog';
 import { FeatureAccessDialog } from './feature-access-dialog';
 import { ModuleAccessDialog } from './module-access-dialog';
+import { MetaAdsAccessDialog } from './meta-ads-access-dialog';
 import { SettingsPanelHead } from './settings-panel-head';
 import { ROLE_META } from './role-meta';
 
@@ -151,6 +153,7 @@ export function MembersTab() {
   );
   const [managingAccessFor, setManagingAccessFor] = useState<Member | null>(null);
   const [managingModuleAccessFor, setManagingModuleAccessFor] = useState<Member | null>(null);
+  const [managingMetaAdsAccessFor, setManagingMetaAdsAccessFor] = useState<Member | null>(null);
 
   const loadEverything = useCallback(async () => {
     try {
@@ -543,6 +546,23 @@ export function MembersTab() {
                       </Button>
                     )}
 
+                    {/* Manage Meta Ads access — owner only, any
+                        non-owner row. Meta Ads is hidden by default
+                        from every role including admin (unlike
+                        module_access_grants, which only ever
+                        restricts admins) — only the owner can grant it
+                        to a specific admin/agent/viewer. */}
+                    {isOwnerViewer && !isOwnerRow && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setManagingMetaAdsAccessFor(member)}
+                        disabled={isBusy}
+                      >
+                        <Megaphone className="size-4" />
+                      </Button>
+                    )}
+
                     {/* Remove. Admin+ only; never on the owner row;
                         never on yourself. Pre-polish styling was
                         neutral-default + red-on-hover — the
@@ -686,6 +706,17 @@ export function MembersTab() {
           open={managingModuleAccessFor !== null}
           onOpenChange={(open) => {
             if (!open) setManagingModuleAccessFor(null);
+          }}
+        />
+      )}
+
+      {managingMetaAdsAccessFor && (
+        <MetaAdsAccessDialog
+          userId={managingMetaAdsAccessFor.user_id}
+          memberName={managingMetaAdsAccessFor.full_name || t('unnamed')}
+          open={managingMetaAdsAccessFor !== null}
+          onOpenChange={(open) => {
+            if (!open) setManagingMetaAdsAccessFor(null);
           }}
         />
       )}

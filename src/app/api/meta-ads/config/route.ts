@@ -1,22 +1,26 @@
 // ============================================================
 // GET    /api/meta-ads/config — this account's connected ad account
-//        (viewer+ can see it's connected; access_token is never
-//        returned).
+//        (access_token is never returned).
 // POST   /api/meta-ads/config — connect (or reconnect) an ad account.
-//        admin+. Verifies the token can actually read the ad account
-//        before storing anything (same "don't trust what was typed"
-//        pattern as httpSMS's config route).
-// DELETE /api/meta-ads/config — disconnect. admin+.
+//        Verifies the token can actually read the ad account before
+//        storing anything (same "don't trust what was typed" pattern
+//        as httpSMS's config route).
+// DELETE /api/meta-ads/config — disconnect.
+//
+// All three require Meta Ads access (see requireMetaAdsAccess,
+// migration 091) — owner-only by default, since this can spend a
+// connected client's ad budget; opened up to a specific admin/agent/
+// viewer only via an explicit grant, unlike every other gated feature
+// in this codebase (which defaults to admin+).
 //
 // BYO System User access token (see migration 086's header comment
-// for why this isn't an OAuth "Connect" button yet — Advanced Access
-// for third-party ad accounts requires an App Review this app
-// doesn't have).
+// for why there's also an OAuth "Connect" button now — see
+// components/meta-ads/connect-meta-ads-button.tsx).
 // ============================================================
 
 import { NextResponse } from 'next/server'
 
-import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { encrypt } from '@/lib/meta-ads/encryption'
 import { verifyAdAccount } from '@/lib/meta-ads/client'
 
@@ -24,7 +28,7 @@ const CONFIG_COLUMNS = 'id, ad_account_id, business_id, connected_name, currency
 
 export async function GET() {
   try {
-    const { supabase } = await getCurrentAccount()
+    const { supabase } = await requireMetaAdsAccess()
     const { data, error } = await supabase.from('meta_ads_config').select(CONFIG_COLUMNS).maybeSingle()
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })
@@ -37,7 +41,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
 
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null
     if (!body || typeof body !== 'object') {
@@ -88,7 +92,7 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
     const { error } = await ctx.supabase.from('meta_ads_config').delete().eq('account_id', ctx.accountId)
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

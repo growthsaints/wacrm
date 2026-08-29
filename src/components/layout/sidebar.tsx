@@ -101,11 +101,14 @@ interface NavItem {
    */
   requiredFeature?: "broadcasts" | "automations";
   /**
-   * Hidden entirely for non-admins — unlike requiredFeature, there's
-   * no per-agent grant for this (real ad spend, not something to
-   * delegate the way a broadcast send might be).
+   * Hidden for anyone without Meta Ads access — owner always; admin/
+   * agent/viewer only with an explicit grant (see
+   * meta_ads_access_grants, migration 091 and useAuth's
+   * canAccessMetaAds). Unlike requiredFeature above, there's no
+   * automatic admin+ floor — this can spend a connected client's ad
+   * budget.
    */
-  adminOnly?: boolean;
+  requiresMetaAdsAccess?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -118,7 +121,7 @@ const navItems: NavItem[] = [
   { href: "/automations", labelKey: "automations", icon: Zap, requiredFeature: "automations" },
   { href: "/flows", labelKey: "flows", icon: Workflow, beta: true },
   { href: "/agents", labelKey: "aiAgents", icon: Bot },
-  { href: "/meta-ads", labelKey: "metaAds", icon: Megaphone, adminOnly: true, beta: true },
+  { href: "/meta-ads", labelKey: "metaAds", icon: Megaphone, requiresMetaAdsAccess: true, beta: true },
 ];
 
 const bottomNavItems = [
@@ -150,10 +153,10 @@ export function Sidebar({ open = false, onClose }: SidebarProps) {
     signOut,
     canAccessBroadcasts,
     canAccessAutomations,
-    canEditSettings,
+    canAccessMetaAds,
   } = useAuth();
   const visibleNavItems = navItems.filter((item) => {
-    if (item.adminOnly && !canEditSettings) return false;
+    if (item.requiresMetaAdsAccess && !canAccessMetaAds) return false;
     if (item.requiredFeature === "broadcasts") return canAccessBroadcasts;
     if (item.requiredFeature === "automations") return canAccessAutomations;
     return true;

@@ -10,7 +10,7 @@
 
 import { NextResponse, after } from 'next/server'
 
-import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { launchCampaign } from '@/lib/meta-ads/launch'
 
@@ -19,7 +19,7 @@ const CAMPAIGN_COLUMNS =
 
 export async function GET() {
   try {
-    const { supabase } = await getCurrentAccount()
+    const { supabase } = await requireMetaAdsAccess()
     const { data, error } = await supabase
       .from('meta_ad_campaigns')
       .select(CAMPAIGN_COLUMNS)
@@ -35,7 +35,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
 
     const { data: config, error: configError } = await ctx.supabase
       .from('meta_ads_config')

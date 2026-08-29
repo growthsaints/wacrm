@@ -14,7 +14,7 @@
 
 import { NextResponse, after } from 'next/server'
 
-import { getCurrentAccount, requireRole, toErrorResponse } from '@/lib/auth/account'
+import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { syncCustomAudience } from '@/lib/meta-ads/sync'
 import type { AudienceFilter } from '@/lib/meta-ads/audience'
@@ -41,7 +41,7 @@ function isValidAudienceFilter(value: unknown): value is AudienceFilter {
 
 export async function GET() {
   try {
-    const { supabase } = await getCurrentAccount()
+    const { supabase } = await requireMetaAdsAccess()
     const { data, error } = await supabase
       .from('meta_custom_audiences')
       .select(AUDIENCE_COLUMNS)
@@ -57,7 +57,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireRole('admin')
+    const ctx = await requireMetaAdsAccess()
 
     const { data: config, error: configError } = await ctx.supabase
       .from('meta_ads_config')
