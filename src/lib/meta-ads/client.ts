@@ -446,17 +446,28 @@ export interface MetaCampaignInsights {
   reach: number
   impressions: number
   clicks: number
+  /** "Results" for a Click-to-WhatsApp campaign — count of WhatsApp
+   *  conversations started, i.e. the same number Ads Manager's own
+   *  Results column shows for this campaign type (optimization_goal:
+   *  CONVERSATIONS). Ground-truth confirmed against a real delivering
+   *  campaign in this account: the `actions` array's
+   *  `onsite_conversion.messaging_conversation_started_7d` entry is
+   *  the one that matches Ads Manager's displayed Results count —
+   *  not `onsite_conversion.total_messaging_connection` or any of
+   *  the other messaging_* action types Meta also returns alongside
+   *  it, which count other engagement milestones instead. */
+  results: number
 }
+
+const RESULTS_ACTION_TYPE = 'onsite_conversion.messaging_conversation_started_7d'
 
 /**
  * Lifetime delivery stats for a campaign — the numbers wacrm's own
  * dashboard shows instead of sending an admin back to Ads Manager to
  * check reach/spend. `spend`/`reach`/`impressions`/`clicks` are
- * long-stable, universally-documented Insights fields (unlike the
- * exact `actions` action_type key for "conversations started", which
- * this deliberately doesn't parse — no real delivery data existed
- * yet to ground-truth verify that key against, and guessing it wrong
- * would silently show a $0/0 metric that looks like a real answer).
+ * long-stable, universally-documented Insights fields. `results` is
+ * parsed from the `actions` array — see MetaCampaignInsights.results
+ * for the ground-truth-confirmed action_type key.
  * Meta returns an empty `data` array (not an error) for a campaign
  * with no delivery yet — treated as all-zero stats, not a failure.
  */
@@ -466,21 +477,29 @@ export async function getCampaignInsights(args: {
 }): Promise<MetaCampaignInsights> {
   const { accessToken, campaignId } = args
   const url = new URL(`${META_API_BASE}/${campaignId}/insights`)
-  url.searchParams.set('fields', 'spend,reach,impressions,clicks')
+  url.searchParams.set('fields', 'spend,reach,impressions,clicks,actions')
   url.searchParams.set('date_preset', 'maximum')
   const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${accessToken}` } })
   if (!response.ok) {
     await throwMetaError(response, `Meta API error: ${response.status}`)
   }
   const data = (await response.json()) as {
-    data?: Array<{ spend?: string; reach?: string; impressions?: string; clicks?: string }>
+    data?: Array<{
+      spend?: string
+      reach?: string
+      impressions?: string
+      clicks?: string
+      actions?: Array<{ action_type?: string; value?: string }>
+    }>
   }
   const row = data.data?.[0]
+  const resultsAction = row?.actions?.find((a) => a.action_type === RESULTS_ACTION_TYPE)
   return {
     spend: Number(row?.spend ?? 0),
     reach: Number(row?.reach ?? 0),
     impressions: Number(row?.impressions ?? 0),
     clicks: Number(row?.clicks ?? 0),
+    results: Number(resultsAction?.value ?? 0),
   }
 }
 

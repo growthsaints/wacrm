@@ -10,6 +10,7 @@ import {
   createCustomAudience,
   createVideoAdCreative,
   getAdReviewStatus,
+  getCampaignInsights,
   getVideoStatus,
   hashPhoneForCustomAudience,
   listPages,
@@ -643,5 +644,57 @@ describe('getAdReviewStatus', () => {
       effectiveStatus: 'DISAPPROVED',
       reviewFeedback: { global: 'AD_DISAPPROVED_TARGETING' },
     })
+  })
+})
+
+describe('getCampaignInsights', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('parses the ground-truth-confirmed results action_type out of the actions array', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        expect(url).toContain('/camp-1/insights')
+        expect(url).toContain('actions')
+        return jsonResponse({
+          data: [
+            {
+              spend: '123',
+              reach: '151',
+              impressions: '239',
+              clicks: '5',
+              actions: [
+                { action_type: 'link_click', value: '5' },
+                { action_type: 'onsite_conversion.total_messaging_connection', value: '2' },
+                { action_type: 'onsite_conversion.messaging_conversation_started_7d', value: '2' },
+              ],
+            },
+          ],
+        })
+      }),
+    )
+    const result = await getCampaignInsights({ accessToken: 'tok', campaignId: 'camp-1' })
+    expect(result).toEqual({ spend: 123, reach: 151, impressions: 239, clicks: 5, results: 2 })
+  })
+
+  it('treats an empty data array (no delivery yet) as all-zero stats, not a failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ data: [] })))
+    const result = await getCampaignInsights({ accessToken: 'tok', campaignId: 'camp-1' })
+    expect(result).toEqual({ spend: 0, reach: 0, impressions: 0, clicks: 0, results: 0 })
+  })
+
+  it('defaults results to 0 when the actions array has no matching action_type', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        jsonResponse({
+          data: [{ spend: '10', reach: '20', impressions: '30', clicks: '1', actions: [{ action_type: 'link_click', value: '1' }] }],
+        }),
+      ),
+    )
+    const result = await getCampaignInsights({ accessToken: 'tok', campaignId: 'camp-1' })
+    expect(result.results).toBe(0)
   })
 })

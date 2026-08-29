@@ -513,6 +513,7 @@ export default function MetaAdsPage() {
     reach: number;
     impressions: number;
     clicks: number;
+    results: number;
     reviewStatus: { effectiveStatus: string; reviewFeedback: Record<string, unknown> | null } | null;
   }
   const [insightsOpenId, setInsightsOpenId] = useState<string | null>(null);
@@ -782,6 +783,10 @@ export default function MetaAdsPage() {
                                 )}
                               </div>
                             )}
+                            <div className="mb-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
+                              <p className="text-xs text-muted-foreground">Results (WhatsApp conversations started)</p>
+                              <p className="text-lg font-semibold text-foreground">{insights.results.toLocaleString()}</p>
+                            </div>
                             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                               <div>
                                 <p className="text-xs text-muted-foreground">Spent</p>
