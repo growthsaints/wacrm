@@ -26,6 +26,29 @@ export interface ResolvedContact {
 }
 
 const FETCH_CHUNK = 200
+/** Supabase/PostgREST caps an unbounded .select() at this many rows by
+ *  default — every query here that could plausibly return more than
+ *  that for a real account (all contacts, tag matches, custom-field
+ *  matches) MUST paginate with .range(), or a large CRM silently gets
+ *  truncated (e.g. an "all contacts" audience built from 5,500 real
+ *  contacts would otherwise only ever pick up the first 1,000). */
+const PAGE_SIZE = 1000
+
+/** Runs `query(from, to)` repeatedly with an advancing .range() until a page comes back short, collecting every row regardless of the default row cap. */
+async function fetchAllPages<T>(
+  query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const out: T[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await query(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const rows = data ?? []
+    out.push(...rows)
+    if (rows.length < PAGE_SIZE) return out
+    from += PAGE_SIZE
+  }
+}
 
 /** Batched by id — a single .in() call with a huge id list can build a request URL past the server's length limit (same failure mode fixed for broadcast audiences). */
 async function fetchContactPhonesByIds(
@@ -49,34 +72,32 @@ export async function resolveAudienceContacts(
   filter: AudienceFilter,
 ): Promise<ResolvedContact[]> {
   if (filter.type === 'all') {
-    const { data, error } = await supabase.from('contacts').select('id, phone')
-    if (error) throw new Error(`Failed to fetch contacts: ${error.message}`)
-    return ((data ?? []) as { id: string; phone: string | null }[]).filter(
-      (c): c is ResolvedContact => Boolean(c.phone),
+    const rows = await fetchAllPages<{ id: string; phone: string | null }>((from, to) =>
+      supabase.from('contacts').select('id, phone').range(from, to),
     )
+    return rows.filter((c): c is ResolvedContact => Boolean(c.phone))
   }
 
   if (filter.type === 'tags') {
     const tagIds = filter.tagIds ?? []
     if (tagIds.length === 0) return []
-    const { data: contactTags, error } = await supabase
-      .from('contact_tags')
-      .select('contact_id')
-      .in('tag_id', tagIds)
-    if (error) throw new Error(`Failed to fetch contact tags: ${error.message}`)
-    const uniqueIds = [...new Set((contactTags ?? []).map((r) => r.contact_id as string))]
+    const contactTags = await fetchAllPages<{ contact_id: string }>((from, to) =>
+      supabase.from('contact_tags').select('contact_id').in('tag_id', tagIds).range(from, to),
+    )
+    const uniqueIds = [...new Set(contactTags.map((r) => r.contact_id))]
     return fetchContactPhonesByIds(supabase, uniqueIds)
   }
 
   if (filter.type === 'custom_field' && filter.customField) {
     const { fieldId, operator, value } = filter.customField
-    let query = supabase.from('contact_custom_values').select('contact_id').eq('custom_field_id', fieldId)
-    if (operator === 'is') query = query.eq('value', value)
-    else if (operator === 'is_not') query = query.neq('value', value)
-    else if (operator === 'contains') query = query.ilike('value', `%${value}%`)
-    const { data: matches, error } = await query
-    if (error) throw new Error(`Custom-field filter failed: ${error.message}`)
-    const uniqueIds = [...new Set((matches ?? []).map((r) => r.contact_id as string))]
+    const matches = await fetchAllPages<{ contact_id: string }>((from, to) => {
+      let query = supabase.from('contact_custom_values').select('contact_id').eq('custom_field_id', fieldId)
+      if (operator === 'is') query = query.eq('value', value)
+      else if (operator === 'is_not') query = query.neq('value', value)
+      else if (operator === 'contains') query = query.ilike('value', `%${value}%`)
+      return query.range(from, to)
+    })
+    const uniqueIds = [...new Set(matches.map((r) => r.contact_id))]
     return fetchContactPhonesByIds(supabase, uniqueIds)
   }
 
