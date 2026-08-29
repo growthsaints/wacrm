@@ -130,19 +130,54 @@ export function MetaAdsConfig() {
               <Trash2 className="h-4 w-4" />
             </Button>
           </div>
-          <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
-            One-time step: before creating your first Custom Audience, Meta requires this ad account to
-            accept its Customer List Terms —{' '}
-            <a
-              href={`https://business.facebook.com/ads/manage/customaudiences/tos/?act=${config.ad_account_id.replace(/^act_/, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium underline underline-offset-2"
-            >
-              accept them here
-            </a>{' '}
-            (only needed once per ad account — skip this if you&apos;ve already done it).
-          </p>
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-600 dark:text-amber-400">
+            <p className="mb-2 font-medium">
+              One-time setup on Meta&apos;s side — do these once per ad account, ideally before creating
+              your first audience or campaign, so you never hit them as a confusing failure later:
+            </p>
+            <ul className="list-disc space-y-1 pl-4">
+              <li>
+                Add a payment method to this ad account in{' '}
+                <a
+                  href="https://www.facebook.com/adsmanager"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline underline-offset-2"
+                >
+                  Ads Manager
+                </a>{' '}
+                → Billing settings — Meta refuses to launch any campaign, even paused, without one.
+              </li>
+              <li>
+                Accept Meta&apos;s Customer List Terms for this ad account —{' '}
+                <a
+                  href={`https://business.facebook.com/ads/manage/customaudiences/tos/?act=${config.ad_account_id.replace(/^act_/, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline underline-offset-2"
+                >
+                  accept them here
+                </a>{' '}
+                — required before any Custom Audience with an uploaded contact list can be created.
+              </li>
+              <li>
+                Certify compliance with Meta&apos;s Non-Discrimination Policy —{' '}
+                <a
+                  href="https://www.facebook.com/certification/nondiscrimination"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline underline-offset-2"
+                >
+                  certify here
+                </a>
+                . On a brand-new Business Portfolio this can be blocked until the business itself is
+                verified (Business Settings → Security Center) — if it stays blocked, either verify the
+                business, or assign this ad account to an already-certified System User from a business
+                that already runs ads.
+              </li>
+              <li>The Facebook Page you&apos;ll pick for a campaign needs a WhatsApp number linked to it in Business Manager.</li>
+            </ul>
+          </div>
         </div>
       ) : (
         <div className="space-y-3 rounded-lg border border-border bg-card p-4">
