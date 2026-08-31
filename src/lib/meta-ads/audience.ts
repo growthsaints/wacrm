@@ -67,20 +67,43 @@ async function fetchContactPhonesByIds(
   return out
 }
 
-/** Contacts who've opted out of marketing must never be uploaded to a
- *  Custom Audience — same exclusion broadcasts already apply before
- *  sending (see hooks/use-broadcast-sending.ts), applied here too so
- *  the Ads path can't silently bypass it. */
+/**
+ * Uploading a phone list to Meta as a Custom Audience hands PII to a
+ * third party for ad targeting — a different, higher-consent-bar
+ * activity than the CRM sending its own WhatsApp messages (where
+ * `marketing_opt_out` alone is the bar broadcasts use). So this
+ * additionally requires the contact's tracked `contact_consent` row
+ * (migration 070) to actually say `opted_in` — not merely "hasn't
+ * opted out" — before their number goes to Meta at all. A contact
+ * with no consent row, or one still `pending`/`no_response`, is
+ * excluded; only an explicit YES (consent-template reply, their own
+ * first inbound message, or an asserted off-platform consent) counts.
+ */
+async function fetchOptedInContactIds(supabase: SupabaseClient, accountId: string): Promise<Set<string>> {
+  const rows = await fetchAllPages<{ contact_id: string | null }>((from, to) =>
+    supabase
+      .from('contact_consent')
+      .select('contact_id')
+      .eq('account_id', accountId)
+      .eq('consent_status', 'opted_in')
+      .range(from, to),
+  )
+  return new Set(rows.map((r) => r.contact_id).filter((id): id is string => Boolean(id)))
+}
+
 export async function resolveAudienceContacts(
   supabase: SupabaseClient,
   filter: AudienceFilter,
+  accountId: string,
 ): Promise<ResolvedContact[]> {
+  const optedInIds = await fetchOptedInContactIds(supabase, accountId)
+
   if (filter.type === 'all') {
     const rows = await fetchAllPages<{ id: string; phone: string | null; marketing_opt_out: boolean | null }>(
       (from, to) => supabase.from('contacts').select('id, phone, marketing_opt_out').range(from, to),
     )
     return rows
-      .filter((c) => Boolean(c.phone) && !c.marketing_opt_out)
+      .filter((c) => Boolean(c.phone) && !c.marketing_opt_out && optedInIds.has(c.id))
       .map((c) => ({ id: c.id, phone: c.phone as string }))
   }
 
@@ -90,7 +113,7 @@ export async function resolveAudienceContacts(
     const contactTags = await fetchAllPages<{ contact_id: string }>((from, to) =>
       supabase.from('contact_tags').select('contact_id').in('tag_id', tagIds).range(from, to),
     )
-    const uniqueIds = [...new Set(contactTags.map((r) => r.contact_id))]
+    const uniqueIds = [...new Set(contactTags.map((r) => r.contact_id))].filter((id) => optedInIds.has(id))
     return fetchContactPhonesByIds(supabase, uniqueIds)
   }
 
@@ -103,7 +126,7 @@ export async function resolveAudienceContacts(
       else if (operator === 'contains') query = query.ilike('value', `%${value}%`)
       return query.range(from, to)
     })
-    const uniqueIds = [...new Set(matches.map((r) => r.contact_id))]
+    const uniqueIds = [...new Set(matches.map((r) => r.contact_id))].filter((id) => optedInIds.has(id))
     return fetchContactPhonesByIds(supabase, uniqueIds)
   }
 

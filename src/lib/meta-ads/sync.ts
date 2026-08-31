@@ -38,7 +38,7 @@ export async function syncCustomAudience(db: SupabaseClient, audienceRowId: stri
   try {
     const { data: row, error: rowError } = await db
       .from('meta_custom_audiences')
-      .select('id, meta_ads_config_id, meta_audience_id, name, audience_filter')
+      .select('id, account_id, meta_ads_config_id, meta_audience_id, name, audience_filter')
       .eq('id', audienceRowId)
       .maybeSingle()
     if (rowError || !row) return
@@ -65,7 +65,7 @@ export async function syncCustomAudience(db: SupabaseClient, audienceRowId: stri
       return
     }
 
-    const contacts = await resolveAudienceContacts(db, row.audience_filter as AudienceFilter)
+    const contacts = await resolveAudienceContacts(db, row.audience_filter as AudienceFilter, row.account_id)
 
     let metaAudienceId = row.meta_audience_id as string | null
     if (!metaAudienceId) {

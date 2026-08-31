@@ -955,7 +955,8 @@ export default function MetaAdsPage() {
                 />
                 <span>
                   I confirm these contacts have consented to receive marketing and can be uploaded to Meta as a
-                  Custom Audience. (Contacts marked opted-out in the CRM are always excluded automatically.)
+                  Custom Audience. (Only contacts with a tracked opted-in consent status are ever included — anyone
+                  opted-out, pending, or never asked is excluded automatically.)
                 </span>
               </label>
             </div>
