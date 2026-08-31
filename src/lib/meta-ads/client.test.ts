@@ -239,6 +239,17 @@ describe('createCampaign', () => {
     const result = await createCampaign({ accessToken: 'tok', adAccountId: 'act_1', name: 'Test campaign' })
     expect(result.id).toBe('camp-1')
   })
+
+  it('declares a Special Ad Category when one is passed instead of defaulting to none', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.special_ad_categories).toEqual(['HOUSING'])
+      return jsonResponse({ id: 'camp-1' })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createCampaign({ accessToken: 'tok', adAccountId: 'act_1', name: 'Test campaign', specialAdCategory: 'HOUSING' })
+  })
 })
 
 describe('createAdSet', () => {

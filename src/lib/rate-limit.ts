@@ -174,6 +174,13 @@ export const RATE_LIMITS = {
    *  as `adminAction` above but for the platform layer instead of a
    *  single tenant. */
   platformAdminAction: { limit: 30, windowMs: 60_000 },
+  /** Meta Ads campaign creation, per account. 10/min is far above any
+   *  realistic manual pace of building campaigns one at a time in the
+   *  dashboard UI, while bounding a scripted or accidental burst —
+   *  rapid, unthrottled campaign creation with no organic account
+   *  history is itself a signal Meta's own integrity systems watch
+   *  for ("churn and burn" ad accounts). */
+  metaAdsCampaignLaunch: { limit: 10, windowMs: 60_000 },
 } as const;
 
 /** Test-only helper. Clears the in-memory state so unit tests don't

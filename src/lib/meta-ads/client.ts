@@ -241,13 +241,21 @@ export async function uploadAdImageFromUrl(args: {
   return { hash: first.hash }
 }
 
+/** Meta requires any Housing/Employment/Credit/Social-Issue ad to
+ *  self-declare its Special Ad Category — undeclared ads in these
+ *  categories are a policy violation in their own right, independent
+ *  of anything else about the ad, so this is a required field rather
+ *  than always defaulting to 'NONE'. */
+export type SpecialAdCategory = 'NONE' | 'HOUSING' | 'EMPLOYMENT' | 'CREDIT' | 'ISSUES_ELECTIONS_POLITICS'
+
 /** Always created PAUSED — see module comment. */
 export async function createCampaign(args: {
   accessToken: string
   adAccountId: string
   name: string
+  specialAdCategory?: SpecialAdCategory
 }): Promise<{ id: string }> {
-  const { accessToken, adAccountId, name } = args
+  const { accessToken, adAccountId, name, specialAdCategory = 'NONE' } = args
   const id = adAccountPath(adAccountId)
   const response = await fetch(`${META_API_BASE}/${id}/campaigns`, {
     method: 'POST',
@@ -256,7 +264,7 @@ export async function createCampaign(args: {
       name,
       objective: 'OUTCOME_ENGAGEMENT',
       status: 'PAUSED',
-      special_ad_categories: [],
+      special_ad_categories: specialAdCategory === 'NONE' ? [] : [specialAdCategory],
       // Budget lives on the ad set (see createAdSet), not the campaign, so
       // Meta requires this to be explicit — (#4834011) "Must specify True
       // or False in is_adset_budget_sharing_enabled field" otherwise.

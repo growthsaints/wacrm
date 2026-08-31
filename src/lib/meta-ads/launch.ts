@@ -24,6 +24,7 @@ import {
   createCarouselAdCreative,
   createVideoAdCreative,
   getVideoStatus,
+  type SpecialAdCategory,
   uploadAdImageFromUrl,
   uploadAdVideoFromUrl,
 } from '@/lib/meta-ads/client'
@@ -69,7 +70,7 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
     const { data: row, error: rowError } = await db
       .from('meta_ad_campaigns')
       .select(
-        'id, meta_ads_config_id, custom_audience_id, name, page_id, daily_budget, primary_text, image_url, ad_format, video_url, carousel_cards, headline, description',
+        'id, meta_ads_config_id, custom_audience_id, name, page_id, daily_budget, primary_text, image_url, ad_format, video_url, carousel_cards, headline, description, special_ad_category',
       )
       .eq('id', campaignRowId)
       .maybeSingle()
@@ -111,7 +112,12 @@ export async function launchCampaign(db: SupabaseClient, campaignRowId: string):
       metaAudienceId = audience.meta_audience_id
     }
 
-    const campaign = await createCampaign({ accessToken, adAccountId: config.ad_account_id, name: row.name })
+    const campaign = await createCampaign({
+      accessToken,
+      adAccountId: config.ad_account_id,
+      name: row.name,
+      specialAdCategory: (row.special_ad_category ?? 'NONE') as SpecialAdCategory,
+    })
     await db.from('meta_ad_campaigns').update({ meta_campaign_id: campaign.id }).eq('id', campaignRowId)
 
     const adSet = await createAdSet({

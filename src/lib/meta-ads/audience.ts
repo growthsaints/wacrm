@@ -58,24 +58,30 @@ async function fetchContactPhonesByIds(
   const out: ResolvedContact[] = []
   for (let i = 0; i < ids.length; i += FETCH_CHUNK) {
     const chunk = ids.slice(i, i + FETCH_CHUNK)
-    const { data, error } = await supabase.from('contacts').select('id, phone').in('id', chunk)
+    const { data, error } = await supabase.from('contacts').select('id, phone, marketing_opt_out').in('id', chunk)
     if (error) throw new Error(`Failed to fetch contacts: ${error.message}`)
-    for (const row of (data ?? []) as { id: string; phone: string | null }[]) {
-      if (row.phone) out.push({ id: row.id, phone: row.phone })
+    for (const row of (data ?? []) as { id: string; phone: string | null; marketing_opt_out: boolean | null }[]) {
+      if (row.phone && !row.marketing_opt_out) out.push({ id: row.id, phone: row.phone })
     }
   }
   return out
 }
 
+/** Contacts who've opted out of marketing must never be uploaded to a
+ *  Custom Audience — same exclusion broadcasts already apply before
+ *  sending (see hooks/use-broadcast-sending.ts), applied here too so
+ *  the Ads path can't silently bypass it. */
 export async function resolveAudienceContacts(
   supabase: SupabaseClient,
   filter: AudienceFilter,
 ): Promise<ResolvedContact[]> {
   if (filter.type === 'all') {
-    const rows = await fetchAllPages<{ id: string; phone: string | null }>((from, to) =>
-      supabase.from('contacts').select('id, phone').range(from, to),
+    const rows = await fetchAllPages<{ id: string; phone: string | null; marketing_opt_out: boolean | null }>(
+      (from, to) => supabase.from('contacts').select('id, phone, marketing_opt_out').range(from, to),
     )
-    return rows.filter((c): c is ResolvedContact => Boolean(c.phone))
+    return rows
+      .filter((c) => Boolean(c.phone) && !c.marketing_opt_out)
+      .map((c) => ({ id: c.id, phone: c.phone as string }))
   }
 
   if (filter.type === 'tags') {

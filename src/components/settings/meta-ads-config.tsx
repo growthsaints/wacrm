@@ -171,9 +171,11 @@ export function MetaAdsConfig() {
                   certify here
                 </a>
                 . On a brand-new Business Portfolio this can be blocked until the business itself is
-                verified (Business Settings → Security Center) — if it stays blocked, either verify the
-                business, or assign this ad account to an already-certified System User from a business
-                that already runs ads.
+                verified (Business Settings → Security Center → Verify Business). Complete that
+                verification — do not assign this ad account or WhatsApp Business Account to a System
+                User belonging to a different, unrelated business as a shortcut. Meta treats one System
+                User holding assets across unconnected businesses as a policy-circumvention signal and
+                can suspend the entire Business Portfolio (ads AND WhatsApp API access) for it.
               </li>
               <li>The Facebook Page you&apos;ll pick for a campaign needs a WhatsApp number linked to it in Business Manager.</li>
             </ul>

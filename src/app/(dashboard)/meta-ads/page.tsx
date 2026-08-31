@@ -93,10 +93,19 @@ interface AudienceDraftState {
   customFieldId: string;
   customFieldOperator: CustomFieldOperator;
   customFieldValue: string;
+  consentConfirmed: boolean;
 }
 
 function emptyAudienceDraft(): AudienceDraftState {
-  return { name: '', type: 'all', tagIds: [], customFieldId: '', customFieldOperator: 'is', customFieldValue: '' };
+  return {
+    name: '',
+    type: 'all',
+    tagIds: [],
+    customFieldId: '',
+    customFieldOperator: 'is',
+    customFieldValue: '',
+    consentConfirmed: false,
+  };
 }
 
 type AdFormat = 'image' | 'video' | 'carousel';
@@ -106,6 +115,16 @@ interface CarouselCardDraft {
   headline: string;
   description: string;
 }
+
+type SpecialAdCategory = 'NONE' | 'HOUSING' | 'EMPLOYMENT' | 'CREDIT' | 'ISSUES_ELECTIONS_POLITICS';
+
+const SPECIAL_AD_CATEGORY_LABELS: Record<SpecialAdCategory, string> = {
+  NONE: 'None of these',
+  HOUSING: 'Housing',
+  EMPLOYMENT: 'Employment',
+  CREDIT: 'Credit',
+  ISSUES_ELECTIONS_POLITICS: 'Social issues, elections or politics',
+};
 
 interface CampaignDraftState {
   name: string;
@@ -120,6 +139,7 @@ interface CampaignDraftState {
   imageUrl: string;
   videoUrl: string;
   carouselCards: CarouselCardDraft[];
+  specialAdCategory: SpecialAdCategory;
 }
 
 function emptyCampaignDraft(): CampaignDraftState {
@@ -139,6 +159,7 @@ function emptyCampaignDraft(): CampaignDraftState {
       { imageUrl: '', headline: '', description: '' },
       { imageUrl: '', headline: '', description: '' },
     ],
+    specialAdCategory: 'NONE',
   };
 }
 
@@ -273,6 +294,10 @@ export default function MetaAdsPage() {
     }
     if (audienceDraft.type === 'custom_field' && (!audienceDraft.customFieldId || !audienceDraft.customFieldValue.trim())) {
       toast.error('Pick a custom field and a value.');
+      return;
+    }
+    if (!audienceDraft.consentConfirmed) {
+      toast.error('Confirm these contacts consented to marketing before uploading them to Meta.');
       return;
     }
 
@@ -480,6 +505,7 @@ export default function MetaAdsPage() {
           primary_text: campaignDraft.primaryText.trim(),
           headline: campaignDraft.headline.trim() || undefined,
           description: campaignDraft.description.trim() || undefined,
+          special_ad_category: campaignDraft.specialAdCategory,
           ad_format: campaignDraft.adFormat,
           image_url: campaignDraft.adFormat === 'image' ? campaignDraft.imageUrl : undefined,
           video_url: campaignDraft.adFormat === 'video' ? campaignDraft.videoUrl : undefined,
@@ -919,6 +945,19 @@ export default function MetaAdsPage() {
                   </div>
                 </div>
               )}
+
+              <label className="flex items-start gap-2 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={audienceDraft.consentConfirmed}
+                  onChange={(e) => setAudienceDraft({ ...audienceDraft, consentConfirmed: e.target.checked })}
+                />
+                <span>
+                  I confirm these contacts have consented to receive marketing and can be uploaded to Meta as a
+                  Custom Audience. (Contacts marked opted-out in the CRM are always excluded automatically.)
+                </span>
+              </label>
             </div>
           )}
           <DialogFooter>
@@ -998,6 +1037,25 @@ export default function MetaAdsPage() {
                   placeholder="100"
                   className="bg-muted text-foreground"
                 />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">
+                  Does this ad relate to any of these? Meta requires this to be declared truthfully.
+                </label>
+                <select
+                  value={campaignDraft.specialAdCategory}
+                  onChange={(e) =>
+                    setCampaignDraft({ ...campaignDraft, specialAdCategory: e.target.value as SpecialAdCategory })
+                  }
+                  className="w-full rounded-md border border-border bg-muted px-2.5 py-1.5 text-sm text-foreground"
+                >
+                  {(Object.keys(SPECIAL_AD_CATEGORY_LABELS) as SpecialAdCategory[]).map((cat) => (
+                    <option key={cat} value={cat}>
+                      {SPECIAL_AD_CATEGORY_LABELS[cat]}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>

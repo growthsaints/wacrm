@@ -13,9 +13,12 @@ import { NextResponse, after } from 'next/server'
 import { requireMetaAdsAccess, toErrorResponse } from '@/lib/auth/account'
 import { supabaseAdmin } from '@/lib/flows/admin-client'
 import { launchCampaign } from '@/lib/meta-ads/launch'
+import { checkRateLimit, RATE_LIMITS, rateLimitResponse } from '@/lib/rate-limit'
 
 const CAMPAIGN_COLUMNS =
-  'id, name, page_id, page_name, daily_budget, currency, primary_text, headline, description, image_url, ad_format, video_url, carousel_cards, custom_audience_id, meta_campaign_id, meta_adset_id, meta_ad_id, status, error_message, created_at, updated_at'
+  'id, name, page_id, page_name, daily_budget, currency, primary_text, headline, description, image_url, ad_format, video_url, carousel_cards, custom_audience_id, special_ad_category, meta_campaign_id, meta_adset_id, meta_ad_id, status, error_message, created_at, updated_at'
+
+const SPECIAL_AD_CATEGORIES = new Set(['NONE', 'HOUSING', 'EMPLOYMENT', 'CREDIT', 'ISSUES_ELECTIONS_POLITICS'])
 
 export async function GET() {
   try {
@@ -36,6 +39,11 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const ctx = await requireMetaAdsAccess()
+
+    const limit = checkRateLimit(`meta-ads-campaign-launch:${ctx.accountId}`, RATE_LIMITS.metaAdsCampaignLaunch)
+    if (!limit.success) {
+      return rateLimitResponse(limit)
+    }
 
     const { data: config, error: configError } = await ctx.supabase
       .from('meta_ads_config')
@@ -74,10 +82,14 @@ export async function POST(request: Request) {
         ? body.custom_audience_id.trim()
         : null
     const dailyBudget = typeof body.daily_budget === 'number' ? body.daily_budget : Number(body.daily_budget)
+    const specialAdCategory = typeof body.special_ad_category === 'string' ? body.special_ad_category : 'NONE'
 
     if (!name) return NextResponse.json({ error: "'name' is required" }, { status: 400 })
     if (!pageId) return NextResponse.json({ error: "'page_id' is required" }, { status: 400 })
     if (!primaryText) return NextResponse.json({ error: "'primary_text' is required" }, { status: 400 })
+    if (!SPECIAL_AD_CATEGORIES.has(specialAdCategory)) {
+      return NextResponse.json({ error: "'special_ad_category' must be one of NONE, HOUSING, EMPLOYMENT, CREDIT, ISSUES_ELECTIONS_POLITICS" }, { status: 400 })
+    }
     if (adFormat === 'video') {
       if (!videoUrl) return NextResponse.json({ error: 'A video is required for the video format' }, { status: 400 })
     } else if (adFormat === 'carousel') {
@@ -126,6 +138,7 @@ export async function POST(request: Request) {
         ad_format: adFormat,
         video_url: adFormat === 'video' ? videoUrl : null,
         carousel_cards: adFormat === 'carousel' ? carouselCards : null,
+        special_ad_category: specialAdCategory,
         status: 'launching',
         created_by: ctx.userId,
       })

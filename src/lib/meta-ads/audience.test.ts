@@ -55,4 +55,58 @@ describe('resolveAudienceContacts', () => {
     const result = await resolveAudienceContacts(client, { type: 'all' })
     expect(result).toEqual([{ id: '1', phone: '+911234567890' }])
   })
+
+  it('excludes marketing_opt_out contacts from an "all contacts" audience', async () => {
+    const range = vi.fn(() =>
+      Promise.resolve({
+        data: [
+          { id: '1', phone: '+911234567890', marketing_opt_out: false },
+          { id: '2', phone: '+911234567891', marketing_opt_out: true },
+        ],
+        error: null,
+      }),
+    )
+    const select = vi.fn(() => ({ range }))
+    const from = vi.fn(() => ({ select }))
+    const client = { from } as unknown as SupabaseClient
+
+    const result = await resolveAudienceContacts(client, { type: 'all' })
+    expect(result).toEqual([{ id: '1', phone: '+911234567890' }])
+  })
+
+  it('excludes marketing_opt_out contacts resolved via a tag filter', async () => {
+    const from = vi.fn((table: string) => {
+      if (table === 'contact_tags') {
+        return {
+          select: () => ({
+            in: () => ({
+              range: vi.fn(() =>
+                Promise.resolve({ data: [{ contact_id: '1' }, { contact_id: '2' }], error: null }),
+              ),
+            }),
+          }),
+        }
+      }
+      if (table === 'contacts') {
+        return {
+          select: () => ({
+            in: vi.fn(() =>
+              Promise.resolve({
+                data: [
+                  { id: '1', phone: '+911234567890', marketing_opt_out: false },
+                  { id: '2', phone: '+911234567891', marketing_opt_out: true },
+                ],
+                error: null,
+              }),
+            ),
+          }),
+        }
+      }
+      throw new Error(`unexpected table: ${table}`)
+    })
+    const client = { from } as unknown as SupabaseClient
+
+    const result = await resolveAudienceContacts(client, { type: 'tags', tagIds: ['tag-1'] })
+    expect(result).toEqual([{ id: '1', phone: '+911234567890' }])
+  })
 })
