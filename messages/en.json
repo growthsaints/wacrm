@@ -555,6 +555,7 @@
       },
       "cancel": "Cancel",
       "close": "Close",
+      "importInProgress": "Importing in the background — {processed} of {total} processed. You can close this window; the import keeps running.",
       "importBtn": "Import {count} contact",
       "importBtn_plural": "Import {count} contacts",
       "toastNoValidRows": "No valid rows found. Ensure CSV has a \"phone\" column header.",

@@ -4,20 +4,9 @@ import { useMemo, useRef, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import {
-  dedupeByPhone,
-  fetchExistingPhonesByAccount,
-  isUniqueViolation,
-  normalizeKey,
-} from '@/lib/contacts/dedupe';
-import {
   parseContactCsv,
   type ParsedContactRow,
 } from '@/lib/contacts/parse-contact-csv';
-import {
-  assignImportedContactTags,
-  resolveImportTagIds,
-  type ContactTagAssignment,
-} from '@/lib/contacts/resolve-import-tags';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import {
@@ -142,6 +131,20 @@ interface ImportModalProps {
   onImported: () => void;
 }
 
+interface ImportJobStatus {
+  status: 'processing' | 'completed' | 'failed';
+  total_rows: number;
+  processed_rows: number;
+  imported_count: number;
+  updated_count: number;
+  skipped_count: number;
+  failed_count: number;
+  tags_assigned_count: number;
+  error_message: string | null;
+}
+
+const POLL_INTERVAL_MS = 1500;
+
 export function ImportModal({
   open,
   onOpenChange,
@@ -149,10 +152,11 @@ export function ImportModal({
 }: ImportModalProps) {
   const t = useTranslations('Contacts.importModal');
   const supabase = createClient();
-  const { accountId, canEditSettings } = useAuth();
+  const { accountId } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile] = useState<File | null>(null);
+  const [csvText, setCsvText] = useState('');
   const [parsedRows, setParsedRows] = useState<ParsedContactRow[]>([]);
   const [hasTagsColumn, setHasTagsColumn] = useState(false);
   const [hasCompanyColumn, setHasCompanyColumn] = useState(false);
@@ -160,6 +164,7 @@ export function ImportModal({
     new Map()
   );
   const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<ImportJobStatus | null>(null);
   const [result, setResult] = useState<{
     imported: number;
     updated: number;
@@ -170,10 +175,12 @@ export function ImportModal({
 
   function reset() {
     setFile(null);
+    setCsvText('');
     setParsedRows([]);
     setHasTagsColumn(false);
     setHasCompanyColumn(false);
     setTagColorByKey(new Map());
+    setProgress(null);
     setResult(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   }
@@ -191,6 +198,7 @@ export function ImportModal({
     setResult(null);
 
     const text = await selected.text();
+    setCsvText(text);
     const {
       rows,
       hasTagsColumn: csvHasTags,
@@ -227,205 +235,76 @@ export function ImportModal({
     }
   }
 
+  async function pollJob(jobId: string) {
+    for (;;) {
+      let res: Response;
+      try {
+        res = await fetch(`/api/contacts/import/${jobId}`, { cache: 'no-store' });
+      } catch {
+        toast.error(t('toastError'));
+        setImporting(false);
+        return;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.job) {
+        toast.error(typeof data.error === 'string' ? data.error : t('toastError'));
+        setImporting(false);
+        return;
+      }
+
+      const job = data.job as ImportJobStatus;
+      setProgress(job);
+
+      if (job.status === 'completed') {
+        setResult({
+          imported: job.imported_count,
+          updated: job.updated_count,
+          skipped: job.skipped_count,
+          failed: job.failed_count,
+          tagsAssigned: job.tags_assigned_count,
+        });
+        if (job.imported_count > 0) toast.success(t('toastImported', { count: job.imported_count }));
+        if (job.updated_count > 0) toast.success(t('toastUpdated', { count: job.updated_count }));
+        if (job.imported_count > 0 || job.updated_count > 0) onImported();
+        if (job.tags_assigned_count > 0) toast.success(t('toastTagsAssigned', { count: job.tags_assigned_count }));
+        if (job.skipped_count > 0) toast.info(t('toastSkipped', { count: job.skipped_count }));
+        if (job.failed_count > 0) toast.error(t('toastFailed', { count: job.failed_count }));
+        setImporting(false);
+        return;
+      }
+      if (job.status === 'failed') {
+        toast.error(job.error_message ?? t('toastError'));
+        setImporting(false);
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+  }
+
+  // Runs server-side in the background (see lib/contacts/import-job.ts) —
+  // this only kicks the job off and polls its status, so a 48k-row
+  // import survives the tab being closed mid-way and isn't bottlenecked
+  // by the browser's own network round trips.
   async function handleImport() {
-    if (parsedRows.length === 0) return;
+    if (!csvText) return;
     setImporting(true);
+    setProgress(null);
 
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) throw new Error('Not authenticated');
-      if (!accountId)
-        throw new Error('Your profile is not linked to an account.');
-
-      let imported = 0;
-      let updated = 0;
-      let skipped = 0;
-      let failed = 0;
-
-      // 1) De-dupe within the file by normalized phone (keep first).
-      const { unique, duplicates: inFileDupes } = dedupeByPhone(parsedRows);
-      skipped += inFileDupes;
-
-      // 2) Split into genuinely-new rows vs. rows matching a contact
-      //    already in this account (re-importing the same list with
-      //    updated details should refresh that contact, not silently
-      //    skip it — one read of the generated `phone_normalized`
-      //    column, migration 022, keyed to the existing row's id so the
-      //    update path below knows which row to touch).
-      const existingIdByPhone = await fetchExistingPhonesByAccount(
-        supabase,
-        accountId
-      );
-
-      const toInsert: ParsedContactRow[] = [];
-      const toUpdate: { id: string; row: ParsedContactRow }[] = [];
-      for (const row of unique) {
-        const existingId = existingIdByPhone.get(normalizeKey(row.phone));
-        if (existingId) {
-          toUpdate.push({ id: existingId, row });
-        } else {
-          toInsert.push(row);
-        }
+      const res = await fetch('/api/contacts/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv: csvText }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : t('toastError'));
       }
-
-      // 3) Resolve tag names → ids (admin+ may auto-create missing tags).
-      //    Skip the round-trip when the import carries no tag names.
-      const allTagNames = [...toInsert, ...toUpdate.map((u) => u.row)].flatMap(
-        (row) => row.tagNames
-      );
-      let tagIdByKey = new Map<string, string>();
-      let skippedNames: string[] = [];
-      if (allTagNames.length > 0) {
-        ({ tagIdByKey, skippedNames } = await resolveImportTagIds(supabase, {
-          accountId,
-          userId: user.id,
-          tagNames: allTagNames,
-          canCreateTags: canEditSettings,
-        }));
-      }
-
-      const tagAssignments: ContactTagAssignment[] = [];
-
-      // 3b) Update rows that matched an existing contact by phone.
-      //     Only overwrite a field when the CSV actually supplied a
-      //     value — an empty cell must never blank out data the
-      //     contact already has. Tags are additive (assignImportedContactTags
-      //     upserts with ignoreDuplicates), never removed.
-      for (const { id, row } of toUpdate) {
-        const patch: Record<string, string> = {};
-        if (row.name?.trim()) patch.name = row.name.trim();
-        if (row.email?.trim()) patch.email = row.email.trim();
-        if (row.company?.trim()) patch.company = row.company.trim();
-
-        if (Object.keys(patch).length > 0) {
-          const { error } = await supabase
-            .from('contacts')
-            .update(patch)
-            .eq('id', id);
-          if (error) {
-            failed++;
-            continue;
-          }
-        }
-        updated++;
-        if (row.tagNames.length > 0) {
-          tagAssignments.push({ contactId: id, tagNames: row.tagNames });
-        }
-      }
-
-      // 4) Batch insert the genuinely-new rows in chunks of 500 — large
-      //    enough to cut a 48k-row import from ~960 round trips down to
-      //    ~96, small enough to stay well under Postgres/PostgREST's
-      //    payload and statement-size limits for this row shape. The DB
-      //    unique index is the backstop: a 23505 (race, or a format
-      //    that normalizes equal) counts as skipped, not failed.
-      const chunkSize = 500;
-
-      for (let i = 0; i < toInsert.length; i += chunkSize) {
-        const chunk = toInsert.slice(i, i + chunkSize);
-        const rows = chunk.map((row) => ({
-          user_id: user.id,
-          account_id: accountId,
-          phone: row.phone,
-          name: row.name || null,
-          email: row.email || null,
-          company: row.company || null,
-          source: 'import' as const,
-        }));
-
-        const { data, error } = await supabase
-          .from('contacts')
-          .insert(rows)
-          .select('id');
-
-        if (error) {
-          // Retry individually so one bad/duplicate row doesn't sink
-          // the whole chunk.
-          for (let j = 0; j < rows.length; j++) {
-            const row = rows[j];
-            const source = chunk[j];
-            const { data: singleData, error: singleErr } = await supabase
-              .from('contacts')
-              .insert(row)
-              .select('id')
-              .single();
-
-            if (!singleErr && singleData) {
-              imported++;
-              if (source.tagNames.length > 0) {
-                tagAssignments.push({
-                  contactId: singleData.id,
-                  tagNames: source.tagNames,
-                });
-              }
-            } else if (isUniqueViolation(singleErr)) {
-              skipped++;
-            } else {
-              failed++;
-            }
-          }
-        } else {
-          const inserted = data ?? [];
-          imported += inserted.length;
-          // inserted[j] ↔ chunk[j] only holds because a single INSERT
-          // preserves RETURNING order. If this path is ever split into
-          // parallel inserts, zip by phone or returned id instead.
-          for (let j = 0; j < inserted.length; j++) {
-            const source = chunk[j];
-            if (!source || source.tagNames.length === 0) continue;
-            tagAssignments.push({
-              contactId: inserted[j].id,
-              tagNames: source.tagNames,
-            });
-          }
-        }
-      }
-
-      // 5) Wire tags onto the contacts we just created. Failure here must
-      //    not mask a successful contact import.
-      let tagsAssigned = 0;
-      try {
-        tagsAssigned = await assignImportedContactTags(
-          supabase,
-          tagAssignments,
-          tagIdByKey
-        );
-      } catch {
-        toast.warning(t('toastTagsWarning'));
-      }
-
-      setResult({ imported, updated, skipped, failed, tagsAssigned });
-      if (imported > 0) {
-        toast.success(t('toastImported', { count: imported }));
-      }
-      if (updated > 0) {
-        toast.success(t('toastUpdated', { count: updated }));
-      }
-      if (imported > 0 || updated > 0) {
-        onImported();
-      }
-      if (tagsAssigned > 0) {
-        toast.success(t('toastTagsAssigned', { count: tagsAssigned }));
-      }
-      if (skippedNames.length > 0) {
-        const sample = skippedNames.slice(0, 3).join(', ');
-        const more =
-          skippedNames.length > 3 ? ` (+${skippedNames.length - 3} more)` : '';
-        toast.info(t('toastTagsSkipped', { sample, more }));
-      }
-      if (skipped > 0) {
-        toast.info(t('toastSkipped', { count: skipped }));
-      }
-      if (failed > 0) {
-        toast.error(t('toastFailed', { count: failed }));
-      }
+      await pollJob(data.jobId as string);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : t('toastError');
       toast.error(message);
-    } finally {
       setImporting(false);
     }
   }
@@ -629,6 +508,18 @@ export function ImportModal({
                   {t('moreRows', { count: parsedRows.length - PREVIEW_LIMIT })}
                 </p>
               )}
+            </div>
+          )}
+
+          {importing && !result && (
+            <div className="rounded-xl border border-border bg-background/50 p-4">
+              <div className="flex items-center gap-2 text-sm text-popover-foreground">
+                <Loader2 className="size-4 shrink-0 animate-spin" />
+                {t('importInProgress', {
+                  processed: progress?.processed_rows ?? 0,
+                  total: progress?.total_rows ?? parsedRows.length,
+                })}
+              </div>
             </div>
           )}
 
