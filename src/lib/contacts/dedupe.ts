@@ -74,6 +74,42 @@ export function isUniqueViolation(error: unknown): boolean {
   return (error as { code?: string }).code === "23505";
 }
 
+const EXISTING_PHONES_PAGE_SIZE = 1000;
+
+/**
+ * Fetches every existing contact's (id, phone_normalized) for an
+ * account, paginating past Supabase/PostgREST's default 1,000-row cap
+ * on an unbounded `.select()`. Used by CSV import to decide insert vs.
+ * update per row — without paginating, an account with more than
+ * 1,000 existing contacts would silently only see the first 1,000,
+ * misclassifying the rest as "new," which then fail on the DB's
+ * unique-phone constraint and fall back to the much slower
+ * one-row-at-a-time retry path. This is the same truncation bug
+ * already fixed for Meta Ads Custom Audiences (lib/meta-ads/audience.ts).
+ */
+export async function fetchExistingPhonesByAccount(
+  db: SupabaseClient,
+  accountId: string,
+): Promise<Map<string, string>> {
+  const existingIdByPhone = new Map<string, string>();
+  let from = 0;
+  for (;;) {
+    const { data, error } = await db
+      .from("contacts")
+      .select("id, phone_normalized")
+      .eq("account_id", accountId)
+      .range(from, from + EXISTING_PHONES_PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as { id: string; phone_normalized: string | null }[];
+    for (const row of rows) {
+      if (row.phone_normalized) existingIdByPhone.set(row.phone_normalized, row.id);
+    }
+    if (rows.length < EXISTING_PHONES_PAGE_SIZE) break;
+    from += EXISTING_PHONES_PAGE_SIZE;
+  }
+  return existingIdByPhone;
+}
+
 /**
  * De-duplicate parsed CSV rows by normalized phone, keeping the first
  * occurrence of each. Rows with an empty normalized phone are dropped

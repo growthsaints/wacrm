@@ -1,7 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   dedupeByPhone,
+  fetchExistingPhonesByAccount,
   findExistingContact,
   isExactMatch,
   isUniqueViolation,
@@ -93,5 +94,59 @@ describe("findExistingContact", () => {
   it("returns null for an empty phone without querying", async () => {
     const db = stubDb([{ id: "c1", phone: "15551234567" }]);
     expect(await findExistingContact(db, "acct", "   ")).toBeNull();
+  });
+});
+
+describe("fetchExistingPhonesByAccount", () => {
+  /** Same PostgREST-default-cap simulation used for the Meta Ads
+   *  audience pagination fix — a .range() request only ever returns up
+   *  to 1,000 rows per page. */
+  function makePaginatedClient(total: number): SupabaseClient {
+    const range = vi.fn((start: number, end: number) => {
+      const cappedEnd = Math.min(end, start + 999);
+      const rows: { id: string; phone_normalized: string }[] = [];
+      for (let i = start; i <= cappedEnd && i < total; i++) {
+        rows.push({ id: `id-${i}`, phone_normalized: `9190000${String(i).padStart(4, "0")}` });
+      }
+      return Promise.resolve({ data: rows, error: null });
+    });
+    const eq = vi.fn(() => ({ range }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    return { from } as unknown as SupabaseClient;
+  }
+
+  it("paginates past the default 1,000-row cap for an account with many existing contacts", async () => {
+    const db = makePaginatedClient(2500);
+    const result = await fetchExistingPhonesByAccount(db, "acct");
+    expect(result.size).toBe(2500);
+    expect(result.get("91900000000")).toBe("id-0");
+    expect(result.get("91900002499")).toBe("id-2499");
+  });
+
+  it("returns everything for a count that fits in one page", async () => {
+    const db = makePaginatedClient(10);
+    const result = await fetchExistingPhonesByAccount(db, "acct");
+    expect(result.size).toBe(10);
+  });
+
+  it("skips contacts with no normalized phone", async () => {
+    const range = vi.fn(() =>
+      Promise.resolve({
+        data: [
+          { id: "1", phone_normalized: "911234567890" },
+          { id: "2", phone_normalized: null },
+        ],
+        error: null,
+      }),
+    );
+    const eq = vi.fn(() => ({ range }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    const db = { from } as unknown as SupabaseClient;
+
+    const result = await fetchExistingPhonesByAccount(db, "acct");
+    expect(result.size).toBe(1);
+    expect(result.get("911234567890")).toBe("1");
   });
 });

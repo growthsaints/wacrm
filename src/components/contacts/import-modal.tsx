@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/use-auth';
 import {
   dedupeByPhone,
+  fetchExistingPhonesByAccount,
   isUniqueViolation,
   normalizeKey,
 } from '@/lib/contacts/dedupe';
@@ -254,17 +255,10 @@ export function ImportModal({
       //    skip it — one read of the generated `phone_normalized`
       //    column, migration 022, keyed to the existing row's id so the
       //    update path below knows which row to touch).
-      const { data: existingRows } = await supabase
-        .from('contacts')
-        .select('id, phone_normalized')
-        .eq('account_id', accountId);
-      const existingIdByPhone = new Map<string, string>();
-      for (const r of (existingRows ?? []) as {
-        id: string;
-        phone_normalized: string | null;
-      }[]) {
-        if (r.phone_normalized) existingIdByPhone.set(r.phone_normalized, r.id);
-      }
+      const existingIdByPhone = await fetchExistingPhonesByAccount(
+        supabase,
+        accountId
+      );
 
       const toInsert: ParsedContactRow[] = [];
       const toUpdate: { id: string; row: ParsedContactRow }[] = [];
@@ -322,10 +316,13 @@ export function ImportModal({
         }
       }
 
-      // 4) Batch insert the genuinely-new rows in chunks of 50. The DB
+      // 4) Batch insert the genuinely-new rows in chunks of 500 — large
+      //    enough to cut a 48k-row import from ~960 round trips down to
+      //    ~96, small enough to stay well under Postgres/PostgREST's
+      //    payload and statement-size limits for this row shape. The DB
       //    unique index is the backstop: a 23505 (race, or a format
       //    that normalizes equal) counts as skipped, not failed.
-      const chunkSize = 50;
+      const chunkSize = 500;
 
       for (let i = 0; i < toInsert.length; i += chunkSize) {
         const chunk = toInsert.slice(i, i + chunkSize);
